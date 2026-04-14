@@ -305,14 +305,16 @@ class AgentTools() : ToolSet {
         Log.w(TAG, "saveBrainNeuron: BrainBoxDao not wired")
         return@runBlocking mapOf("error" to "BrainBox not available", "status" to "failed")
       }
+      // Reuse the existing ID if a neuron with this label already exists, so it is overwritten.
+      val existing = dao.getAllNeurons().find { it.label.equals(label.trim(), ignoreCase = true) }
       val neuron = NeuronEntity(
-        id = UUID.randomUUID().toString(),
+        id = existing?.id ?: UUID.randomUUID().toString(),
         label = label.trim(),
         type = type.trim(),
         content = content.trim(),
       )
       dao.insertNeuron(neuron)
-      Log.d(TAG, "saveBrainNeuron saved neuron label='$label'")
+      Log.d(TAG, "saveBrainNeuron saved neuron label='$label' (${if (existing != null) "updated" else "created"})")
       mapOf("label" to label, "type" to type, "status" to "succeeded")
     }
   }
