@@ -41,7 +41,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
@@ -86,16 +85,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.BlurredEdgeTreatment
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Brush.Companion.linearGradient
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -388,63 +383,10 @@ fun HomeScreen(
                   .padding(top = innerPadding.calculateTopPadding())
                   .verticalScroll(rememberScrollState()),
             ) {
-              // Background star at top.
-              if (gm4) {
-                val progress =
-                  if (!enableAnimation) {
-                    1f
-                  } else {
-                    rememberDelayedAnimationProgress(
-                      initialDelay = ANIMATION_INIT_DELAY,
-                      animationDurationMs = 2000,
-                      animationLabel = "bg star",
-                    )
-                  }
-                val configuration = LocalConfiguration.current
-                val screenWidth = configuration.screenWidthDp.dp
-                val targetWidth = screenWidth * 1.5f
-                Image(
-                  painter = painterResource(id = R.drawable.bg_star),
-                  contentDescription = null,
-                  modifier =
-                    Modifier.requiredWidth(targetWidth)
-                      .blur(radius = 35.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
-                      .offset(x = screenWidth * 0.25f, y = -screenWidth * 0.1f)
-                      .graphicsLayer {
-                        rotationZ = (1f - progress) * 40f
-                        scaleX = 0.4f + 0.6f * progress
-                        scaleY = 0.4f + 0.6f * progress
-                        alpha = progress * 2f
-                      },
-                  contentScale = ContentScale.Crop,
-                  colorFilter = ColorFilter.tint(MaterialTheme.customColors.bgStarColor),
-                )
-              }
+              // Background star removed (was part of Google AI Edge Gallery branding).
 
               Column(modifier = Modifier.fillMaxWidth()) {
                 var selectedCategoryIndex by remember { mutableIntStateOf(0) }
-
-                // App title and intro text.
-                Column(
-                  modifier =
-                    Modifier.padding(
-                        horizontal = if (gm4) 24.dp else 40.dp,
-                        vertical = if (gm4) 0.dp else 48.dp,
-                      )
-                      .padding(top = 24.dp, bottom = 16.dp)
-                      .semantics(mergeDescendants = true) {},
-                  verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                  if (gm4) {
-                    AppTitleGm4(enableAnimation = enableAnimation)
-                  } else {
-                    AppTitle(enableAnimation = enableAnimation)
-                  }
-                  IntroText(enableAnimation = enableAnimation, gm4 = gm4)
-                  if (gm4) {
-                    TryGm4IntroText(enableAnimation = enableAnimation)
-                  }
-                }
 
                 // Tab header for categories.
                 //
@@ -853,7 +795,7 @@ private fun TaskList(
   }
 
   // The highlighted tiles at the top.
-  if (gm4) {
+  if (false) {
     Column(
       verticalArrangement = Arrangement.spacedBy(10.dp),
       modifier =
