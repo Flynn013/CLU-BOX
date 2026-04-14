@@ -18,7 +18,6 @@ package com.google.ai.edge.gallery.ui.theme
 
 import android.app.Activity
 import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -34,7 +33,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
-import com.google.ai.edge.gallery.proto.Theme
 
 private val lightScheme =
   lightColorScheme(
@@ -146,65 +144,42 @@ val LocalCustomColors = staticCompositionLocalOf { CustomColors() }
 
 val lightCustomColors =
   CustomColors(
-    appTitleGradientColors = listOf(Color(0xFF85B1F8), Color(0xFF3174F1)),
-    tabHeaderBgColor = Color(0xFF3174F1),
-    taskCardBgColor = surfaceContainerLowestLight,
+    appTitleGradientColors = listOf(neonGreen, neonGreen),
+    tabHeaderBgColor = absoluteBlack,
+    taskCardBgColor = terminalMidGrey,
     taskBgColors =
-      listOf(
-        // red
-        Color(0xFFFFF5F5),
-        // green
-        Color(0xFFF4FBF6),
-        // blue
-        Color(0xFFF1F6FE),
-        // yellow
-        Color(0xFFFFFBF0),
-      ),
+      listOf(terminalDarkGrey, terminalDarkGrey, terminalDarkGrey, terminalDarkGrey),
     taskBgGradientColors =
       listOf(
-        // red
-        listOf(Color(0xFFE25F57), Color(0xFFDB372D)),
-        // green
-        listOf(Color(0xFF41A15F), Color(0xFF128937)),
-        // blue
-        listOf(Color(0xFF669DF6), Color(0xFF3174F1)),
-        // yellow
-        listOf(Color(0xFFFDD45D), Color(0xFFCAA12A)),
+        listOf(terminalMidGrey, absoluteBlack),
+        listOf(terminalMidGrey, absoluteBlack),
+        listOf(terminalMidGrey, absoluteBlack),
+        listOf(terminalMidGrey, absoluteBlack),
       ),
     taskIconColors =
-      listOf(
-        // red.
-        Color(0xFFDB372D),
-        // green
-        Color(0xFF128937),
-        // blue
-        Color(0xFF3174F1),
-        // yellow
-        Color(0xFFCAA12A),
-      ),
-    taskIconShapeBgColor = Color.White,
-    homeBottomGradient = listOf(Color(0x00F8F9FF), Color(0xffFFEFC9)),
-    agentBubbleBgColor = Color(0xFFe9eef6),
-    userBubbleBgColor = Color(0xFF32628D),
-    linkColor = Color(0xFF32628D),
-    successColor = Color(0xff3d860b),
-    recordButtonBgColor = Color(0xFFEE675C),
-    waveFormBgColor = Color(0xFFaaaaaa),
-    modelInfoIconColor = Color(0xFFCCCCCC),
-    warningContainerColor = Color(0xfffef7e0),
-    warningTextColor = Color(0xffe37400),
-    errorContainerColor = Color(0xfffce8e6),
-    errorTextColor = Color(0xffd93025),
-    newFeatureContainerColor = Color(0xFFEEDCFE),
-    newFeatureTextColor = Color(0xFF400B84),
-    bgStarColor = Color(0x3A669AF5),
+      listOf(neonGreen, neonGreen, neonGreen, neonGreen),
+    taskIconShapeBgColor = absoluteBlack,
+    homeBottomGradient = listOf(Color(0x00000000), absoluteBlack),
+    agentBubbleBgColor = terminalDarkGrey,
+    userBubbleBgColor = terminalMidGrey,
+    linkColor = neonGreen,
+    successColor = neonGreen,
+    recordButtonBgColor = neonGreen,
+    waveFormBgColor = terminalOutline,
+    modelInfoIconColor = terminalOutline,
+    warningContainerColor = terminalMidGrey,
+    warningTextColor = neonGreen,
+    errorContainerColor = terminalErrorContainer,
+    errorTextColor = terminalError,
+    newFeatureContainerColor = terminalMidGrey,
+    newFeatureTextColor = neonGreen,
+    bgStarColor = Color(0x194ade80),
     promoBannerBgBrush =
       Brush.linearGradient(
         colorStops =
           arrayOf(
-            0.0f to Color(0x42ACB7FF),
-            0.6154f to Color(0x422D96FF),
-            1.0f to Color(0x423C6BFF),
+            0.0f to Color(0xFF0D0D0D),
+            1.0f to absoluteBlack,
           ),
         start = Offset(0f, 0f),
         end = Offset(0f, Float.POSITIVE_INFINITY),
@@ -213,87 +188,15 @@ val lightCustomColors =
       Brush.linearGradient(
         colorStops =
           arrayOf(
-            0.2442f to Color(0x3B446EFF),
-            0.4296f to Color(0x3B2E96FF),
-            0.6651f to Color(0x3BB1C5FF),
+            0.0f to Color(0xFF1A1A1A),
+            1.0f to absoluteBlack,
           ),
         start = Offset(0f, 1f),
         end = Offset(1f, 0f),
       ),
   )
 
-val darkCustomColors =
-  CustomColors(
-    appTitleGradientColors = listOf(Color(0xFF85B1F8), Color(0xFF3174F1)),
-    tabHeaderBgColor = Color(0xFF3174F1),
-    taskCardBgColor = surfaceContainerHighDark,
-    taskBgColors =
-      listOf(
-        // red
-        Color(0xFF181210),
-        // green
-        Color(0xFF131711),
-        // blue
-        Color(0xFF191924),
-        // yellow
-        Color(0xFF1A1813),
-      ),
-    taskBgGradientColors =
-      listOf(
-        // red
-        listOf(Color(0xFFE25F57), Color(0xFFDB372D)),
-        // green
-        listOf(Color(0xFF41A15F), Color(0xFF128937)),
-        // blue
-        listOf(Color(0xFF669DF6), Color(0xFF3174F1)),
-        // yellow
-        listOf(Color(0xFFFDD45D), Color(0xFFCAA12A)),
-      ),
-    taskIconColors =
-      listOf(
-        // red.
-        Color(0xFFE25F57),
-        // green
-        Color(0xFF41A15F),
-        // blue
-        Color(0xFF669DF6),
-        // yellow
-        Color(0xFFCAA12A),
-      ),
-    taskIconShapeBgColor = Color(0xFF202124),
-    homeBottomGradient = listOf(Color(0x00F8F9FF), Color(0x1AF6AD01)),
-    agentBubbleBgColor = Color(0xFF1b1c1d),
-    userBubbleBgColor = Color(0xFF1f3760),
-    linkColor = Color(0xFF9DCAFC),
-    successColor = Color(0xFFA1CE83),
-    recordButtonBgColor = Color(0xFFEE675C),
-    waveFormBgColor = Color(0xFFaaaaaa),
-    modelInfoIconColor = Color(0xFFCCCCCC),
-    warningContainerColor = Color(0xff554c33),
-    warningTextColor = Color(0xfffcc934),
-    errorContainerColor = Color(0xff523a3b),
-    errorTextColor = Color(0xffee675c),
-    newFeatureContainerColor = Color(0xFFEEDCFE),
-    newFeatureTextColor = Color(0xFF400B84),
-    bgStarColor = Color(0x19346BF0),
-    promoBannerBgBrush =
-      Brush.linearGradient(
-        colorStops = arrayOf(0.0f to Color(0x82183570), 0.8077f to Color(0x820A122D)),
-        start = Offset(0f, 0f),
-        end = Offset(0f, Float.POSITIVE_INFINITY),
-      ),
-    promoBannerIconBgBrush =
-      Brush.linearGradient(
-        colorStops =
-          arrayOf(
-            0.2442f to Color(0x6F0F41F8),
-            0.4296f to Color(0x6F1685F8),
-            0.6651f to Color(0x6F809EF3),
-          ),
-        start = Offset(0f, 1f),
-        end = Offset(1f, 0f),
-      ),
-  )
+val darkCustomColors = lightCustomColors
 
 val MaterialTheme.customColors: CustomColors
   @Composable @ReadOnlyComposable get() = LocalCustomColors.current
@@ -318,21 +221,15 @@ fun StatusBarColorController(useDarkTheme: Boolean) {
 
 @Composable
 fun GalleryTheme(content: @Composable () -> Unit) {
-  val themeOverride = ThemeSettings.themeOverride
-  val darkTheme: Boolean =
-    (isSystemInDarkTheme() || themeOverride.value == Theme.THEME_DARK) &&
-      themeOverride.value != Theme.THEME_LIGHT
+  // CLU/BOX: dark mode is always forced — no light mode.
+  val darkTheme = true
   val view = LocalView.current
 
   StatusBarColorController(useDarkTheme = darkTheme)
 
-  val colorScheme =
-    when {
-      darkTheme -> darkScheme
-      else -> lightScheme
-    }
+  val colorScheme = darkScheme
 
-  val customColorsPalette = if (darkTheme) darkCustomColors else lightCustomColors
+  val customColorsPalette = darkCustomColors
 
   CompositionLocalProvider(LocalCustomColors provides customColorsPalette) {
     MaterialTheme(colorScheme = colorScheme, typography = AppTypography, content = content)

@@ -188,15 +188,14 @@ class LlmAskImageTask @Inject constructor() : CustomTask {
   }
 }
 
-@Module
-@InstallIn(SingletonComponent::class) // Or another component that fits your scope
-internal object LlmAskImageModule {
-  @Provides
-  @IntoSet
-  fun provideTask(): CustomTask {
-    return LlmAskImageTask()
-  }
-}
+// CLU/BOX: Ask Image task disabled — CLU/BOX focuses on text-only LLM inference.
+// @Module
+// @InstallIn(SingletonComponent::class)
+// internal object LlmAskImageModule {
+//   @Provides
+//   @IntoSet
+//   fun provideTask(): CustomTask = LlmAskImageTask()
+// }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Ask audio.
@@ -253,12 +252,11 @@ class LlmAskAudioTask @Inject constructor() : CustomTask {
   }
 }
 
-@Module
-@InstallIn(SingletonComponent::class) // Or another component that fits your scope
-internal object LlmAskAudioModule {
-  @Provides
-  @IntoSet
-  fun provideTask(): CustomTask {
-    return LlmAskAudioTask()
-  }
-}
+// CLU/BOX: Audio Scribe task disabled — CLU/BOX focuses on text-only LLM inference.
+// @Module
+// @InstallIn(SingletonComponent::class)
+// internal object LlmAskAudioModule {
+//   @Provides
+//   @IntoSet
+//   fun provideTask(): CustomTask = LlmAskAudioTask()
+// }
