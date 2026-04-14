@@ -321,30 +321,3 @@ private fun NeuronCard(neuron: NeuronEntity, onEdit: () -> Unit, onDelete: () ->
     }
   }
 }
-
-@Composable
-internal fun NeonTextField(
-  value: String,
-  onValueChange: (String) -> Unit,
-  label: String,
-  modifier: Modifier = Modifier,
-  singleLine: Boolean = true,
-) {
-  OutlinedTextField(
-    value = value,
-    onValueChange = onValueChange,
-    label = { Text(label, fontFamily = FontFamily.Monospace) },
-    singleLine = singleLine,
-    modifier = modifier.fillMaxWidth(),
-    textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-    colors = OutlinedTextFieldDefaults.colors(
-      focusedBorderColor = neonGreen,
-      unfocusedBorderColor = neonGreen,
-      focusedLabelColor = neonGreen,
-      unfocusedLabelColor = neonGreen,
-      focusedTextColor = neonGreen,
-      unfocusedTextColor = neonGreen,
-      cursorColor = neonGreen,
-    ),
-  )
-}

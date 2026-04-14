@@ -26,6 +26,7 @@ import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.data.brainbox.ChatHistoryDao
 import com.google.ai.edge.gallery.data.brainbox.ChatMessageEntity
 import com.google.ai.edge.gallery.runtime.runtimeHelper
+import java.util.Collections
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageAudioClip
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageError
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageLoading
@@ -53,7 +54,7 @@ open class LlmChatViewModelBase(
 ) : ChatViewModel() {
 
   /** Tracks which (taskId, modelName) pairs have already had their history loaded. */
-  private val loadedHistoryKeys = mutableSetOf<String>()
+  private val loadedHistoryKeys = Collections.synchronizedSet(mutableSetOf<String>())
 
   /**
    * Loads persisted chat history for [taskId] + [model] from the database into the in-memory
@@ -61,14 +62,21 @@ open class LlmChatViewModelBase(
    */
   fun loadChatHistory(taskId: String, model: Model) {
     val key = "$taskId::${model.name}"
-    if (loadedHistoryKeys.contains(key)) return
+    // Guard against concurrent launches; only the first launch proceeds.
+    if (!loadedHistoryKeys.add(key)) return
     val dao = chatHistoryDao ?: return
 
-    loadedHistoryKeys.add(key)
     viewModelScope.launch(Dispatchers.IO) {
       val rows = dao.getMessages(taskId = taskId, modelName = model.name)
       for (row in rows) {
-        val side = if (row.side == "USER") ChatSide.USER else ChatSide.AGENT
+        val side = when (row.side) {
+          "USER" -> ChatSide.USER
+          "AGENT" -> ChatSide.AGENT
+          else -> {
+            Log.w(TAG, "Unknown chat side '${row.side}' in history — skipping row id=${row.id}")
+            continue
+          }
+        }
         addMessage(model = model, message = ChatMessageText(content = row.content, side = side))
       }
     }
@@ -81,7 +89,7 @@ open class LlmChatViewModelBase(
   fun wipeGrid(taskId: String, model: Model) {
     val dao = chatHistoryDao ?: return
     clearAllMessages(model = model)
-    // Reset so history can be reloaded (will now be empty)
+    // Allow history to be freshly loaded (will be empty) on next model selection.
     loadedHistoryKeys.remove("$taskId::${model.name}")
     viewModelScope.launch(Dispatchers.IO) {
       dao.deleteMessages(taskId = taskId, modelName = model.name)

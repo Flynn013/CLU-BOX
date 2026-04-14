@@ -48,7 +48,7 @@ abstract class GraphDatabase : RoomDatabase() {
               GraphDatabase::class.java,
               "brainbox.db",
             )
-            .fallbackToDestructiveMigration()
+            .fallbackToDestructiveMigration() // TODO: replace with proper migrations before release
             .build()
             .also { INSTANCE = it }
         }
