@@ -29,7 +29,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -76,7 +76,7 @@ fun SysSettingsScreen() {
       color = neonGreen,
       fontFamily = FontFamily.Monospace,
     )
-    Divider(color = neonGreen, thickness = 1.dp)
+    HorizontalDivider(color = neonGreen, thickness = 1.dp)
 
     Text("SYSTEM DIRECTIVES", color = neonGreen, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelMedium)
     NeonTextField(
@@ -93,14 +93,14 @@ fun SysSettingsScreen() {
       Text("WRITE DIRECTIVES", fontFamily = FontFamily.Monospace)
     }
 
-    Divider(color = neonGreen, thickness = 1.dp)
+    HorizontalDivider(color = neonGreen, thickness = 1.dp)
     Text("INFERENCE TOGGLES", color = neonGreen, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelMedium)
 
     ToggleRow("Streaming Output", streamingEnabled) { streamingEnabled = it }
     ToggleRow("Thinking Mode (CoT)", thinkingModeEnabled) { thinkingModeEnabled = it }
     ToggleRow("Persist Chat History", persistHistoryEnabled) { persistHistoryEnabled = it }
 
-    Divider(color = neonGreen, thickness = 1.dp)
+    HorizontalDivider(color = neonGreen, thickness = 1.dp)
     Text("HARDWARE STATUS", color = neonGreen, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelMedium)
 
     HardwareRow("Device", Build.MODEL)
