@@ -4,8 +4,11 @@ on:
   push:
     branches: [ "main", "master", "copilot/**" ]
   pull_request:
-    branches: [ "main", "master" ]
+    branches: [ "main", "master", "copilot/**" ]
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
