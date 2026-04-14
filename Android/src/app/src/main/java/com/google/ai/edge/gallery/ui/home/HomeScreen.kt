@@ -173,6 +173,9 @@ fun HomeScreen(
   val context = LocalContext.current
   val isDevBuild = context.packageName.endsWith(".dev")
 
+  // Load and apply any saved custom colors on first composition.
+  LaunchedEffect(Unit) { modelManagerViewModel.readAndApplyCustomColors() }
+
   var tasks = uiState.tasks
 
   val categoryMap: Map<String, CategoryInfo> =

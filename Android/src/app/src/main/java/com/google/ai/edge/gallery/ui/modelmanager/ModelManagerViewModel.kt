@@ -19,6 +19,7 @@ package com.google.ai.edge.gallery.ui.modelmanager
 import android.content.Context
 import android.util.Log
 import androidx.activity.result.ActivityResult
+import androidx.compose.ui.graphics.Color
 import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -54,6 +55,7 @@ import com.google.ai.edge.gallery.proto.AccessTokenData
 import com.google.ai.edge.gallery.proto.ImportedModel
 import com.google.ai.edge.gallery.proto.Theme
 import com.google.ai.edge.gallery.runtime.aicore.AICoreModelHelper
+import com.google.ai.edge.gallery.ui.theme.ThemeSettings
 import com.google.gson.Gson
 import com.google.gson.JsonSyntaxException
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -586,6 +588,40 @@ constructor(
 
   fun saveThemeOverride(theme: Theme) {
     dataStoreRepository.saveTheme(theme = theme)
+  }
+
+  fun saveCustomColors(useCustom: Boolean, background: Color, text: Color, accent: Color) {
+    dataStoreRepository.saveCustomColors(
+      useCustom = useCustom,
+      background = android.graphics.Color.argb(
+        (background.alpha * 255).toInt(),
+        (background.red * 255).toInt(),
+        (background.green * 255).toInt(),
+        (background.blue * 255).toInt(),
+      ),
+      text = android.graphics.Color.argb(
+        (text.alpha * 255).toInt(),
+        (text.red * 255).toInt(),
+        (text.green * 255).toInt(),
+        (text.blue * 255).toInt(),
+      ),
+      accent = android.graphics.Color.argb(
+        (accent.alpha * 255).toInt(),
+        (accent.red * 255).toInt(),
+        (accent.green * 255).toInt(),
+        (accent.blue * 255).toInt(),
+      ),
+    )
+  }
+
+  fun readAndApplyCustomColors() {
+    val saved = dataStoreRepository.readCustomColors()
+    ThemeSettings.useCustomColors.value = saved.useCustomColors
+    if (saved.useCustomColors) {
+      ThemeSettings.customBackgroundColor.value = Color(saved.backgroundColorArgb)
+      ThemeSettings.customTextColor.value = Color(saved.textColorArgb)
+      ThemeSettings.customAccentColor.value = Color(saved.accentColorArgb)
+    }
   }
 
   fun getModelUrlResponse(model: Model, accessToken: String? = null): Int {

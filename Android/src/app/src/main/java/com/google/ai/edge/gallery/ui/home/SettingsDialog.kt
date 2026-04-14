@@ -20,6 +20,7 @@ import com.google.android.gms.oss.licenses.OssLicensesMenuActivity
 import android.app.UiModeManager
 import android.content.Context
 import android.content.Intent
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -31,6 +32,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -50,6 +52,7 @@ import androidx.compose.material3.MultiChoiceSegmentedButtonRow
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -61,6 +64,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -78,7 +82,10 @@ import com.google.ai.edge.gallery.ui.common.ClickableLink
 import com.google.ai.edge.gallery.ui.common.tos.AppTosDialog
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import com.google.ai.edge.gallery.ui.theme.ThemeSettings
+import com.google.ai.edge.gallery.ui.theme.absoluteBlack
 import com.google.ai.edge.gallery.ui.theme.labelSmallNarrow
+import com.google.ai.edge.gallery.ui.theme.neonGreen
+import com.google.ai.edge.gallery.ui.theme.terminalOnSurface
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -107,7 +114,13 @@ fun SettingsDialog(
   val interactionSource = remember { MutableInteractionSource() }
   var showTos by remember { mutableStateOf(false) }
 
-  Dialog(onDismissRequest = onDismissed) {
+  // UI color customization state — initialized from ThemeSettings.
+  var useCustomColors by remember { mutableStateOf(ThemeSettings.useCustomColors.value) }
+  var bgHex by remember { mutableStateOf(colorToHex(ThemeSettings.customBackgroundColor.value)) }
+  var textHex by remember { mutableStateOf(colorToHex(ThemeSettings.customTextColor.value)) }
+  var accentHex by remember { mutableStateOf(colorToHex(ThemeSettings.customAccentColor.value)) }
+
+
     val focusManager = LocalFocusManager.current
     Card(
       modifier =
@@ -183,6 +196,106 @@ fun SettingsDialog(
                   checked = theme == selectedTheme,
                   label = { Text(themeLabel(theme)) },
                 )
+              }
+            }
+          }
+
+          // UI Colors customization.
+          Column(
+            modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {},
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+          ) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              Text(
+                "Custom UI colors",
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium),
+              )
+              Switch(
+                checked = useCustomColors,
+                onCheckedChange = { enabled ->
+                  useCustomColors = enabled
+                  ThemeSettings.useCustomColors.value = enabled
+                  val bg = parseHexColor(bgHex) ?: ThemeSettings.customBackgroundColor.value
+                  val txt = parseHexColor(textHex) ?: ThemeSettings.customTextColor.value
+                  val acc = parseHexColor(accentHex) ?: ThemeSettings.customAccentColor.value
+                  modelManagerViewModel.saveCustomColors(
+                    useCustom = enabled,
+                    background = bg,
+                    text = txt,
+                    accent = acc,
+                  )
+                },
+              )
+            }
+            if (useCustomColors) {
+              ColorPickerRow(
+                label = "Background",
+                hexValue = bgHex,
+                onHexChange = { bgHex = it },
+                onCommit = { hex ->
+                  val color = parseHexColor(hex) ?: return@ColorPickerRow
+                  ThemeSettings.customBackgroundColor.value = color
+                  modelManagerViewModel.saveCustomColors(
+                    useCustom = true,
+                    background = color,
+                    text = parseHexColor(textHex) ?: ThemeSettings.customTextColor.value,
+                    accent = parseHexColor(accentHex) ?: ThemeSettings.customAccentColor.value,
+                  )
+                },
+              )
+              ColorPickerRow(
+                label = "Text",
+                hexValue = textHex,
+                onHexChange = { textHex = it },
+                onCommit = { hex ->
+                  val color = parseHexColor(hex) ?: return@ColorPickerRow
+                  ThemeSettings.customTextColor.value = color
+                  modelManagerViewModel.saveCustomColors(
+                    useCustom = true,
+                    background = parseHexColor(bgHex) ?: ThemeSettings.customBackgroundColor.value,
+                    text = color,
+                    accent = parseHexColor(accentHex) ?: ThemeSettings.customAccentColor.value,
+                  )
+                },
+              )
+              ColorPickerRow(
+                label = "Accent",
+                hexValue = accentHex,
+                onHexChange = { accentHex = it },
+                onCommit = { hex ->
+                  val color = parseHexColor(hex) ?: return@ColorPickerRow
+                  ThemeSettings.customAccentColor.value = color
+                  modelManagerViewModel.saveCustomColors(
+                    useCustom = true,
+                    background = parseHexColor(bgHex) ?: ThemeSettings.customBackgroundColor.value,
+                    text = parseHexColor(textHex) ?: ThemeSettings.customTextColor.value,
+                    accent = color,
+                  )
+                },
+              )
+              // Reset to CLU/BOX defaults.
+              OutlinedButton(
+                onClick = {
+                  bgHex = colorToHex(absoluteBlack)
+                  textHex = colorToHex(terminalOnSurface)
+                  accentHex = colorToHex(neonGreen)
+                  ThemeSettings.customBackgroundColor.value = absoluteBlack
+                  ThemeSettings.customTextColor.value = terminalOnSurface
+                  ThemeSettings.customAccentColor.value = neonGreen
+                  modelManagerViewModel.saveCustomColors(
+                    useCustom = true,
+                    background = absoluteBlack,
+                    text = terminalOnSurface,
+                    accent = neonGreen,
+                  )
+                },
+                modifier = Modifier.fillMaxWidth(),
+              ) {
+                Text("Reset to defaults")
               }
             }
           }
@@ -354,5 +467,125 @@ private fun themeLabel(theme: Theme): String {
     Theme.THEME_LIGHT -> "Light"
     Theme.THEME_DARK -> "Dark"
     else -> "Unknown"
+  }
+}
+
+/** Row with a colored swatch, a label, and a hex (#RRGGBB) text input. */
+@Composable
+private fun ColorPickerRow(
+  label: String,
+  hexValue: String,
+  onHexChange: (String) -> Unit,
+  onCommit: (String) -> Unit,
+) {
+  var localHex by remember(hexValue) { mutableStateOf(hexValue) }
+  var isFocused by remember { mutableStateOf(false) }
+  val previewColor = parseHexColor(localHex)
+
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    verticalAlignment = Alignment.CenterVertically,
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+  ) {
+    // Color swatch preview.
+    Box(
+      modifier = Modifier
+        .size(32.dp)
+        .background(color = previewColor ?: Color.Transparent, shape = RoundedCornerShape(4.dp))
+        .border(
+          width = 1.dp,
+          color = MaterialTheme.colorScheme.outline,
+          shape = RoundedCornerShape(4.dp),
+        ),
+    )
+
+    Column(modifier = Modifier.weight(1f)) {
+      Text(
+        label,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
+      BasicTextField(
+        value = localHex,
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = {
+          onHexChange(localHex)
+          onCommit(localHex)
+        }),
+        onValueChange = { raw ->
+          // Allow only valid hex prefix input (#RRGGBB).
+          val cleaned = raw.trimStart().let { if (!it.startsWith("#")) "#$it" else it }
+            .filter { it == '#' || it.isLetterOrDigit() }
+            .take(7)
+            .uppercase()
+          localHex = cleaned
+          if (cleaned.length == 7) {
+            onHexChange(cleaned)
+          }
+        },
+        modifier = Modifier
+          .fillMaxWidth()
+          .onFocusChanged { state ->
+            isFocused = state.isFocused
+            if (!state.isFocused && localHex.length == 7) {
+              onHexChange(localHex)
+              onCommit(localHex)
+            }
+          },
+        textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface),
+        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+      ) { innerTextField ->
+        Box(
+          modifier = Modifier
+            .border(
+              width = if (isFocused) 2.dp else 1.dp,
+              color = if (isFocused) MaterialTheme.colorScheme.primary
+              else MaterialTheme.colorScheme.outline,
+              shape = RoundedCornerShape(6.dp),
+            )
+            .height(36.dp)
+            .padding(horizontal = 10.dp),
+          contentAlignment = Alignment.CenterStart,
+        ) {
+          if (localHex.isEmpty()) {
+            Text(
+              "#RRGGBB",
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              style = MaterialTheme.typography.bodySmall,
+            )
+          }
+          innerTextField()
+        }
+      }
+    }
+  }
+}
+
+/** Converts a [Color] to a "#RRGGBB" hex string. */
+private fun colorToHex(color: Color): String {
+  val r = (color.red * 255).toInt().coerceIn(0, 255)
+  val g = (color.green * 255).toInt().coerceIn(0, 255)
+  val b = (color.blue * 255).toInt().coerceIn(0, 255)
+  return "#%02X%02X%02X".format(r, g, b)
+}
+
+/**
+ * Parses a "#RRGGBB" hex string into a fully-opaque [Color].
+ * Returns null if the string is not a valid 7-character hex color.
+ */
+private fun parseHexColor(hex: String): Color? {
+  val h = hex.trim()
+  if (h.length != 7 || h[0] != '#') return null
+  return try {
+    val rgb = h.substring(1).toLong(16)
+    Color(
+      red = ((rgb shr 16) and 0xFF).toInt() / 255f,
+      green = ((rgb shr 8) and 0xFF).toInt() / 255f,
+      blue = (rgb and 0xFF).toInt() / 255f,
+      alpha = 1f,
+    )
+  } catch (_: NumberFormatException) {
+    null
   }
 }

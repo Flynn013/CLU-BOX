@@ -27,10 +27,12 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
@@ -227,9 +229,23 @@ fun GalleryTheme(content: @Composable () -> Unit) {
 
   StatusBarColorController(useDarkTheme = darkTheme)
 
-  val colorScheme = darkScheme
+  // Read custom color overrides from ThemeSettings.
+  val useCustomColors by ThemeSettings.useCustomColors
+  val customBg by ThemeSettings.customBackgroundColor
+  val customText by ThemeSettings.customTextColor
+  val customAccent by ThemeSettings.customAccentColor
 
-  val customColorsPalette = darkCustomColors
+  val colorScheme = if (useCustomColors) {
+    buildCustomColorScheme(bg = customBg, text = customText, accent = customAccent)
+  } else {
+    darkScheme
+  }
+
+  val customColorsPalette = if (useCustomColors) {
+    buildCustomColorsPalette(bg = customBg, text = customText, accent = customAccent)
+  } else {
+    darkCustomColors
+  }
 
   CompositionLocalProvider(LocalCustomColors provides customColorsPalette) {
     MaterialTheme(colorScheme = colorScheme, typography = AppTypography, content = content)
@@ -243,4 +259,107 @@ fun GalleryTheme(content: @Composable () -> Unit) {
       window.isNavigationBarContrastEnforced = false
     }
   }
+}
+
+/** Builds a Material3 color scheme from three user-specified colors. */
+private fun buildCustomColorScheme(bg: Color, text: Color, accent: Color) = darkColorScheme(
+  primary = accent,
+  onPrimary = if (accent.luminance() > 0.4f) Color.Black else Color.White,
+  primaryContainer = accent.copy(alpha = 0.2f).compositeOver(bg),
+  onPrimaryContainer = accent,
+  secondary = accent,
+  onSecondary = if (accent.luminance() > 0.4f) Color.Black else Color.White,
+  secondaryContainer = accent.copy(alpha = 0.15f).compositeOver(bg),
+  onSecondaryContainer = accent,
+  tertiary = accent,
+  onTertiary = if (accent.luminance() > 0.4f) Color.Black else Color.White,
+  tertiaryContainer = accent.copy(alpha = 0.15f).compositeOver(bg),
+  onTertiaryContainer = accent,
+  error = terminalError,
+  onError = Color.Black,
+  errorContainer = terminalErrorContainer,
+  onErrorContainer = terminalError,
+  background = bg,
+  onBackground = text,
+  surface = bg,
+  onSurface = text,
+  surfaceVariant = blend(bg, Color.White, 0.06f),
+  onSurfaceVariant = text.copy(alpha = 0.75f),
+  outline = text.copy(alpha = 0.30f),
+  outlineVariant = text.copy(alpha = 0.15f),
+  scrim = Color.Black,
+  inverseSurface = text,
+  inverseOnSurface = bg,
+  inversePrimary = bg,
+  surfaceDim = bg,
+  surfaceBright = blend(bg, Color.White, 0.10f),
+  surfaceContainerLowest = bg,
+  surfaceContainerLow = blend(bg, Color.White, 0.04f),
+  surfaceContainer = blend(bg, Color.White, 0.08f),
+  surfaceContainerHigh = blend(bg, Color.White, 0.12f),
+  surfaceContainerHighest = blend(bg, Color.White, 0.16f),
+)
+
+/** Builds a [CustomColors] palette from three user-specified colors. */
+private fun buildCustomColorsPalette(bg: Color, text: Color, accent: Color): CustomColors {
+  val surface = blend(bg, Color.White, 0.08f)
+  val bubbleSurface = blend(bg, Color.White, 0.12f)
+  return CustomColors(
+    appTitleGradientColors = listOf(accent, accent),
+    tabHeaderBgColor = bg,
+    taskCardBgColor = surface,
+    taskBgColors = listOf(bg, bg, bg, bg),
+    taskBgGradientColors = listOf(
+      listOf(surface, bg),
+      listOf(surface, bg),
+      listOf(surface, bg),
+      listOf(surface, bg),
+    ),
+    taskIconColors = listOf(accent, accent, accent, accent),
+    taskIconShapeBgColor = bg,
+    homeBottomGradient = listOf(Color(0x00000000), bg),
+    agentBubbleBgColor = surface,
+    userBubbleBgColor = bubbleSurface,
+    linkColor = accent,
+    successColor = accent,
+    recordButtonBgColor = accent,
+    waveFormBgColor = text.copy(alpha = 0.25f),
+    modelInfoIconColor = text.copy(alpha = 0.40f),
+    warningContainerColor = surface,
+    warningTextColor = accent,
+    errorContainerColor = terminalErrorContainer,
+    errorTextColor = terminalError,
+    newFeatureContainerColor = surface,
+    newFeatureTextColor = accent,
+    bgStarColor = accent.copy(alpha = 0.10f),
+    promoBannerBgBrush = Brush.linearGradient(
+      colorStops = arrayOf(0.0f to blend(bg, Color.White, 0.08f), 1.0f to bg),
+      start = Offset(0f, 0f),
+      end = Offset(0f, Float.POSITIVE_INFINITY),
+    ),
+    promoBannerIconBgBrush = Brush.linearGradient(
+      colorStops = arrayOf(0.0f to blend(bg, Color.White, 0.12f), 1.0f to bg),
+      start = Offset(0f, 1f),
+      end = Offset(1f, 0f),
+    ),
+  )
+}
+
+/** Linearly interpolates [from] toward [to] by [fraction] (0 = from, 1 = to). */
+private fun blend(from: Color, to: Color, fraction: Float) = Color(
+  red = (from.red + (to.red - from.red) * fraction).coerceIn(0f, 1f),
+  green = (from.green + (to.green - from.green) * fraction).coerceIn(0f, 1f),
+  blue = (from.blue + (to.blue - from.blue) * fraction).coerceIn(0f, 1f),
+  alpha = from.alpha,
+)
+
+/** Composites [this] (with alpha) on top of [background]. */
+private fun Color.compositeOver(background: Color): Color {
+  val a = alpha
+  return Color(
+    red = red * a + background.red * (1f - a),
+    green = green * a + background.green * (1f - a),
+    blue = blue * a + background.blue * (1f - a),
+    alpha = 1f,
+  )
 }
