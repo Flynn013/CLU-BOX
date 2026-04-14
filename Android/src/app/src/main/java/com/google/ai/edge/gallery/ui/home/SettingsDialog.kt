@@ -514,9 +514,9 @@ private fun ColorPickerRow(
           onCommit(localHex)
         }),
         onValueChange = { raw ->
-          // Allow only valid hex prefix input (#RRGGBB).
+          // Allow only valid hex characters (#RRGGBB — digits and A-F only).
           val cleaned = raw.trimStart().let { if (!it.startsWith("#")) "#$it" else it }
-            .filter { it == '#' || it.isLetterOrDigit() }
+            .filter { it == '#' || it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }
             .take(7)
             .uppercase()
           localHex = cleaned
