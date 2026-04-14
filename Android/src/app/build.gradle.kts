@@ -114,7 +114,7 @@ dependencies {
   implementation(libs.androidx.exifinterface)
   implementation(libs.moshi.kotlin)
   kapt(libs.hilt.android.compiler)
-  kapt(libs.moshi.kotlin.codegen)
+  ksp(libs.moshi.kotlin.codegen)
   ksp(libs.room.compiler)
   testImplementation(libs.junit)
   androidTestImplementation(libs.androidx.junit)
