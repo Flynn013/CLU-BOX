@@ -23,14 +23,26 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.os.bundleOf
@@ -49,6 +61,7 @@ import com.google.ai.edge.gallery.ui.common.chat.SendMessageTrigger
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import com.google.ai.edge.gallery.ui.theme.emptyStateContent
 import com.google.ai.edge.gallery.ui.theme.emptyStateTitle
+import com.google.ai.edge.gallery.ui.theme.neonGreen
 
 private const val TAG = "AGLlmChatScreen"
 
@@ -90,6 +103,7 @@ fun LlmChatScreen(
     sendMessageTrigger = sendMessageTrigger,
     showImagePicker = showImagePicker,
     showAudioPicker = showAudioPicker,
+    showWipeGridButton = true,
   )
 }
 
@@ -187,10 +201,64 @@ fun ChatViewWrapper(
   sendMessageTrigger: SendMessageTrigger? = null,
   showImagePicker: Boolean = false,
   showAudioPicker: Boolean = false,
+  showWipeGridButton: Boolean = false,
 ) {
   val context = LocalContext.current
   val task = modelManagerViewModel.getTaskById(id = taskId)!!
   val allowThinking = task.allowThinking()
+  val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
+  val selectedModel = modelManagerUiState.selectedModel
+  var showWipeConfirmDialog by remember { mutableStateOf(false) }
+
+  // Load persisted chat history whenever the selected model changes.
+  LaunchedEffect(selectedModel.name) {
+    viewModel.loadChatHistory(taskId, selectedModel)
+  }
+
+  if (showWipeConfirmDialog) {
+    AlertDialog(
+      onDismissRequest = { showWipeConfirmDialog = false },
+      title = {
+        Text(
+          "WIPE GRID?",
+          fontFamily = FontFamily.Monospace,
+          color = neonGreen,
+        )
+      },
+      text = {
+        Text(
+          "This will permanently delete all chat history for this model.",
+          fontFamily = FontFamily.Monospace,
+        )
+      },
+      confirmButton = {
+        TextButton(onClick = {
+          viewModel.wipeGrid(taskId, selectedModel)
+          showWipeConfirmDialog = false
+        }) {
+          Text("CONFIRM", color = neonGreen, fontFamily = FontFamily.Monospace)
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { showWipeConfirmDialog = false }) {
+          Text("CANCEL", fontFamily = FontFamily.Monospace)
+        }
+      },
+    )
+  }
+
+  val wrappedComposableBelowMessageList: @Composable (Model) -> Unit = { model ->
+    if (showWipeGridButton) {
+      OutlinedButton(
+        onClick = { showWipeConfirmDialog = true },
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = neonGreen),
+      ) {
+        Text("⚠ WIPE GRID", fontFamily = FontFamily.Monospace)
+      }
+    }
+    composableBelowMessageList(model)
+  }
 
   ChatView(
     task = task,
@@ -222,6 +290,7 @@ fun ChatViewWrapper(
         viewModel.generateResponse(
           model = model,
           input = text,
+          taskId = taskId,
           images = images,
           audioMessages = audioMessages,
           onFirstToken = onFirstToken,
@@ -249,6 +318,7 @@ fun ChatViewWrapper(
         viewModel.runAgain(
           model = model,
           message = message,
+          taskId = taskId,
           onError = { errorMessage ->
             viewModel.handleError(
               context = context,
@@ -280,7 +350,7 @@ fun ChatViewWrapper(
     onSkillClicked = onSkillClicked,
     navigateUp = navigateUp,
     modifier = modifier,
-    composableBelowMessageList = composableBelowMessageList,
+    composableBelowMessageList = wrappedComposableBelowMessageList,
     showImagePicker = showImagePicker,
     emptyStateComposable = emptyStateComposable,
     allowEditingSystemPrompt = allowEditingSystemPrompt,

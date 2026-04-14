@@ -26,10 +26,16 @@ import androidx.room.RoomDatabase
  *
  * Increment [version] whenever the schema changes and provide a migration strategy.
  */
-@Database(entities = [NeuronEntity::class], version = 1, exportSchema = false)
+@Database(
+  entities = [NeuronEntity::class, ChatMessageEntity::class],
+  version = 2,
+  exportSchema = false,
+)
 abstract class GraphDatabase : RoomDatabase() {
 
   abstract fun brainBoxDao(): BrainBoxDao
+
+  abstract fun chatHistoryDao(): ChatHistoryDao
 
   companion object {
     @Volatile private var INSTANCE: GraphDatabase? = null

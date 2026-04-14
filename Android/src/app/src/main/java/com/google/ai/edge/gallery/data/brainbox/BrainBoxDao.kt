@@ -37,4 +37,8 @@ interface BrainBoxDao {
   /** Deletes the given neuron from the knowledge graph. */
   @Delete
   suspend fun deleteNeuron(neuron: NeuronEntity)
+
+  /** Deletes all neurons — used when importing a new brain snapshot. */
+  @Query("DELETE FROM neurons")
+  suspend fun deleteAllNeurons()
 }

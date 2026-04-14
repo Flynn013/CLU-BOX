@@ -23,6 +23,8 @@ import androidx.lifecycle.viewModelScope
 import com.google.ai.edge.gallery.data.ConfigKeys
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.Task
+import com.google.ai.edge.gallery.data.brainbox.ChatHistoryDao
+import com.google.ai.edge.gallery.data.brainbox.ChatMessageEntity
 import com.google.ai.edge.gallery.runtime.runtimeHelper
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageAudioClip
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageError
@@ -46,10 +48,64 @@ import kotlinx.coroutines.launch
 private const val TAG = "AGLlmChatViewModel"
 
 @OptIn(ExperimentalApi::class)
-open class LlmChatViewModelBase() : ChatViewModel() {
+open class LlmChatViewModelBase(
+  private val chatHistoryDao: ChatHistoryDao? = null,
+) : ChatViewModel() {
+
+  /** Tracks which (taskId, modelName) pairs have already had their history loaded. */
+  private val loadedHistoryKeys = mutableSetOf<String>()
+
+  /**
+   * Loads persisted chat history for [taskId] + [model] from the database into the in-memory
+   * UI state. No-op if already loaded or if no [chatHistoryDao] is available.
+   */
+  fun loadChatHistory(taskId: String, model: Model) {
+    val key = "$taskId::${model.name}"
+    if (loadedHistoryKeys.contains(key)) return
+    val dao = chatHistoryDao ?: return
+
+    loadedHistoryKeys.add(key)
+    viewModelScope.launch(Dispatchers.IO) {
+      val rows = dao.getMessages(taskId = taskId, modelName = model.name)
+      for (row in rows) {
+        val side = if (row.side == "USER") ChatSide.USER else ChatSide.AGENT
+        addMessage(model = model, message = ChatMessageText(content = row.content, side = side))
+      }
+    }
+  }
+
+  /**
+   * Deletes all persisted messages for [taskId] + [model] and clears the in-memory state.
+   * This is the "Wipe Grid" operation.
+   */
+  fun wipeGrid(taskId: String, model: Model) {
+    val dao = chatHistoryDao ?: return
+    clearAllMessages(model = model)
+    // Reset so history can be reloaded (will now be empty)
+    loadedHistoryKeys.remove("$taskId::${model.name}")
+    viewModelScope.launch(Dispatchers.IO) {
+      dao.deleteMessages(taskId = taskId, modelName = model.name)
+    }
+  }
+
+  /** Persists a completed user or agent TEXT message to the database. */
+  private fun persistMessage(taskId: String, model: Model, side: ChatSide, content: String) {
+    val dao = chatHistoryDao ?: return
+    val entity =
+      ChatMessageEntity(
+        taskId = taskId,
+        modelName = model.name,
+        side = side.name,
+        content = content,
+        timestampMs = System.currentTimeMillis(),
+      )
+    viewModelScope.launch(Dispatchers.IO) { dao.insertMessage(entity) }
+  }
+
   fun generateResponse(
     model: Model,
     input: String,
+    taskId: String = "",
     images: List<Bitmap> = listOf(),
     audioMessages: List<ChatMessageAudioClip> = listOf(),
     onFirstToken: (Model) -> Unit = {},
@@ -61,6 +117,11 @@ open class LlmChatViewModelBase() : ChatViewModel() {
     viewModelScope.launch(Dispatchers.Default) {
       setInProgress(true)
       setPreparing(true)
+
+      // Persist user message immediately.
+      if (taskId.isNotEmpty() && input.isNotEmpty()) {
+        persistMessage(taskId = taskId, model = model, side = ChatSide.USER, content = input)
+      }
 
       // Loading.
       addMessage(model = model, message = ChatMessageLoading(accelerator = accelerator))
@@ -192,6 +253,20 @@ open class LlmChatViewModelBase() : ChatViewModel() {
                     )
                   }
                 }
+
+                // Persist the completed agent response.
+                if (taskId.isNotEmpty()) {
+                  val agentMsg = getLastMessage(model = model)
+                  if (agentMsg is ChatMessageText && agentMsg.side == ChatSide.AGENT) {
+                    persistMessage(
+                      taskId = taskId,
+                      model = model,
+                      side = ChatSide.AGENT,
+                      content = agentMsg.content,
+                    )
+                  }
+                }
+
                 setInProgress(false)
                 onDone()
               }
@@ -284,6 +359,7 @@ open class LlmChatViewModelBase() : ChatViewModel() {
   fun runAgain(
     model: Model,
     message: ChatMessageText,
+    taskId: String = "",
     onError: (String) -> Unit,
     allowThinking: Boolean = false,
   ) {
@@ -300,6 +376,7 @@ open class LlmChatViewModelBase() : ChatViewModel() {
       generateResponse(
         model = model,
         input = message.content,
+        taskId = taskId,
         onError = onError,
         allowThinking = allowThinking,
       )
@@ -341,7 +418,9 @@ open class LlmChatViewModelBase() : ChatViewModel() {
   }
 }
 
-@HiltViewModel class LlmChatViewModel @Inject constructor() : LlmChatViewModelBase()
+@HiltViewModel
+class LlmChatViewModel @Inject constructor(chatHistoryDao: ChatHistoryDao) :
+  LlmChatViewModelBase(chatHistoryDao)
 
 @HiltViewModel class LlmAskImageViewModel @Inject constructor() : LlmChatViewModelBase()
 
