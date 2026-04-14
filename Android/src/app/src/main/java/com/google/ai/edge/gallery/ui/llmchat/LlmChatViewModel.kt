@@ -28,10 +28,7 @@ import com.google.ai.edge.gallery.data.brainbox.ChatHistoryDao
 import com.google.ai.edge.gallery.data.brainbox.ChatMessageEntity
 import com.google.ai.edge.gallery.data.brainbox.NeuronEntity
 import com.google.ai.edge.gallery.runtime.runtimeHelper
-import java.text.SimpleDateFormat
 import java.util.Collections
-import java.util.Date
-import java.util.Locale
 import java.util.UUID
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageAudioClip
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageError
@@ -124,16 +121,19 @@ open class LlmChatViewModelBase(
         .take(3)
     if (keywords.isEmpty()) return null
 
-    val found = mutableSetOf<NeuronEntity>()
+    // Count how many keywords matched each neuron to rank by relevance.
+    val hitCount = mutableMapOf<NeuronEntity, Int>()
     for (kw in keywords) {
-      found.addAll(dao.searchNeurons(kw))
+      for (neuron in dao.searchNeurons(kw)) {
+        hitCount[neuron] = (hitCount[neuron] ?: 0) + 1
+      }
     }
-    if (found.isEmpty()) return null
+    if (hitCount.isEmpty()) return null
 
-    return found
-      .sortedByDescending { it.label }
+    return hitCount.entries
+      .sortedByDescending { it.value } // most-matched neurons first
       .take(3) // cap context injection at 3 neurons to avoid blowing the context window
-      .joinToString("\n---\n") { n -> "## ${n.label} [${n.type}]\n${n.content}" }
+      .joinToString("\n---\n") { (n, _) -> "## ${n.label} [${n.type}]\n${n.content}" }
   }
 
   /**
@@ -157,7 +157,9 @@ open class LlmChatViewModelBase(
     if (transcript.isBlank()) return
 
     viewModelScope.launch(Dispatchers.IO) {
-      val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+      val timestamp =
+        java.time.LocalDateTime.now()
+          .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
       val neuron =
         NeuronEntity(
           id = UUID.randomUUID().toString(),

@@ -250,13 +250,18 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao) {
               }
               val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
               if (uri != null) {
-                resolver.openOutputStream(uri)?.use { it.write(json.toByteArray()) }
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                  values.clear()
-                  values.put(MediaStore.Downloads.IS_PENDING, 0)
-                  resolver.update(uri, values, null, null)
+                val stream = resolver.openOutputStream(uri)
+                if (stream != null) {
+                  stream.use { it.write(json.toByteArray()) }
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    values.clear()
+                    values.put(MediaStore.Downloads.IS_PENDING, 0)
+                    resolver.update(uri, values, null, null)
+                  }
+                  Toast.makeText(context, "Saved to Downloads/$fileName", Toast.LENGTH_LONG).show()
+                } else {
+                  Toast.makeText(context, "Export failed — could not open file for writing", Toast.LENGTH_LONG).show()
                 }
-                Toast.makeText(context, "Saved to Downloads/$fileName", Toast.LENGTH_LONG).show()
               } else {
                 Toast.makeText(context, "Export failed — storage unavailable", Toast.LENGTH_LONG).show()
               }
