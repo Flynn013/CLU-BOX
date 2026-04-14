@@ -72,7 +72,6 @@ import com.google.ai.edge.gallery.ui.navigation.GALLERY_ROUTE_BENCHMARK
 import com.google.ai.edge.gallery.ui.navigation.GALLERY_ROUTE_MODEL
 import com.google.ai.edge.gallery.ui.navigation.GalleryNavHost
 import com.google.ai.edge.gallery.ui.osmodules.BrainBoxModuleScreen
-import com.google.ai.edge.gallery.ui.osmodules.SysSettingsScreen
 import com.google.ai.edge.gallery.ui.osmodules.TheGridScreen
 import com.google.ai.edge.gallery.ui.theme.absoluteBlack
 import com.google.ai.edge.gallery.ui.theme.neonGreen
@@ -88,6 +87,15 @@ private enum class OsModule(val label: String, val icon: ImageVector) {
   VENDING_MACHINE("VENDING MACHINE", Icons.Outlined.ShoppingCart),
   SYS_SETTINGS("SYS_SETTINGS", Icons.Outlined.Settings),
 }
+
+/**
+ * Returns true for modules that render their own full-screen Scaffold (top bar + insets).
+ * These must be displayed without an outer CLU/BOX Scaffold shell to avoid a double top-bar gap.
+ */
+private val OsModule.isFullScreenModule: Boolean
+  get() = this == OsModule.CHAT_BOX ||
+    this == OsModule.SKILL_BOX ||
+    this == OsModule.VENDING_MACHINE
 
 /** Top level composable representing the main CLU/BOX operating system interface. */
 @Composable
@@ -142,13 +150,18 @@ fun GalleryApp(
 
           Spacer(Modifier.height(8.dp))
 
-          // Module items
+          // Module items.
+          // SYS_SETTINGS redirects to VENDING_MACHINE (the real model-management / config hub).
           OsModule.entries.forEach { module ->
             DrawerItem(
               module = module,
               selected = activeModule == module,
               onClick = {
-                activeModule = module
+                activeModule = if (module == OsModule.SYS_SETTINGS) {
+                  OsModule.VENDING_MACHINE
+                } else {
+                  module
+                }
                 scope.launch { drawerState.close() }
               },
             )
@@ -157,69 +170,79 @@ fun GalleryApp(
       }
     },
   ) {
-    Scaffold(
-      containerColor = absoluteBlack,
-      topBar = {
-        Row(
-          modifier = Modifier
-            .fillMaxWidth()
-            .background(absoluteBlack)
-            .windowInsetsPadding(WindowInsets.statusBars)
-            .padding(horizontal = 4.dp, vertical = 4.dp),
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          IconButton(onClick = { scope.launch { drawerState.open() } }) {
-            Icon(Icons.Outlined.Menu, contentDescription = "Open menu", tint = neonGreen)
+    // Full-screen modules (CHAT_BOX, SKILL_BOX, VENDING_MACHINE) manage their own Scaffold and
+    // window insets. Wrapping them in an additional Scaffold produces a double top-bar and a large
+    // blank gap. Render them directly so only their own top bar appears on screen.
+    //
+    // Shell modules (BRAIN_BOX, THE_GRID) are simple content screens that rely on the CLU/BOX
+    // Scaffold to supply the top bar and correct inset padding.
+    if (activeModule.isFullScreenModule) {
+      when (activeModule) {
+        // CHAT_BOX: starts directly at the Agent Chat (Agent Skills) model picker —
+        // the primary AI interaction window for CLU/BOX.
+        OsModule.CHAT_BOX -> GalleryNavHost(
+          navController = chatNavController,
+          modelManagerViewModel = modelManagerViewModel,
+          initialTaskId = BuiltInTaskId.LLM_AGENT_CHAT,
+        )
+
+        // SKILL_BOX: starts directly at the Agent Chat model picker, which
+        // hosts the full skill import / edit / test workflow.
+        OsModule.SKILL_BOX -> GalleryNavHost(
+          navController = skillNavController,
+          modelManagerViewModel = modelManagerViewModel,
+          initialTaskId = BuiltInTaskId.LLM_AGENT_CHAT,
+        )
+
+        // VENDING_MACHINE / SYS_SETTINGS: the real model-management hub — download,
+        // delete, and configure any model.  Selecting a model switches to CHAT_BOX.
+        OsModule.VENDING_MACHINE -> GlobalModelManager(
+          viewModel = modelManagerViewModel,
+          navigateUp = { activeModule = OsModule.CHAT_BOX },
+          onModelSelected = { task, model ->
+            chatNavController.navigate("$GALLERY_ROUTE_MODEL/${task.id}/${model.name}")
+            activeModule = OsModule.CHAT_BOX
+          },
+          onBenchmarkClicked = { model ->
+            chatNavController.navigate("$GALLERY_ROUTE_BENCHMARK/${model.name}")
+            activeModule = OsModule.CHAT_BOX
+          },
+        )
+
+        else -> {} // unreachable
+      }
+    } else {
+      // Shell modules: the CLU/BOX Scaffold supplies the top bar and status-bar insets.
+      Scaffold(
+        containerColor = absoluteBlack,
+        topBar = {
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .background(absoluteBlack)
+              .windowInsetsPadding(WindowInsets.statusBars)
+              .padding(horizontal = 4.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            IconButton(onClick = { scope.launch { drawerState.open() } }) {
+              Icon(Icons.Outlined.Menu, contentDescription = "Open menu", tint = neonGreen)
+            }
+            Text(
+              activeModule.label,
+              style = MaterialTheme.typography.titleMedium,
+              color = neonGreen,
+              fontFamily = FontFamily.Monospace,
+              modifier = Modifier.padding(start = 4.dp),
+            )
           }
-          Text(
-            activeModule.label,
-            style = MaterialTheme.typography.titleMedium,
-            color = neonGreen,
-            fontFamily = FontFamily.Monospace,
-            modifier = Modifier.padding(start = 4.dp),
-          )
-        }
-      },
-    ) { innerPadding ->
-      Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
-        when (activeModule) {
-          // CHAT_BOX: starts directly at the Agent Chat (Agent Skills) model picker —
-          // the primary AI interaction window for CLU/BOX.
-          OsModule.CHAT_BOX -> GalleryNavHost(
-            navController = chatNavController,
-            modelManagerViewModel = modelManagerViewModel,
-            initialTaskId = BuiltInTaskId.LLM_AGENT_CHAT,
-          )
-
-          OsModule.BRAIN_BOX -> BrainBoxModuleScreen(dao = db.brainBoxDao())
-
-          OsModule.THE_GRID -> TheGridScreen()
-
-          // SKILL_BOX: starts directly at the Agent Chat model picker, which
-          // hosts the full skill import / edit / test workflow.
-          OsModule.SKILL_BOX -> GalleryNavHost(
-            navController = skillNavController,
-            modelManagerViewModel = modelManagerViewModel,
-            initialTaskId = BuiltInTaskId.LLM_AGENT_CHAT,
-          )
-
-          // VENDING_MACHINE: the real model-management hub — download, delete,
-          // and launch any model.  Selecting a model switches to CHAT_BOX and
-          // opens the chat screen for that model.
-          OsModule.VENDING_MACHINE -> GlobalModelManager(
-            viewModel = modelManagerViewModel,
-            navigateUp = { activeModule = OsModule.CHAT_BOX },
-            onModelSelected = { task, model ->
-              chatNavController.navigate("$GALLERY_ROUTE_MODEL/${task.id}/${model.name}")
-              activeModule = OsModule.CHAT_BOX
-            },
-            onBenchmarkClicked = { model ->
-              chatNavController.navigate("$GALLERY_ROUTE_BENCHMARK/${model.name}")
-              activeModule = OsModule.CHAT_BOX
-            },
-          )
-
-          OsModule.SYS_SETTINGS -> SysSettingsScreen()
+        },
+      ) { innerPadding ->
+        Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+          when (activeModule) {
+            OsModule.BRAIN_BOX -> BrainBoxModuleScreen(dao = db.brainBoxDao())
+            OsModule.THE_GRID -> TheGridScreen()
+            else -> {} // SYS_SETTINGS redirected above; other full-screen handled in outer branch
+          }
         }
       }
     }
@@ -249,5 +272,4 @@ private fun DrawerItem(module: OsModule, selected: Boolean, onClick: () -> Unit)
     )
   }
 }
-
 
