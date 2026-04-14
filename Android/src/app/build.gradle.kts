@@ -24,6 +24,7 @@ plugins {
   alias(libs.plugins.protobuf)
   alias(libs.plugins.hilt.application)
   alias(libs.plugins.oss.licenses)
+  alias(libs.plugins.ksp)
   kotlin("kapt")
 }
 
@@ -114,7 +115,7 @@ dependencies {
   implementation(libs.moshi.kotlin)
   kapt(libs.hilt.android.compiler)
   kapt(libs.moshi.kotlin.codegen)
-  kapt(libs.room.compiler)
+  ksp(libs.room.compiler)
   testImplementation(libs.junit)
   androidTestImplementation(libs.androidx.junit)
   androidTestImplementation(libs.androidx.espresso.core)
