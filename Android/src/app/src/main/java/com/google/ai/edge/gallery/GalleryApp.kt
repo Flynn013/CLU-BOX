@@ -30,8 +30,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.widthimport androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Chat
@@ -174,28 +173,56 @@ fun GalleryApp(
     // window insets. Wrapping them in an additional Scaffold produces a double top-bar and a large
     // blank gap. Render them directly so only their own top bar appears on screen.
     //
+    // A CLU/BOX hamburger button is overlaid on each full-screen module so the drawer remains
+    // accessible without reintroducing the outer Scaffold:
+    //   - CHAT_BOX / SKILL_BOX: overlay at TopEnd (ModelManager has no right-side action there)
+    //   - VENDING_MACHINE: passed via the openDrawer parameter into GlobalModelManager's
+    //     navigationIcon slot (which is otherwise empty)
+    //
     // Shell modules (BRAIN_BOX, THE_GRID) are simple content screens that rely on the CLU/BOX
     // Scaffold to supply the top bar and correct inset padding.
     if (activeModule.isFullScreenModule) {
       when (activeModule) {
         // CHAT_BOX: starts directly at the Agent Chat (Agent Skills) model picker —
         // the primary AI interaction window for CLU/BOX.
-        OsModule.CHAT_BOX -> GalleryNavHost(
-          navController = chatNavController,
-          modelManagerViewModel = modelManagerViewModel,
-          initialTaskId = BuiltInTaskId.LLM_AGENT_CHAT,
-        )
+        OsModule.CHAT_BOX -> Box(modifier = Modifier.fillMaxSize()) {
+          GalleryNavHost(
+            navController = chatNavController,
+            modelManagerViewModel = modelManagerViewModel,
+            initialTaskId = BuiltInTaskId.LLM_AGENT_CHAT,
+          )
+          IconButton(
+            onClick = { scope.launch { drawerState.open() } },
+            modifier = Modifier
+              .align(Alignment.TopEnd)
+              .windowInsetsPadding(WindowInsets.statusBars),
+          ) {
+            Icon(Icons.Outlined.Menu, contentDescription = "Open CLU/BOX menu", tint = neonGreen)
+          }
+        }
 
         // SKILL_BOX: starts directly at the Agent Chat model picker, which
         // hosts the full skill import / edit / test workflow.
-        OsModule.SKILL_BOX -> GalleryNavHost(
-          navController = skillNavController,
-          modelManagerViewModel = modelManagerViewModel,
-          initialTaskId = BuiltInTaskId.LLM_AGENT_CHAT,
-        )
+        OsModule.SKILL_BOX -> Box(modifier = Modifier.fillMaxSize()) {
+          GalleryNavHost(
+            navController = skillNavController,
+            modelManagerViewModel = modelManagerViewModel,
+            initialTaskId = BuiltInTaskId.LLM_AGENT_CHAT,
+          )
+          IconButton(
+            onClick = { scope.launch { drawerState.open() } },
+            modifier = Modifier
+              .align(Alignment.TopEnd)
+              .windowInsetsPadding(WindowInsets.statusBars),
+          ) {
+            Icon(Icons.Outlined.Menu, contentDescription = "Open CLU/BOX menu", tint = neonGreen)
+          }
+        }
 
         // VENDING_MACHINE / SYS_SETTINGS: the real model-management hub — download,
         // delete, and configure any model.  Selecting a model switches to CHAT_BOX.
+        // openDrawer is passed in so GlobalModelManager can show the hamburger in its
+        // otherwise-empty navigationIcon slot.
         OsModule.VENDING_MACHINE -> GlobalModelManager(
           viewModel = modelManagerViewModel,
           navigateUp = { activeModule = OsModule.CHAT_BOX },
@@ -207,6 +234,7 @@ fun GalleryApp(
             chatNavController.navigate("$GALLERY_ROUTE_BENCHMARK/${model.name}")
             activeModule = OsModule.CHAT_BOX
           },
+          openDrawer = { scope.launch { drawerState.open() } },
         )
 
         else -> {} // unreachable

@@ -50,6 +50,7 @@ import androidx.compose.material.icons.automirrored.rounded.ListAlt
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Error
+import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
@@ -108,6 +109,7 @@ fun GlobalModelManager(
   onModelSelected: (Task, Model) -> Unit,
   onBenchmarkClicked: (Model) -> Unit,
   modifier: Modifier = Modifier,
+  openDrawer: (() -> Unit)? = null,
 ) {
   val uiState by viewModel.uiState.collectAsState()
   val builtInModels = remember { mutableStateListOf<Model>() }
@@ -214,6 +216,18 @@ fun GlobalModelManager(
                   "${stringResource(R.string.drawer_models_label)} (${builtInModels.size + importedModels.size})",
                 color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.titleMedium,
+              )
+            }
+          }
+        },
+        // CLU/BOX drawer hamburger — only shown when called from the CLU/BOX shell.
+        navigationIcon = {
+          if (openDrawer != null) {
+            IconButton(onClick = openDrawer) {
+              Icon(
+                imageVector = Icons.Rounded.Menu,
+                contentDescription = "Open CLU/BOX menu",
+                tint = MaterialTheme.colorScheme.onSurface,
               )
             }
           }
