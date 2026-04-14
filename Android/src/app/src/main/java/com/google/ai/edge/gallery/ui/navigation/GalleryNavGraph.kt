@@ -93,9 +93,12 @@ import kotlinx.coroutines.launch
 private const val TAG = "AGGalleryNavGraph"
 private const val ROUTE_HOMESCREEN = "homepage"
 private const val ROUTE_MODEL_LIST = "model_list"
-private const val ROUTE_MODEL = "route_model"
-private const val ROUTE_BENCHMARK = "benchmark"
-private const val ROUTE_MODEL_MANAGER = "model_manager"
+internal const val GALLERY_ROUTE_MODEL = "route_model"
+internal const val GALLERY_ROUTE_BENCHMARK = "benchmark"
+internal const val GALLERY_ROUTE_MODEL_MANAGER = "model_manager"
+private const val ROUTE_MODEL = GALLERY_ROUTE_MODEL
+private const val ROUTE_BENCHMARK = GALLERY_ROUTE_BENCHMARK
+private const val ROUTE_MODEL_MANAGER = GALLERY_ROUTE_MODEL_MANAGER
 private const val ENTER_ANIMATION_DURATION_MS = 500
 private val ENTER_ANIMATION_EASING = EaseOutExpo
 private const val ENTER_ANIMATION_DELAY_MS = 100
@@ -149,10 +152,16 @@ fun GalleryNavHost(
   navController: NavHostController,
   modifier: Modifier = Modifier,
   modelManagerViewModel: ModelManagerViewModel,
+  initialTaskId: String? = null,
 ) {
   val lifecycleOwner = LocalLifecycleOwner.current
   var showModelManager by remember { mutableStateOf(false) }
-  var pickedTask by remember { mutableStateOf<Task?>(null) }
+  var pickedTask by remember(initialTaskId) {
+    mutableStateOf<Task?>(
+      if (initialTaskId != null) modelManagerViewModel.getTaskById(initialTaskId) else null
+    )
+  }
+  val startDestination = if (initialTaskId != null) ROUTE_MODEL_LIST else ROUTE_HOMESCREEN
   var enableHomeScreenAnimation by remember { mutableStateOf(true) }
   var enableModelListAnimation by remember { mutableStateOf(true) }
   var lastNavigatedModelName = remember { "" }
@@ -182,7 +191,7 @@ fun GalleryNavHost(
 
   NavHost(
     navController = navController,
-    startDestination = ROUTE_HOMESCREEN,
+    startDestination = startDestination,
     enterTransition = { EnterTransition.None },
     exitTransition = { ExitTransition.None },
   ) {

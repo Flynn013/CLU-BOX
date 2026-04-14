@@ -41,9 +41,7 @@ import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.ShoppingCart
-import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.DrawerValue
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -65,16 +63,17 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
-import androidx.navigation.NavHostController
 import androidx.navigation.compose.rememberNavController
+import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.brainbox.GraphDatabase
+import com.google.ai.edge.gallery.ui.modelmanager.GlobalModelManager
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
+import com.google.ai.edge.gallery.ui.navigation.GALLERY_ROUTE_BENCHMARK
+import com.google.ai.edge.gallery.ui.navigation.GALLERY_ROUTE_MODEL
 import com.google.ai.edge.gallery.ui.navigation.GalleryNavHost
 import com.google.ai.edge.gallery.ui.osmodules.BrainBoxModuleScreen
-import com.google.ai.edge.gallery.ui.osmodules.SkillBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.SysSettingsScreen
 import com.google.ai.edge.gallery.ui.osmodules.TheGridScreen
-import com.google.ai.edge.gallery.ui.osmodules.VendingMachineScreen
 import com.google.ai.edge.gallery.ui.theme.absoluteBlack
 import com.google.ai.edge.gallery.ui.theme.neonGreen
 import com.google.ai.edge.gallery.ui.theme.terminalMidGrey
@@ -93,7 +92,6 @@ private enum class OsModule(val label: String, val icon: ImageVector) {
 /** Top level composable representing the main CLU/BOX operating system interface. */
 @Composable
 fun GalleryApp(
-  navController: NavHostController = rememberNavController(),
   modelManagerViewModel: ModelManagerViewModel,
 ) {
   val context = LocalContext.current
@@ -101,6 +99,10 @@ fun GalleryApp(
   val scope = rememberCoroutineScope()
   var activeModule by remember { mutableStateOf(OsModule.CHAT_BOX) }
   val db = remember { GraphDatabase.getInstance(context) }
+
+  // Separate nav controllers so each module retains its own back stack.
+  val chatNavController = rememberNavController()
+  val skillNavController = rememberNavController()
 
   ModalNavigationDrawer(
     drawerState = drawerState,
@@ -181,19 +183,42 @@ fun GalleryApp(
     ) { innerPadding ->
       Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
         when (activeModule) {
+          // CHAT_BOX: starts directly at the Agent Chat (Agent Skills) model picker —
+          // the primary AI interaction window for CLU/BOX.
           OsModule.CHAT_BOX -> GalleryNavHost(
-            navController = navController,
+            navController = chatNavController,
             modelManagerViewModel = modelManagerViewModel,
+            initialTaskId = BuiltInTaskId.LLM_AGENT_CHAT,
           )
+
           OsModule.BRAIN_BOX -> BrainBoxModuleScreen(dao = db.brainBoxDao())
+
           OsModule.THE_GRID -> TheGridScreen()
-          OsModule.SKILL_BOX -> SkillBoxScreen()
-          OsModule.VENDING_MACHINE -> VendingMachineScreen(
-            onOpenModelManager = {
-              // Navigate to the model manager inside the CHAT_BOX nav host.
+
+          // SKILL_BOX: starts directly at the Agent Chat model picker, which
+          // hosts the full skill import / edit / test workflow.
+          OsModule.SKILL_BOX -> GalleryNavHost(
+            navController = skillNavController,
+            modelManagerViewModel = modelManagerViewModel,
+            initialTaskId = BuiltInTaskId.LLM_AGENT_CHAT,
+          )
+
+          // VENDING_MACHINE: the real model-management hub — download, delete,
+          // and launch any model.  Selecting a model switches to CHAT_BOX and
+          // opens the chat screen for that model.
+          OsModule.VENDING_MACHINE -> GlobalModelManager(
+            viewModel = modelManagerViewModel,
+            navigateUp = { activeModule = OsModule.CHAT_BOX },
+            onModelSelected = { task, model ->
+              chatNavController.navigate("$GALLERY_ROUTE_MODEL/${task.id}/${model.name}")
+              activeModule = OsModule.CHAT_BOX
+            },
+            onBenchmarkClicked = { model ->
+              chatNavController.navigate("$GALLERY_ROUTE_BENCHMARK/${model.name}")
               activeModule = OsModule.CHAT_BOX
             },
           )
+
           OsModule.SYS_SETTINGS -> SysSettingsScreen()
         }
       }
@@ -224,4 +249,5 @@ private fun DrawerItem(module: OsModule, selected: Boolean, onClick: () -> Unit)
     )
   }
 }
+
 
