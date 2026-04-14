@@ -25,11 +25,14 @@ import com.google.ai.edge.gallery.common.CallJsSkillResultImage
 import com.google.ai.edge.gallery.common.CallJsSkillResultWebview
 import com.google.ai.edge.gallery.common.LOCAL_URL_BASE
 import com.google.ai.edge.gallery.common.SkillProgressAgentAction
+import com.google.ai.edge.gallery.data.brainbox.BrainBoxDao
+import com.google.ai.edge.gallery.data.brainbox.NeuronEntity
 import com.google.ai.edge.litertlm.Tool
 import com.google.ai.edge.litertlm.ToolParam
 import com.google.ai.edge.litertlm.ToolSet
 import com.squareup.moshi.JsonAdapter
 import com.squareup.moshi.Moshi
+import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
@@ -40,6 +43,7 @@ private const val TAG = "AGAgentTools"
 class AgentTools() : ToolSet {
   lateinit var context: Context
   lateinit var skillManagerViewModel: SkillManagerViewModel
+  var brainBoxDao: BrainBoxDao? = null
 
   private val _actionChannel = Channel<AgentAction>(Channel.UNLIMITED)
   val actionChannel: ReceiveChannel<AgentAction> = _actionChannel
@@ -252,6 +256,64 @@ class AgentTools() : ToolSet {
           "result" to "failed",
         )
       }
+    }
+  }
+
+  /**
+   * Query the BRAIN_BOX knowledge graph.
+   *
+   * Returns all neurons whose label or content contains [query] (case-insensitive). If [query] is
+   * empty, all neurons are returned.
+   */
+  @Tool(description = "Searches the CLU/BOX BrainBox knowledge graph for neurons matching a query. Returns label, type, and content for each matching neuron.")
+  fun queryBrain(
+    @ToolParam(description = "The search term. Pass an empty string to retrieve all neurons.") query: String,
+  ): Map<String, String> {
+    return runBlocking(Dispatchers.Default) {
+      val dao = brainBoxDao
+      if (dao == null) {
+        Log.w(TAG, "queryBrain: BrainBoxDao not wired")
+        return@runBlocking mapOf("error" to "BrainBox not available", "status" to "failed")
+      }
+      val all = dao.getAllNeurons()
+      val matched = if (query.isBlank()) all else {
+        val q = query.lowercase()
+        all.filter { it.label.lowercase().contains(q) || it.content.lowercase().contains(q) }
+      }
+      val summary = matched.joinToString(separator = "\n") { n ->
+        "[${n.type}] ${n.label}: ${n.content}"
+      }.ifEmpty { "(no neurons found)" }
+      Log.d(TAG, "queryBrain query='$query' returned ${matched.size} neurons")
+      mapOf("result" to summary, "count" to matched.size.toString(), "status" to "succeeded")
+    }
+  }
+
+  /**
+   * Save a new neuron (memory) to the BRAIN_BOX knowledge graph.
+   *
+   * If a neuron with the same [label] already exists it is overwritten.
+   */
+  @Tool(description = "Saves a neuron to the CLU/BOX BrainBox knowledge graph. Use this to remember facts, preferences, context, or any information the user wants stored persistently.")
+  fun saveBrainNeuron(
+    @ToolParam(description = "A short, unique label identifying this memory (e.g. 'User preference: dark mode').") label: String,
+    @ToolParam(description = "The category or type of memory (e.g. 'preference', 'fact', 'context', 'task').") type: String,
+    @ToolParam(description = "The full content to store.") content: String,
+  ): Map<String, String> {
+    return runBlocking(Dispatchers.Default) {
+      val dao = brainBoxDao
+      if (dao == null) {
+        Log.w(TAG, "saveBrainNeuron: BrainBoxDao not wired")
+        return@runBlocking mapOf("error" to "BrainBox not available", "status" to "failed")
+      }
+      val neuron = NeuronEntity(
+        id = UUID.randomUUID().toString(),
+        label = label.trim(),
+        type = type.trim(),
+        content = content.trim(),
+      )
+      dao.insertNeuron(neuron)
+      Log.d(TAG, "saveBrainNeuron saved neuron label='$label'")
+      mapOf("label" to label, "type" to type, "status" to "succeeded")
     }
   }
 
