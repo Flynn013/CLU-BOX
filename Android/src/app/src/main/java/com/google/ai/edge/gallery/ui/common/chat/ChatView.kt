@@ -109,6 +109,7 @@ fun ChatView(
   curSystemPrompt: String = "",
   onSystemPromptChanged: (String) -> Unit = {},
   sendMessageTrigger: SendMessageTrigger? = null,
+  onForgeNeuronClicked: (() -> Unit)? = null,
 ) {
   val uiState by viewModel.uiState.collectAsState()
   val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
@@ -199,6 +200,7 @@ fun ChatView(
         allowEditingSystemPrompt = allowEditingSystemPrompt,
         curSystemPrompt = curSystemPrompt,
         onSystemPromptChanged = onSystemPromptChanged,
+        onForgeNeuronClicked = onForgeNeuronClicked,
       )
     },
   ) { innerPadding ->

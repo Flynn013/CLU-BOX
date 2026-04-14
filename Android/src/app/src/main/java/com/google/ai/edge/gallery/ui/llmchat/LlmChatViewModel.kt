@@ -23,10 +23,16 @@ import androidx.lifecycle.viewModelScope
 import com.google.ai.edge.gallery.data.ConfigKeys
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.Task
+import com.google.ai.edge.gallery.data.brainbox.BrainBoxDao
 import com.google.ai.edge.gallery.data.brainbox.ChatHistoryDao
 import com.google.ai.edge.gallery.data.brainbox.ChatMessageEntity
+import com.google.ai.edge.gallery.data.brainbox.NeuronEntity
 import com.google.ai.edge.gallery.runtime.runtimeHelper
+import java.text.SimpleDateFormat
 import java.util.Collections
+import java.util.Date
+import java.util.Locale
+import java.util.UUID
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageAudioClip
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageError
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageLoading
@@ -45,12 +51,14 @@ import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private const val TAG = "AGLlmChatViewModel"
 
 @OptIn(ExperimentalApi::class)
 open class LlmChatViewModelBase(
   private val chatHistoryDao: ChatHistoryDao? = null,
+  private val brainBoxDao: BrainBoxDao? = null,
 ) : ChatViewModel() {
 
   /** Tracks which (taskId, modelName) pairs have already had their history loaded. */
@@ -93,6 +101,85 @@ open class LlmChatViewModelBase(
     loadedHistoryKeys.remove("$taskId::${model.name}")
     viewModelScope.launch(Dispatchers.IO) {
       dao.deleteMessages(taskId = taskId, modelName = model.name)
+    }
+  }
+
+  // =========================================================================
+  // BrainBox — Retrieval-Augmented Generation (RAG)
+  // =========================================================================
+
+  /**
+   * Searches the BrainBox for neurons whose label, type, or content contain any keyword from
+   * [input] (words ≥ 4 chars, up to 3 keywords).  Returns a formatted context block ready to be
+   * prepended to the user's message, or null if nothing relevant was found.
+   */
+  suspend fun retrieveBrainContext(input: String): String? {
+    val dao = brainBoxDao ?: return null
+    val keywords =
+      input
+        .split(Regex("\\s+"))
+        .map { it.trim().lowercase() }
+        .filter { it.length >= 4 }
+        .distinct()
+        .take(3)
+    if (keywords.isEmpty()) return null
+
+    val found = mutableSetOf<NeuronEntity>()
+    for (kw in keywords) {
+      found.addAll(dao.searchNeurons(kw))
+    }
+    if (found.isEmpty()) return null
+
+    return found
+      .sortedByDescending { it.label }
+      .take(3) // cap context injection at 3 neurons to avoid blowing the context window
+      .joinToString("\n---\n") { n -> "## ${n.label} [${n.type}]\n${n.content}" }
+  }
+
+  /**
+   * FORGE NEURON — snapshot the current conversation as a [NeuronEntity] in BrainBox.
+   *
+   * Builds a plain-text transcript of all [ChatMessageText] turns for [model], saves it as a
+   * Session_Log neuron, and appends a confirmation message to the chat so the user can see
+   * what was locked.  No-op if [brainBoxDao] is unavailable or the chat is empty.
+   */
+  fun forgeNeuron(model: Model) {
+    val dao = brainBoxDao ?: return
+    val messages = uiState.value.messagesByModel[model.name] ?: return
+    val transcript =
+      messages
+        .filterIsInstance<ChatMessageText>()
+        .filter { it.side == ChatSide.USER || it.side == ChatSide.AGENT }
+        .joinToString("\n\n") { msg ->
+          val speaker = if (msg.side == ChatSide.USER) "USER" else "CLU"
+          "$speaker: ${msg.content}"
+        }
+    if (transcript.isBlank()) return
+
+    viewModelScope.launch(Dispatchers.IO) {
+      val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+      val neuron =
+        NeuronEntity(
+          id = UUID.randomUUID().toString(),
+          label = "Session_$timestamp",
+          type = "Session_Log",
+          content = transcript,
+        )
+      dao.insertNeuron(neuron)
+      Log.d(TAG, "Forged neuron: ${neuron.label} (${transcript.length} chars)")
+
+      withContext(Dispatchers.Main) {
+        addMessage(
+          model = model,
+          message =
+            ChatMessageText(
+              content =
+                "⚡ **FORGED TO BRAINBOX** — session locked as `${neuron.label}`.\n" +
+                  "CLU will remember this the next time you reference it.",
+              side = ChatSide.AGENT,
+            ),
+        )
+      }
     }
   }
 
@@ -298,9 +385,26 @@ open class LlmChatViewModelBase(
             model.getBooleanConfigValue(key = ConfigKeys.ENABLE_THINKING, defaultValue = false)
         val extraContext = if (enableThinking) mapOf("enable_thinking" to "true") else null
 
+        // BrainBox RAG — query for relevant neurons and prepend them as injected context.
+        // Only runs when the user has actually typed something (not for image/audio-only turns).
+        val augmentedInput =
+          if (input.isNotBlank()) {
+            val brainContext = withContext(Dispatchers.IO) { retrieveBrainContext(input) }
+            if (!brainContext.isNullOrBlank()) {
+              Log.d(TAG, "BrainBox: injecting context (${brainContext.length} chars)")
+              "=== CLU/BOX MEMORY (relevant context retrieved from BrainBox) ===\n" +
+                brainContext +
+                "\n=== END MEMORY ===\n\nUser message: $input"
+            } else {
+              input
+            }
+          } else {
+            input
+          }
+
         model.runtimeHelper.runInference(
           model = model,
-          input = input,
+          input = augmentedInput,
           images = images,
           audioClips = audioClips,
           resultListener = resultListener,
@@ -427,8 +531,8 @@ open class LlmChatViewModelBase(
 }
 
 @HiltViewModel
-class LlmChatViewModel @Inject constructor(chatHistoryDao: ChatHistoryDao) :
-  LlmChatViewModelBase(chatHistoryDao)
+class LlmChatViewModel @Inject constructor(chatHistoryDao: ChatHistoryDao, brainBoxDao: BrainBoxDao) :
+  LlmChatViewModelBase(chatHistoryDao, brainBoxDao)
 
 @HiltViewModel class LlmAskImageViewModel @Inject constructor() : LlmChatViewModelBase()
 

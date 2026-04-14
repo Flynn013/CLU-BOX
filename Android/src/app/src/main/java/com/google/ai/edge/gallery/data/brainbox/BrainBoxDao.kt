@@ -21,6 +21,7 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Update
 
 /** Data Access Object for the CLU/BOX BrainBox knowledge graph. */
 @Dao
@@ -41,4 +42,17 @@ interface BrainBoxDao {
   /** Deletes all neurons — used when importing a new brain snapshot. */
   @Query("DELETE FROM neurons")
   suspend fun deleteAllNeurons()
+
+  /**
+   * Full-text keyword search across label, type, and content (case-insensitive).
+   * Used by the BrainBox retrieval loop to inject relevant context before inference.
+   */
+  @Query(
+    "SELECT * FROM neurons WHERE lower(label) LIKE '%' || lower(:query) || '%' OR lower(type) LIKE '%' || lower(:query) || '%' OR lower(content) LIKE '%' || lower(:query) || '%'"
+  )
+  suspend fun searchNeurons(query: String): List<NeuronEntity>
+
+  /** Updates an existing neuron (replaces all fields). */
+  @Update
+  suspend fun updateNeuron(neuron: NeuronEntity)
 }

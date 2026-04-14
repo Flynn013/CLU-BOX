@@ -358,5 +358,6 @@ fun ChatViewWrapper(
     onSystemPromptChanged = onSystemPromptChanged,
     sendMessageTrigger = sendMessageTrigger,
     showAudioPicker = showAudioPicker,
+    onForgeNeuronClicked = { viewModel.forgeNeuron(selectedModel) },
   )
 }

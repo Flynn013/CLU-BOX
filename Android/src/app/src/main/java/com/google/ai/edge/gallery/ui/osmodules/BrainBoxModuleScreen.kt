@@ -43,11 +43,14 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import android.content.ContentValues
+import android.os.Build
+import android.provider.MediaStore
+import android.widget.Toast
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -75,6 +78,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun BrainBoxModuleScreen(dao: BrainBoxDao) {
   val scope = rememberCoroutineScope()
+  val context = LocalContext.current
   val neurons = remember { mutableStateListOf<NeuronEntity>() }
 
   var showAddDialog by remember { mutableStateOf(false) }
@@ -85,10 +89,6 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao) {
   var showImportDialog by remember { mutableStateOf(false) }
   var importJson by remember { mutableStateOf("") }
   var importError by remember { mutableStateOf("") }
-
-  // Export (download) state
-  var exportedJson by remember { mutableStateOf("") }
-  var showExportDialog by remember { mutableStateOf(false) }
 
   // Load all neurons on entry.
   LaunchedEffect(Unit) {
@@ -202,36 +202,6 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao) {
     )
   }
 
-  if (showExportDialog) {
-    AlertDialog(
-      onDismissRequest = { showExportDialog = false },
-      title = { Text("DOWNLOAD BRAIN", fontFamily = FontFamily.Monospace, color = neonGreen) },
-      text = {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-          Text("Copy the JSON snapshot below:", fontFamily = FontFamily.Monospace)
-          OutlinedTextField(
-            value = exportedJson,
-            onValueChange = {},
-            readOnly = true,
-            modifier = Modifier.fillMaxWidth().height(200.dp),
-            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-            colors = OutlinedTextFieldDefaults.colors(
-              focusedBorderColor = neonGreen,
-              unfocusedBorderColor = neonGreen,
-              focusedTextColor = neonGreen,
-              unfocusedTextColor = neonGreen,
-            ),
-          )
-        }
-      },
-      confirmButton = {
-        TextButton(onClick = { showExportDialog = false }) {
-          Text("CLOSE", fontFamily = FontFamily.Monospace)
-        }
-      },
-    )
-  }
-
   // ---- Main UI ----
 
   Scaffold(
@@ -267,8 +237,29 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao) {
         OutlinedButton(
           onClick = {
             scope.launch {
-              exportedJson = exportBrain(dao)
-              showExportDialog = true
+              val json = exportBrain(dao)
+              val timestamp = System.currentTimeMillis()
+              val fileName = "brainbox_$timestamp.json"
+              val resolver = context.contentResolver
+              val values = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                put(MediaStore.Downloads.MIME_TYPE, "application/json")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                  put(MediaStore.Downloads.IS_PENDING, 1)
+                }
+              }
+              val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+              if (uri != null) {
+                resolver.openOutputStream(uri)?.use { it.write(json.toByteArray()) }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                  values.clear()
+                  values.put(MediaStore.Downloads.IS_PENDING, 0)
+                  resolver.update(uri, values, null, null)
+                }
+                Toast.makeText(context, "Saved to Downloads/$fileName", Toast.LENGTH_LONG).show()
+              } else {
+                Toast.makeText(context, "Export failed — storage unavailable", Toast.LENGTH_LONG).show()
+              }
             }
           },
           colors = ButtonDefaults.outlinedButtonColors(contentColor = neonGreen),

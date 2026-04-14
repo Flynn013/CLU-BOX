@@ -32,6 +32,7 @@ import com.google.ai.edge.gallery.data.DataStoreRepository
 import com.google.ai.edge.gallery.data.DefaultDataStoreRepository
 import com.google.ai.edge.gallery.data.DefaultDownloadRepository
 import com.google.ai.edge.gallery.data.DownloadRepository
+import com.google.ai.edge.gallery.data.brainbox.BrainBoxDao
 import com.google.ai.edge.gallery.data.brainbox.ChatHistoryDao
 import com.google.ai.edge.gallery.data.brainbox.GraphDatabase
 import com.google.ai.edge.gallery.proto.BenchmarkResults
@@ -198,5 +199,12 @@ internal object AppModule {
   @Singleton
   fun provideChatHistoryDao(db: GraphDatabase): ChatHistoryDao {
     return db.chatHistoryDao()
+  }
+
+  // Provides BrainBoxDao via GraphDatabase — used for RAG retrieval and Forge
+  @Provides
+  @Singleton
+  fun provideBrainBoxDao(db: GraphDatabase): BrainBoxDao {
+    return db.brainBoxDao()
   }
 }
