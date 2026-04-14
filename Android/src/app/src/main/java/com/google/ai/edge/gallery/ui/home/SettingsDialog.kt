@@ -120,7 +120,7 @@ fun SettingsDialog(
   var textHex by remember { mutableStateOf(colorToHex(ThemeSettings.customTextColor.value)) }
   var accentHex by remember { mutableStateOf(colorToHex(ThemeSettings.customAccentColor.value)) }
 
-
+  Dialog(onDismissRequest = onDismissed) {
     val focusManager = LocalFocusManager.current
     Card(
       modifier =
