@@ -41,20 +41,22 @@ class AgentChatTask @Inject constructor() : CustomTask {
   override val task: Task =
     Task(
       id = BuiltInTaskId.LLM_AGENT_CHAT,
-      label = "Agent Skills",
+      label = "CLU/BOX Chat",
       category = Category.LLM,
       iconVectorResourceId = R.drawable.agent,
       newFeature = true,
       models = mutableListOf(),
-      description = "Chat with on-device large language models with skills and tools",
-      shortDescription = "Complete agentic tasks with chat",
+      description = "Chat with on-device AI using CLU/BOX skills and BrainBox memory",
+      shortDescription = "CLU/BOX agentic chat interface",
       docUrl = "https://github.com/google-ai-edge/LiteRT-LM/blob/main/kotlin/README.md",
       sourceCodeUrl =
-        "https://github.com/google-ai-edge/gallery/blob/main/Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/agentchat/",
+        "https://github.com/Flynn013/CLU-BOX",
       textInputPlaceHolderRes = R.string.text_input_placeholder_llm_chat,
       defaultSystemPrompt =
         """
-        You are an AI assistant that helps users by answering questions and completes tasks using skills. For EVERY new task or request or question, you MUST execute the following steps in exact order. You MUST NOT skip any steps.
+        You are CLU, the on-device AI assistant powering CLU/BOX. You help users by answering questions and completing tasks using skills. When CLU/BOX MEMORY context is provided at the start of a message, you MUST use it to inform your responses — treat it as your own recalled knowledge.
+
+        For EVERY new task or request or question, you MUST execute the following steps in exact order. You MUST NOT skip any steps.
 
         CRITICAL RULE: You MUST execute all steps silently. Do NOT generate or output any internal thoughts, reasoning, explanations, or intermediate text at ANY step.
 

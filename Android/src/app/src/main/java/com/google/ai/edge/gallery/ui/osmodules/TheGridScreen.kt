@@ -42,19 +42,41 @@ import androidx.compose.ui.unit.dp
 import com.google.ai.edge.gallery.ui.theme.absoluteBlack
 import com.google.ai.edge.gallery.ui.theme.neonGreen
 
-private data class AiGame(val name: String, val description: String)
+private data class AiGame(val name: String, val description: String, val systemPrompt: String)
 
 private val AI_GAMES = listOf(
-  AiGame("Neural Chess", "Strategic board game with adaptive LLM opponent."),
-  AiGame("Code Breaker", "Guess the 4-digit code — LLM defends and hints."),
-  AiGame("Riddle Forge", "LLM generates escalating logic riddles to solve."),
-  AiGame("Story Duel", "Turn-based collaborative storytelling — then vote."),
-  AiGame("Cipher Run", "Encrypt/decrypt messages against the clock."),
+  AiGame(
+    "Neural Chess",
+    "Strategic board game with adaptive LLM opponent.",
+    "You are a chess engine named CLU. You play chess against the user. Track the board state mentally. Accept moves in algebraic notation (e.g. e4, Nf3). Respond with your counter-move and a brief strategic comment. If a move is illegal, say so. Start by asking the user to pick white or black.",
+  ),
+  AiGame(
+    "Code Breaker",
+    "Guess the 4-digit code — LLM defends and hints.",
+    "You are the Code Master in a Mastermind-style game. You have secretly chosen a 4-digit code (digits 1-9, no repeats). The user guesses and you respond with how many digits are correct and in the right position (bulls) and how many are correct but in the wrong position (cows). Never reveal the code until the user wins or gives up.",
+  ),
+  AiGame(
+    "Riddle Forge",
+    "LLM generates escalating logic riddles to solve.",
+    "You are a Riddle Master named CLU. Generate one logic riddle at a time, starting easy and getting progressively harder. Wait for the user's answer before revealing the solution. Keep score of correct answers. After each answer, generate the next riddle at a higher difficulty.",
+  ),
+  AiGame(
+    "Story Duel",
+    "Turn-based collaborative storytelling — then vote.",
+    "You are a collaborative storytelling partner. Take turns writing one paragraph at a time with the user to build a story. After 5 rounds each, summarize the story and ask the user to rate the collaboration. Start by proposing a genre and opening line.",
+  ),
+  AiGame(
+    "Cipher Run",
+    "Encrypt/decrypt messages against the clock.",
+    "You are a cryptography trainer named CLU. Present cipher challenges to the user using substitution ciphers, Caesar shifts, and simple transposition ciphers. Start easy and escalate. Provide hints if asked. Reveal the answer if the user is stuck after 3 attempts.",
+  ),
 )
 
 /** THE_GRID module — AI simulation game list with Initialize Match actions. */
 @Composable
-fun TheGridScreen() {
+fun TheGridScreen(
+  onInitializeMatch: (systemPrompt: String) -> Unit = {},
+) {
   Column(
     modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
   ) {
@@ -74,14 +96,14 @@ fun TheGridScreen() {
     Spacer(Modifier.height(16.dp))
     LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
       items(AI_GAMES) { game ->
-        GameCard(game)
+        GameCard(game, onInitializeMatch = { onInitializeMatch(game.systemPrompt) })
       }
     }
   }
 }
 
 @Composable
-private fun GameCard(game: AiGame) {
+private fun GameCard(game: AiGame, onInitializeMatch: () -> Unit) {
   Card(
     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
     modifier = Modifier.fillMaxWidth().border(1.dp, neonGreen, RoundedCornerShape(4.dp)),
@@ -106,7 +128,7 @@ private fun GameCard(game: AiGame) {
         )
       }
       Button(
-        onClick = { /* TODO: launch game session */ },
+        onClick = onInitializeMatch,
         colors = ButtonDefaults.buttonColors(containerColor = neonGreen, contentColor = absoluteBlack),
         modifier = Modifier.padding(start = 8.dp),
       ) {

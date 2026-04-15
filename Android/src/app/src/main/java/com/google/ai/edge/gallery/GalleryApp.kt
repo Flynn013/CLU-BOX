@@ -17,6 +17,7 @@
 package com.google.ai.edge.gallery
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,23 +28,23 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Hub
-import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.ShoppingCart
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
@@ -58,11 +59,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.navigation.compose.rememberNavController
 import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.brainbox.GraphDatabase
@@ -94,7 +98,6 @@ private enum class OsModule(val label: String, val icon: ImageVector) {
  */
 private val OsModule.isFullScreenModule: Boolean
   get() = this == OsModule.CHAT_BOX ||
-    this == OsModule.SKILL_BOX ||
     this == OsModule.VENDING_MACHINE
 
 /** Top level composable representing the main CLU/BOX operating system interface. */
@@ -106,11 +109,12 @@ fun GalleryApp(
   val drawerState = rememberDrawerState(DrawerValue.Closed)
   val scope = rememberCoroutineScope()
   var activeModule by remember { mutableStateOf(OsModule.CHAT_BOX) }
+  // Grid prompt override: when a Grid game is initialized, this holds the injected system prompt.
+  var gridPromptOverride by remember { mutableStateOf<String?>(null) }
   val db = remember { GraphDatabase.getInstance(context) }
 
   // Separate nav controllers so each module retains its own back stack.
   val chatNavController = rememberNavController()
-  val skillNavController = rememberNavController()
 
   ModalNavigationDrawer(
     drawerState = drawerState,
@@ -170,109 +174,110 @@ fun GalleryApp(
       }
     },
   ) {
-    // Full-screen modules (CHAT_BOX, SKILL_BOX, VENDING_MACHINE) manage their own Scaffold and
-    // window insets. Wrapping them in an additional Scaffold produces a double top-bar and a large
-    // blank gap. Render them directly so only their own top bar appears on screen.
-    //
-    // A CLU/BOX hamburger button is overlaid on each full-screen module so the drawer remains
-    // accessible without reintroducing the outer Scaffold:
-    //   - CHAT_BOX / SKILL_BOX: overlay at TopEnd (ModelManager has no right-side action there)
-    //   - VENDING_MACHINE: passed via the openDrawer parameter into GlobalModelManager's
-    //     navigationIcon slot (which is otherwise empty)
-    //
-    // Shell modules (BRAIN_BOX, THE_GRID) are simple content screens that rely on the CLU/BOX
-    // Scaffold to supply the top bar and correct inset padding.
-    if (activeModule.isFullScreenModule) {
-      when (activeModule) {
-        // CHAT_BOX: starts directly at the Agent Chat (Agent Skills) model picker —
-        // the primary AI interaction window for CLU/BOX.
-        OsModule.CHAT_BOX -> Box(modifier = Modifier.fillMaxSize()) {
-          GalleryNavHost(
+    // ============================================================
+    // Content area — wrapped in a Box so we can overlay the
+    // right-edge tab button that opens the navigation drawer.
+    // ============================================================
+    Box(modifier = Modifier.fillMaxSize()) {
+      // Full-screen modules manage their own Scaffold / window insets.
+      // Shell modules (BRAIN_BOX, THE_GRID, SKILL_BOX) use the CLU/BOX Scaffold.
+      if (activeModule.isFullScreenModule) {
+        when (activeModule) {
+          // CHAT_BOX: the Agent Skills chat — primary AI interaction window.
+          OsModule.CHAT_BOX -> GalleryNavHost(
             navController = chatNavController,
             modelManagerViewModel = modelManagerViewModel,
             initialTaskId = BuiltInTaskId.LLM_AGENT_CHAT,
           )
-          IconButton(
-            onClick = { scope.launch { drawerState.open() } },
-            modifier = Modifier
-              .align(Alignment.TopEnd)
-              .windowInsetsPadding(WindowInsets.statusBars),
-          ) {
-            Icon(Icons.Outlined.Menu, contentDescription = "Open CLU/BOX menu", tint = neonGreen)
-          }
-        }
 
-        // SKILL_BOX: starts directly at the Agent Chat model picker, which
-        // hosts the full skill import / edit / test workflow.
-        OsModule.SKILL_BOX -> Box(modifier = Modifier.fillMaxSize()) {
-          GalleryNavHost(
-            navController = skillNavController,
-            modelManagerViewModel = modelManagerViewModel,
-            initialTaskId = BuiltInTaskId.LLM_AGENT_CHAT,
+          // VENDING_MACHINE / SYS_SETTINGS: model management hub.
+          OsModule.VENDING_MACHINE -> GlobalModelManager(
+            viewModel = modelManagerViewModel,
+            navigateUp = { activeModule = OsModule.CHAT_BOX },
+            onModelSelected = { task, model ->
+              chatNavController.navigate("$GALLERY_ROUTE_MODEL/${task.id}/${model.name}")
+              activeModule = OsModule.CHAT_BOX
+            },
+            onBenchmarkClicked = { model ->
+              chatNavController.navigate("$GALLERY_ROUTE_BENCHMARK/${model.name}")
+              activeModule = OsModule.CHAT_BOX
+            },
           )
-          IconButton(
-            onClick = { scope.launch { drawerState.open() } },
-            modifier = Modifier
-              .align(Alignment.TopEnd)
-              .windowInsetsPadding(WindowInsets.statusBars),
-          ) {
-            Icon(Icons.Outlined.Menu, contentDescription = "Open CLU/BOX menu", tint = neonGreen)
-          }
+
+          else -> {} // unreachable
         }
-
-        // VENDING_MACHINE / SYS_SETTINGS: the real model-management hub — download,
-        // delete, and configure any model.  Selecting a model switches to CHAT_BOX.
-        // openDrawer is passed in so GlobalModelManager can show the hamburger in its
-        // otherwise-empty navigationIcon slot.
-        OsModule.VENDING_MACHINE -> GlobalModelManager(
-          viewModel = modelManagerViewModel,
-          navigateUp = { activeModule = OsModule.CHAT_BOX },
-          onModelSelected = { task, model ->
-            chatNavController.navigate("$GALLERY_ROUTE_MODEL/${task.id}/${model.name}")
-            activeModule = OsModule.CHAT_BOX
-          },
-          onBenchmarkClicked = { model ->
-            chatNavController.navigate("$GALLERY_ROUTE_BENCHMARK/${model.name}")
-            activeModule = OsModule.CHAT_BOX
-          },
-          openDrawer = { scope.launch { drawerState.open() } },
-        )
-
-        else -> {} // unreachable
-      }
-    } else {
-      // Shell modules: the CLU/BOX Scaffold supplies the top bar and status-bar insets.
-      Scaffold(
-        containerColor = absoluteBlack,
-        topBar = {
-          Row(
-            modifier = Modifier
-              .fillMaxWidth()
-              .background(absoluteBlack)
-              .windowInsetsPadding(WindowInsets.statusBars)
-              .padding(horizontal = 4.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-          ) {
-            IconButton(onClick = { scope.launch { drawerState.open() } }) {
-              Icon(Icons.Outlined.Menu, contentDescription = "Open menu", tint = neonGreen)
+      } else {
+        // Shell modules: the CLU/BOX Scaffold supplies the top bar and status-bar insets.
+        Scaffold(
+          containerColor = absoluteBlack,
+          topBar = {
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .background(absoluteBlack)
+                .windowInsetsPadding(WindowInsets.statusBars)
+                .padding(horizontal = 4.dp, vertical = 4.dp),
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              Text(
+                activeModule.label,
+                style = MaterialTheme.typography.titleMedium,
+                color = neonGreen,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.padding(start = 12.dp),
+              )
             }
-            Text(
-              activeModule.label,
-              style = MaterialTheme.typography.titleMedium,
-              color = neonGreen,
-              fontFamily = FontFamily.Monospace,
-              modifier = Modifier.padding(start = 4.dp),
-            )
-          }
-        },
-      ) { innerPadding ->
-        Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
-          when (activeModule) {
-            OsModule.BRAIN_BOX -> BrainBoxModuleScreen(dao = db.brainBoxDao())
-            OsModule.THE_GRID -> TheGridScreen()
-            else -> {} // SYS_SETTINGS redirected above; other full-screen handled in outer branch
+          },
+        ) { innerPadding ->
+          Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+            when (activeModule) {
+              OsModule.BRAIN_BOX -> BrainBoxModuleScreen(dao = db.brainBoxDao())
+              OsModule.THE_GRID -> TheGridScreen(
+                onInitializeMatch = { systemPrompt ->
+                  gridPromptOverride = systemPrompt
+                  activeModule = OsModule.CHAT_BOX
+                },
+              )
+              OsModule.SKILL_BOX -> {
+                // SKILL_BOX: Dedicated skills configuration screen. Routes to the
+                // Agent Chat model picker which hosts the skill import / edit / test workflow.
+                GalleryNavHost(
+                  navController = rememberNavController(),
+                  modelManagerViewModel = modelManagerViewModel,
+                  initialTaskId = BuiltInTaskId.LLM_AGENT_CHAT,
+                )
+              }
+              else -> {} // SYS_SETTINGS redirected above
+            }
           }
         }
+      }
+
+      // ── Right-edge tab button ──────────────────────────────────
+      // A tall slender tab anchored to the vertical middle of the
+      // right edge.  Tapping it opens the ModalNavigationDrawer.
+      val tabShape = RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp)
+      Box(
+        modifier = Modifier
+          .align(Alignment.CenterEnd)
+          .offset(x = 0.dp)
+          .width(28.dp)
+          .height(120.dp)
+          .clip(tabShape)
+          .background(absoluteBlack.copy(alpha = 0.85f))
+          .border(1.dp, neonGreen.copy(alpha = 0.6f), tabShape)
+          .clickable { scope.launch { drawerState.open() } },
+        contentAlignment = Alignment.Center,
+      ) {
+        // Vertical "CLU" text
+        Text(
+          text = "C\nL\nU",
+          color = neonGreen,
+          fontFamily = FontFamily.Monospace,
+          fontSize = 12.sp,
+          lineHeight = 14.sp,
+          textAlign = TextAlign.Center,
+        )
       }
     }
   }

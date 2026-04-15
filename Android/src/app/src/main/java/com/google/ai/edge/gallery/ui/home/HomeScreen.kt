@@ -496,14 +496,11 @@ private fun AppTitle(enableAnimation: Boolean) {
   val fontSize = with(LocalDensity.current) { (screenWidthInDp.toPx() * 0.12f).toSp() }
   val titleStyle = homePageTitleStyle.copy(fontSize = fontSize, lineHeight = fontSize)
 
-  // First line text "Google AI" and its animation.
+  // First line text "CLU" and its animation.
   //
   // The animation starts with the first line of text swiping in from left to right, progressively
-  // revealing itself in the title color (blue). Then, after a brief delay, the exact same text, but
-  // in the onSurface color (which is black in light mode), begins its own left-to-right swiping
-  // animation. This second animation is positioned directly on top of the first, appearing just as
-  // the initial reveal is finishing or has just completed, creating a layered and dynamic visual
-  // effect.
+  // revealing itself in the title color. Then, after a brief delay, the exact same text, but
+  // in the onSurface color, begins its own left-to-right swiping animation.
   Box(modifier = Modifier.clearAndSetSemantics {}) {
     var delay = ANIMATION_INIT_DELAY
     if (enableAnimation) {
@@ -524,7 +521,7 @@ private fun AppTitle(enableAnimation: Boolean) {
       animationDurationMs = if (enableAnimation) TITLE_FIRST_LINE_ANIMATION_DURATION else 0,
     )
   }
-  // Second line text "Edge Gallery" and its animation.
+  // Second line text "BOX" and its animation.
   //
   // The initial animation is the same as the first line text. Right before it is done, the final
   // text with a gradient is revealed.
@@ -565,11 +562,10 @@ private fun AppTitle(enableAnimation: Boolean) {
 
 @Composable
 fun AppTitleGm4(enableAnimation: Boolean) {
-  val text1 = "Google"
-  val text2 = "AI Edge Gallery"
+  val text1 = "CLU"
+  val text2 = "/BOX"
   val annotatedText = buildAnnotatedString {
     withStyle(style = SpanStyle(color = MaterialTheme.colorScheme.onSurface)) { append(text1) }
-    append(" ")
     withStyle(style = SpanStyle(color = MaterialTheme.colorScheme.primary)) { append(text2) }
   }
 
