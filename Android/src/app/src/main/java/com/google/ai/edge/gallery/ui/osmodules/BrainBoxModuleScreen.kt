@@ -103,6 +103,7 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao) {
     var label by remember(existing) { mutableStateOf(existing?.label ?: "") }
     var type by remember(existing) { mutableStateOf(existing?.type ?: "") }
     var content by remember(existing) { mutableStateOf(existing?.content ?: "") }
+    var synapses by remember(existing) { mutableStateOf(existing?.synapses ?: "") }
     AlertDialog(
       onDismissRequest = { showAddDialog = false; editTarget = null },
       title = {
@@ -115,8 +116,9 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao) {
       text = {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
           NeonTextField(value = label, onValueChange = { label = it }, label = "Label")
-          NeonTextField(value = type, onValueChange = { type = it }, label = "Type")
-          NeonTextField(value = content, onValueChange = { content = it }, label = "Content", singleLine = false)
+          NeonTextField(value = type, onValueChange = { type = it }, label = "Type (Concept/Code/Session_Log/Lore)")
+          NeonTextField(value = content, onValueChange = { content = it }, label = "Content (markdown)", singleLine = false)
+          NeonTextField(value = synapses, onValueChange = { synapses = it }, label = "Synapses ([[Wiki-Links]])", singleLine = false)
         }
       },
       confirmButton = {
@@ -127,6 +129,7 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao) {
               label = label.trim(),
               type = type.trim(),
               content = content.trim(),
+              synapses = synapses.trim(),
             )
             dao.insertNeuron(neuron)
             neurons.clear()
@@ -309,6 +312,9 @@ private fun NeuronCard(neuron: NeuronEntity, onEdit: () -> Unit, onDelete: () ->
         Text(neuron.label, color = neonGreen, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.titleSmall)
         Text("[${neuron.type}]", color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelSmall)
         Text(neuron.content, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, maxLines = 3)
+        if (neuron.synapses.isNotBlank()) {
+          Text("⚡ ${neuron.synapses}", color = neonGreen.copy(alpha = 0.7f), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+        }
       }
       Row {
         IconButton(onClick = onEdit) { Icon(Icons.Outlined.Edit, contentDescription = "Edit", tint = neonGreen) }

@@ -20,6 +20,8 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 /**
  * The Room database for the CLU/BOX BrainBox GraphRAG memory system.
@@ -28,7 +30,7 @@ import androidx.room.RoomDatabase
  */
 @Database(
   entities = [NeuronEntity::class, ChatMessageEntity::class],
-  version = 2,
+  version = 3,
   exportSchema = false,
 )
 abstract class GraphDatabase : RoomDatabase() {
@@ -40,6 +42,14 @@ abstract class GraphDatabase : RoomDatabase() {
   companion object {
     @Volatile private var INSTANCE: GraphDatabase? = null
 
+    /** Migration from v2 → v3: add the synapses column to the neurons table. */
+    private val MIGRATION_2_3 =
+      object : Migration(2, 3) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+          db.execSQL("ALTER TABLE neurons ADD COLUMN synapses TEXT NOT NULL DEFAULT ''")
+        }
+      }
+
     fun getInstance(context: Context): GraphDatabase {
       return INSTANCE
         ?: synchronized(this) {
@@ -48,6 +58,7 @@ abstract class GraphDatabase : RoomDatabase() {
               GraphDatabase::class.java,
               "brainbox.db",
             )
+            .addMigrations(MIGRATION_2_3)
             .fallbackToDestructiveMigration() // TODO: replace with proper migrations before release
             .build()
             .also { INSTANCE = it }

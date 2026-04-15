@@ -24,8 +24,10 @@ import androidx.room.PrimaryKey
  *
  * @param id       Unique identifier for this node (e.g. a UUID).
  * @param label    Human-readable name for the node.
- * @param type     Category or type of the node (e.g. "concept", "entity", "fact").
- * @param content  The raw text content stored at this node.
+ * @param type     Category or type of the node (e.g. "Concept", "Code", "Session_Log", "Lore").
+ * @param content  The raw text content stored at this node (markdown / code).
+ * @param synapses Comma-separated [[Wiki-Links]] referencing other Neuron labels.
+ *                 Example: "[[M-CLU_Architecture_v1]],[[Icarus_Base_Design]]"
  */
 @Entity(tableName = "neurons")
 data class NeuronEntity(
@@ -33,4 +35,5 @@ data class NeuronEntity(
   val label: String,
   val type: String,
   val content: String,
+  val synapses: String = "",
 )

@@ -44,11 +44,11 @@ interface BrainBoxDao {
   suspend fun deleteAllNeurons()
 
   /**
-   * Full-text keyword search across label, type, and content (case-insensitive).
+   * Full-text keyword search across label, type, content, and synapses (case-insensitive).
    * Used by the BrainBox retrieval loop to inject relevant context before inference.
    */
   @Query(
-    "SELECT * FROM neurons WHERE lower(label) LIKE '%' || lower(:query) || '%' OR lower(type) LIKE '%' || lower(:query) || '%' OR lower(content) LIKE '%' || lower(:query) || '%'"
+    "SELECT * FROM neurons WHERE lower(label) LIKE '%' || lower(:query) || '%' OR lower(type) LIKE '%' || lower(:query) || '%' OR lower(content) LIKE '%' || lower(:query) || '%' OR lower(synapses) LIKE '%' || lower(:query) || '%'"
   )
   suspend fun searchNeurons(query: String): List<NeuronEntity>
 

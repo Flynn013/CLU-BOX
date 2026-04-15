@@ -105,10 +105,16 @@ open class LlmChatViewModelBase(
   // BrainBox — Retrieval-Augmented Generation (RAG)
   // =========================================================================
 
+  /** Regex that matches [[Wiki-Link]] references embedded in neuron content. */
+  private val wikiLinkPattern = Regex("""\[\[(.+?)]]""")
+
   /**
-   * Searches the BrainBox for neurons whose label, type, or content contain any keyword from
-   * [input] (words ≥ 4 chars, up to 3 keywords).  Returns a formatted context block ready to be
-   * prepended to the user's message, or null if nothing relevant was found.
+   * Searches the BrainBox for neurons whose label, type, content, or synapses contain any
+   * keyword from [input] (words ≥ 4 chars, up to 3 keywords).  Returns a formatted context
+   * block ready to be prepended to the user's message, or null if nothing relevant was found.
+   *
+   * When a matched neuron has [[Wiki-Link]] synapses, a second pass resolves those links
+   * and appends the connected neurons — giving the LLM traversal across the knowledge graph.
    */
   suspend fun retrieveBrainContext(input: String): String? {
     val dao = brainBoxDao ?: return null
@@ -130,10 +136,31 @@ open class LlmChatViewModelBase(
     }
     if (hitCount.isEmpty()) return null
 
-    return hitCount.entries
-      .sortedByDescending { it.value } // most-matched neurons first
-      .take(3) // cap context injection at 3 neurons to avoid blowing the context window
-      .joinToString("\n---\n") { (n, _) -> "## ${n.label} [${n.type}]\n${n.content}" }
+    val topNeurons = hitCount.entries
+      .sortedByDescending { it.value }
+      .take(3) // cap primary context at 3 neurons
+      .map { it.key }
+
+    // Resolve synapse links: pull any neurons referenced via [[Wiki-Links]].
+    val synapseLabels = topNeurons
+      .flatMap { wikiLinkPattern.findAll(it.synapses).map { m -> m.groupValues[1] } }
+      .distinct()
+    val linkedNeurons =
+      if (synapseLabels.isNotEmpty()) {
+        synapseLabels
+          .flatMap { dao.searchNeurons(it) }
+          .filter { it !in topNeurons }
+          .distinct()
+          .take(2) // limit synapse-traversal depth to avoid context bloat
+      } else {
+        emptyList()
+      }
+
+    val allNeurons = topNeurons + linkedNeurons
+    return allNeurons.joinToString("\n---\n") { n ->
+      val synTag = if (n.synapses.isNotBlank()) "\nSynapses: ${n.synapses}" else ""
+      "## ${n.label} [${n.type}]$synTag\n${n.content}"
+    }
   }
 
   /**
@@ -141,7 +168,10 @@ open class LlmChatViewModelBase(
    *
    * Builds a plain-text transcript of all [ChatMessageText] turns for [model], saves it as a
    * Session_Log neuron, and appends a confirmation message to the chat so the user can see
-   * what was locked.  No-op if [brainBoxDao] is unavailable or the chat is empty.
+   * what was locked.  Any [[Wiki-Links]] found inside the transcript are automatically
+   * extracted and stored in the synapses field.
+   *
+   * No-op if [brainBoxDao] is unavailable or the chat is empty.
    */
   fun forgeNeuron(model: Model) {
     val dao = brainBoxDao ?: return
@@ -156,6 +186,13 @@ open class LlmChatViewModelBase(
         }
     if (transcript.isBlank()) return
 
+    // Auto-extract any [[Wiki-Links]] from the transcript.
+    val extractedSynapses =
+      wikiLinkPattern.findAll(transcript)
+        .map { it.groupValues[1] }
+        .distinct()
+        .joinToString(",") { "[[${it}]]" }
+
     viewModelScope.launch(Dispatchers.IO) {
       val timestamp =
         java.time.LocalDateTime.now()
@@ -166,6 +203,7 @@ open class LlmChatViewModelBase(
           label = "Session_$timestamp",
           type = "Session_Log",
           content = transcript,
+          synapses = extractedSynapses,
         )
       dao.insertNeuron(neuron)
       Log.d(TAG, "Forged neuron: ${neuron.label} (${transcript.length} chars)")
