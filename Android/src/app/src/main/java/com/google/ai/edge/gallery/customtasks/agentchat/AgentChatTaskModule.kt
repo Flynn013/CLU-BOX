@@ -48,7 +48,7 @@ class AgentChatTask @Inject constructor() : CustomTask {
       models = mutableListOf(),
       description = "Chat with on-device AI using CLU/BOX skills and BrainBox memory",
       shortDescription = "CLU/BOX agentic chat interface",
-      docUrl = "https://github.com/google-ai-edge/LiteRT-LM/blob/main/kotlin/README.md",
+      docUrl = "https://github.com/Flynn013/CLU-BOX",
       sourceCodeUrl =
         "https://github.com/Flynn013/CLU-BOX",
       textInputPlaceHolderRes = R.string.text_input_placeholder_llm_chat,

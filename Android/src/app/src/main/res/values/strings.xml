@@ -246,7 +246,7 @@
   <string name="add_skill_manual_input_sheet_title" translatable="false">Create a skill</string>
   <string name="agent_skills" translatable="false">Agent Skills</string>
   <string name="agent_skills_description" translatable="false">Use specialized, high-order reasoning by loading different skills or creating your own.\n\nTry tapping a sample prompt below to see Agent Skills in action!</string>
-  <string name="disclaimer_dialog_content" translatable="false">Third-party skills are community-provided and not authored or endorsed by CLU/BOX. Please exercise caution before providing sensitive information, such as personal identification, tokens, or API keys.\n\nAny use of an Agent Skill is subject to the applicable terms for that Skill.</string>
+  <string name="disclaimer_dialog_content" translatable="false">Third-party skills are community-provided and not authored or endorsed by the developers of CLU/BOX. Please exercise caution before providing sensitive information, such as personal identification, tokens, or API keys.\n\nAny use of an Agent Skill is subject to the applicable terms for that Skill.</string>
   <string name="disclaimer_dialog_title" translatable="false">Add third-party skill</string>
   <string name="disclaimer_dialog_agree" translatable="false">Agree</string>
   <string name="delete_script_dialog_title" translatable="false">Delete script</string>
