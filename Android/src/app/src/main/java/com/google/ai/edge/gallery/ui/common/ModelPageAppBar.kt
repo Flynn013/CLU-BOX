@@ -27,6 +27,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.MapsUgc
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.CenterAlignedTopAppBar
@@ -84,6 +85,7 @@ fun ModelPageAppBar(
   curSystemPrompt: String = "",
   onSystemPromptChanged: (String) -> Unit = {},
   onForgeNeuronClicked: (() -> Unit)? = null,
+  onChatHistoryClicked: (() -> Unit)? = null,
 ) {
   var showConfigDialog by remember { mutableStateOf(false) }
   val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
@@ -147,6 +149,18 @@ fun ModelPageAppBar(
       val downloadSucceeded = curDownloadStatus?.status == ModelDownloadStatusType.SUCCEEDED
       val showConfigButton = model.configs.isNotEmpty() && downloadSucceeded
       val showResetSessionButton = canShowResetSessionButton && downloadSucceeded
+
+      // 📜 Chat History — open saved sessions list
+      if (onChatHistoryClicked != null && downloadSucceeded) {
+        IconButton(onClick = onChatHistoryClicked) {
+          Icon(
+            imageVector = Icons.Rounded.History,
+            contentDescription = "Chat history",
+            tint = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.size(20.dp),
+          )
+        }
+      }
 
       // ⚡ Forge Neuron — save the current chat session to BrainBox
       if (onForgeNeuronClicked != null && isModelInitialized && !inProgress) {

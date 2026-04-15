@@ -42,4 +42,18 @@ interface ChatHistoryDao {
   /** Deletes every persisted chat message across all tasks and models. */
   @Query("DELETE FROM chat_history")
   suspend fun deleteAllMessages()
+
+  /**
+   * Returns the distinct (taskId, modelName) sessions with message count and latest timestamp.
+   * Used by the chat history UI to show a list of previous conversations.
+   */
+  @Query(
+    """
+    SELECT taskId, modelName, COUNT(*) as messageCount, MAX(timestampMs) as lastTimestampMs
+    FROM chat_history
+    GROUP BY taskId, modelName
+    ORDER BY lastTimestampMs DESC
+    """
+  )
+  suspend fun getSessions(): List<ChatSessionSummary>
 }

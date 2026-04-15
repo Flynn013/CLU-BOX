@@ -51,6 +51,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -86,6 +87,7 @@ import com.google.ai.edge.gallery.ui.common.chat.ChatMessageCollapsableProgressP
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageImage
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageInfo
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageText
+import com.google.ai.edge.gallery.ui.common.chat.ChatHistorySheet
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageType
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageWebView
 import com.google.ai.edge.gallery.ui.common.chat.ChatSide
@@ -136,6 +138,9 @@ fun AgentChatScreen(
   var sendMessageTrigger by remember { mutableStateOf<SendMessageTrigger?>(null) }
   var showAlertForDisabledSkill by remember { mutableStateOf(false) }
   var disabledSkillName by remember { mutableStateOf("") }
+  var showChatHistorySheet by remember { mutableStateOf(false) }
+  var chatHistoryRefreshKey by remember { mutableStateOf(0) }
+  val chatHistoryDao = remember(context) { GraphDatabase.getInstance(context).chatHistoryDao() }
 
   LlmChatScreen(
     modelManagerViewModel = modelManagerViewModel,
@@ -435,6 +440,7 @@ fun AgentChatScreen(
       }
     },
     sendMessageTrigger = sendMessageTrigger,
+    onChatHistoryClicked = { showChatHistorySheet = true },
   )
 
   if (showAskInfoDialog && currentAskInfoAction != null) {
@@ -492,6 +498,30 @@ fun AgentChatScreen(
         }
       },
     )
+  }
+
+  if (showChatHistorySheet) {
+    // Use key() to force recomposition when sessions are deleted
+    key(chatHistoryRefreshKey) {
+      ChatHistorySheet(
+        chatHistoryDao = chatHistoryDao,
+        onDismiss = { showChatHistorySheet = false },
+        onSessionSelected = { _, modelName ->
+          // Select the model and close sheet — the existing LaunchedEffect in ChatViewWrapper
+          // will automatically load the history for the newly selected model.
+          val matchingModel = task.models.find { it.name == modelName }
+          if (matchingModel != null) {
+            modelManagerViewModel.selectModel(model = matchingModel)
+          }
+          showChatHistorySheet = false
+        },
+        onSessionDeleted = { sessionTaskId, modelName ->
+          viewModel.wipeGrid(sessionTaskId, task.models.find { it.name == modelName } ?: return@ChatHistorySheet)
+          // Bump refresh key to force LaunchedEffect in ChatHistorySheet to re-query
+          chatHistoryRefreshKey++
+        },
+      )
+    }
   }
 }
 

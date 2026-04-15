@@ -84,6 +84,7 @@ fun LlmChatScreen(
   sendMessageTrigger: SendMessageTrigger? = null,
   showImagePicker: Boolean = false,
   showAudioPicker: Boolean = false,
+  onChatHistoryClicked: (() -> Unit)? = null,
 ) {
   ChatViewWrapper(
     viewModel = viewModel,
@@ -104,6 +105,7 @@ fun LlmChatScreen(
     showImagePicker = showImagePicker,
     showAudioPicker = showAudioPicker,
     showWipeGridButton = true,
+    onChatHistoryClicked = onChatHistoryClicked,
   )
 }
 
@@ -202,6 +204,7 @@ fun ChatViewWrapper(
   showImagePicker: Boolean = false,
   showAudioPicker: Boolean = false,
   showWipeGridButton: Boolean = false,
+  onChatHistoryClicked: (() -> Unit)? = null,
 ) {
   val context = LocalContext.current
   val task = modelManagerViewModel.getTaskById(id = taskId)!!
@@ -359,5 +362,6 @@ fun ChatViewWrapper(
     sendMessageTrigger = sendMessageTrigger,
     showAudioPicker = showAudioPicker,
     onForgeNeuronClicked = { viewModel.forgeNeuron(selectedModel) },
+    onChatHistoryClicked = onChatHistoryClicked,
   )
 }
