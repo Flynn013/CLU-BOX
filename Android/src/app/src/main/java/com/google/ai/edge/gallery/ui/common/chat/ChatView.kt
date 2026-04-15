@@ -243,6 +243,7 @@ fun ChatView(
                   showImageViewer = true
                 },
                 onSkillClicked = onSkillClicked,
+                onForgeNeuronClicked = onForgeNeuronClicked,
                 modifier = Modifier.weight(1f),
                 showStopButtonInInputWhenInProgress = showStopButtonInInputWhenInProgress,
                 showImagePicker = showImagePicker,

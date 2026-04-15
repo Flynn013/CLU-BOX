@@ -91,8 +91,8 @@ private enum class OsModule(val label: String, val icon: ImageVector) {
   BRAIN_BOX("BRAIN_BOX", Icons.Outlined.Hub),
   THE_GRID("THE_GRID", Icons.Outlined.GridView),
   SKILL_BOX("SKILL_BOX", Icons.Outlined.Psychology),
-  VENDING_MACHINE("VENDING MACHINE", Icons.Outlined.ShoppingCart),
-  SYS_SETTINGS("SYS_SETTINGS", Icons.Outlined.Settings),
+  VENDING_MACHINE("MODELS", Icons.Outlined.ShoppingCart),
+  SYS_SETTINGS("SETTINGS", Icons.Outlined.Settings),
 }
 
 /**
@@ -101,7 +101,8 @@ private enum class OsModule(val label: String, val icon: ImageVector) {
  */
 private val OsModule.isFullScreenModule: Boolean
   get() = this == OsModule.CHAT_BOX ||
-    this == OsModule.VENDING_MACHINE
+    this == OsModule.VENDING_MACHINE ||
+    this == OsModule.SYS_SETTINGS
 
 /** Top level composable representing the main CLU/BOX operating system interface. */
 @Composable
@@ -159,17 +160,12 @@ fun GalleryApp(
           Spacer(Modifier.height(8.dp))
 
           // Module items.
-          // SYS_SETTINGS redirects to VENDING_MACHINE (the real model-management / config hub).
           OsModule.entries.forEach { module ->
             DrawerItem(
               module = module,
               selected = activeModule == module,
               onClick = {
-                activeModule = if (module == OsModule.SYS_SETTINGS) {
-                  OsModule.VENDING_MACHINE
-                } else {
-                  module
-                }
+                activeModule = module
                 scope.launch { drawerState.close() }
               },
             )
@@ -187,15 +183,29 @@ fun GalleryApp(
       // Shell modules (BRAIN_BOX, THE_GRID, SKILL_BOX) use the CLU/BOX Scaffold.
       if (activeModule.isFullScreenModule) {
         when (activeModule) {
-          // CHAT_BOX: the Agent Skills chat — primary AI interaction window.
+          // CHAT_BOX: the CLU/BOX Chat — primary AI interaction window.
           OsModule.CHAT_BOX -> GalleryNavHost(
             navController = chatNavController,
             modelManagerViewModel = modelManagerViewModel,
             initialTaskId = BuiltInTaskId.LLM_AGENT_CHAT,
           )
 
-          // VENDING_MACHINE / SYS_SETTINGS: model management hub.
+          // VENDING_MACHINE: model management hub (now "MODELS").
           OsModule.VENDING_MACHINE -> GlobalModelManager(
+            viewModel = modelManagerViewModel,
+            navigateUp = { activeModule = OsModule.CHAT_BOX },
+            onModelSelected = { task, model ->
+              chatNavController.navigate("$GALLERY_ROUTE_MODEL/${task.id}/${model.name}")
+              activeModule = OsModule.CHAT_BOX
+            },
+            onBenchmarkClicked = { model ->
+              chatNavController.navigate("$GALLERY_ROUTE_BENCHMARK/${model.name}")
+              activeModule = OsModule.CHAT_BOX
+            },
+          )
+
+          // SYS_SETTINGS: settings / model configuration hub.
+          OsModule.SYS_SETTINGS -> GlobalModelManager(
             viewModel = modelManagerViewModel,
             navigateUp = { activeModule = OsModule.CHAT_BOX },
             onModelSelected = { task, model ->
@@ -245,7 +255,7 @@ fun GalleryApp(
               OsModule.SKILL_BOX -> SkillBoxScreen(
                 skillManagerViewModel = skillManagerViewModel,
               )
-              else -> {} // SYS_SETTINGS redirected above
+              else -> {} // all shell and full-screen modules covered above
             }
           }
         }

@@ -69,6 +69,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.rounded.AudioFile
+import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.FlipCameraAndroid
 import androidx.compose.material.icons.rounded.History
@@ -166,6 +167,7 @@ fun MessageInputText(
   onSetAudioRecorderVisible: (visible: Boolean) -> Unit = {},
   onAmplitudeChanged: (Int) -> Unit,
   onSkillsClicked: () -> Unit = {},
+  onForgeNeuronClicked: (() -> Unit)? = null,
   onPickedImagesChanged: (List<Bitmap>) -> Unit = {},
   onPickedAudioClipsChanged: (List<AudioClip>) -> Unit = {},
   showPromptTemplatesInMenu: Boolean = false,
@@ -606,6 +608,22 @@ fun MessageInputText(
                       enabled = !inProgress && !isResettingSession && !modelInitializing,
                     ) {
                       Text(stringResource(R.string.skills))
+                    }
+                  }
+
+                  // ⚡ Forge Neuron — save current session to BrainBox.
+                  if (onForgeNeuronClicked != null) {
+                    OutlinedButton(
+                      onClick = onForgeNeuronClicked,
+                      enabled = !inProgress && !isResettingSession && !modelInitializing,
+                    ) {
+                      Icon(
+                        Icons.Rounded.Bolt,
+                        contentDescription = "Forge Neuron",
+                        modifier = Modifier.size(18.dp),
+                      )
+                      Spacer(modifier = Modifier.width(4.dp))
+                      Text("Forge")
                     }
                   }
                 }
