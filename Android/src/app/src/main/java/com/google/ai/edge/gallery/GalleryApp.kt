@@ -67,7 +67,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.navigation.compose.rememberNavController
+import com.google.ai.edge.gallery.customtasks.agentchat.SkillManagerViewModel
 import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.brainbox.GraphDatabase
 import com.google.ai.edge.gallery.ui.modelmanager.GlobalModelManager
@@ -76,6 +78,7 @@ import com.google.ai.edge.gallery.ui.navigation.GALLERY_ROUTE_BENCHMARK
 import com.google.ai.edge.gallery.ui.navigation.GALLERY_ROUTE_MODEL
 import com.google.ai.edge.gallery.ui.navigation.GalleryNavHost
 import com.google.ai.edge.gallery.ui.osmodules.BrainBoxModuleScreen
+import com.google.ai.edge.gallery.ui.osmodules.SkillBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.TheGridScreen
 import com.google.ai.edge.gallery.ui.theme.absoluteBlack
 import com.google.ai.edge.gallery.ui.theme.neonGreen
@@ -112,6 +115,7 @@ fun GalleryApp(
   // Grid prompt override: when a Grid game is initialized, this holds the injected system prompt.
   var gridPromptOverride by remember { mutableStateOf<String?>(null) }
   val db = remember { GraphDatabase.getInstance(context) }
+  val skillManagerViewModel: SkillManagerViewModel = hiltViewModel()
 
   // Separate nav controllers so each module retains its own back stack.
   val chatNavController = rememberNavController()
@@ -238,15 +242,9 @@ fun GalleryApp(
                   activeModule = OsModule.CHAT_BOX
                 },
               )
-              OsModule.SKILL_BOX -> {
-                // SKILL_BOX: Dedicated skills configuration screen. Routes to the
-                // Agent Chat model picker which hosts the skill import / edit / test workflow.
-                GalleryNavHost(
-                  navController = rememberNavController(),
-                  modelManagerViewModel = modelManagerViewModel,
-                  initialTaskId = BuiltInTaskId.LLM_AGENT_CHAT,
-                )
-              }
+              OsModule.SKILL_BOX -> SkillBoxScreen(
+                skillManagerViewModel = skillManagerViewModel,
+              )
               else -> {} // SYS_SETTINGS redirected above
             }
           }

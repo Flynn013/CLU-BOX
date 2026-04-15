@@ -67,7 +67,7 @@ val TRYOUT_CHIPS: List<SkillTryOutChip> =
     SkillTryOutChip(
       icon = Icons.Outlined.Map,
       label = "Interactive Map",
-      prompt = "Show me Googleplex on interactive map.",
+      prompt = "Show me San Francisco on interactive map.",
       skillName = "interactive-map",
     ),
     SkillTryOutChip(
@@ -110,7 +110,7 @@ val TRYOUT_CHIPS: List<SkillTryOutChip> =
     SkillTryOutChip(
       icon = Icons.Outlined.QrCode,
       label = "Generate QR code",
-      prompt = "Generate QR code for https://deepmind.google/models/gemma/",
+      prompt = "Generate QR code for https://github.com/Flynn013/CLU-BOX",
       skillName = "qr-code",
     ),
   )
@@ -650,6 +650,12 @@ constructor(
     viewModelScope.launch(Dispatchers.IO) {
       dataStoreRepository.setSkillSelected(skill.skill, selected)
     }
+  }
+
+  /** Toggle a skill's selected state by name. Used by SKILL_BOX module. */
+  fun toggleSkillSelected(skillName: String) {
+    val skill = _uiState.value.skills.find { it.skill.name == skillName } ?: return
+    setSkillSelected(skill, !skill.skill.selected)
   }
 
   fun setAllSkillsSelected(selected: Boolean) {

@@ -56,7 +56,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -371,21 +370,14 @@ fun AgentChatScreen(
                 style =
                   MaterialTheme.typography.headlineLarge.copy(
                     fontWeight = FontWeight.Medium,
-                    brush =
-                      Brush.linearGradient(colors = listOf(Color(0xFF85B1F8), Color(0xFF3174F1))),
+                    color = Color(0xFF00FF41),
                   ),
                 modifier = Modifier.padding(top = 12.dp, bottom = 16.dp),
               )
               Text(
                 buildAnnotatedString {
-                  append("Use specialized, high-order reasoning by loading different skills or ")
-                  append(
-                    buildTrackableUrlAnnotatedString(
-                      url = "https://github.com/Flynn013/CLU-BOX/tree/main/skills",
-                      linkText = "creating\u00A0your\u00A0own",
-                    )
-                  )
-                  append(".\n\nTry tapping a sample prompt below to see Agent Skills in action!")
+                  append("Your on-device AI assistant with skills, BrainBox memory, and offline reasoning.")
+                  append("\n\nTap a sample prompt below or start chatting!")
                 },
                 style =
                   MaterialTheme.typography.headlineSmall.copy(fontSize = 16.sp, lineHeight = 22.sp),
