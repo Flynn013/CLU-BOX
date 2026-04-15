@@ -52,6 +52,18 @@ import kotlinx.coroutines.withContext
 
 private const val TAG = "AGLlmChatViewModel"
 
+/** Maximum number of primary neurons injected as RAG context. */
+private const val MAX_PRIMARY_NEURONS = 3
+
+/** Maximum number of synapse-linked neurons fetched during graph traversal. */
+private const val MAX_LINKED_NEURONS = 2
+
+/** Minimum word length for keyword extraction from user input. */
+private const val MIN_KEYWORD_LENGTH = 4
+
+/** Maximum number of keywords extracted from user input for BrainBox search. */
+private const val MAX_SEARCH_KEYWORDS = 3
+
 @OptIn(ExperimentalApi::class)
 open class LlmChatViewModelBase(
   private val chatHistoryDao: ChatHistoryDao? = null,
@@ -122,9 +134,9 @@ open class LlmChatViewModelBase(
       input
         .split(Regex("\\s+"))
         .map { it.trim().lowercase() }
-        .filter { it.length >= 4 }
+        .filter { it.length >= MIN_KEYWORD_LENGTH }
         .distinct()
-        .take(3)
+        .take(MAX_SEARCH_KEYWORDS)
     if (keywords.isEmpty()) return null
 
     // Count how many keywords matched each neuron to rank by relevance.
@@ -138,7 +150,7 @@ open class LlmChatViewModelBase(
 
     val topNeurons = hitCount.entries
       .sortedByDescending { it.value }
-      .take(3) // cap primary context at 3 neurons
+      .take(MAX_PRIMARY_NEURONS)
       .map { it.key }
 
     // Resolve synapse links: pull any neurons referenced via [[Wiki-Links]].
@@ -151,7 +163,7 @@ open class LlmChatViewModelBase(
           .flatMap { dao.searchNeurons(it) }
           .filter { it !in topNeurons }
           .distinct()
-          .take(2) // limit synapse-traversal depth to avoid context bloat
+          .take(MAX_LINKED_NEURONS)
       } else {
         emptyList()
       }
