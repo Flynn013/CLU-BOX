@@ -54,6 +54,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -141,6 +142,7 @@ fun AgentChatScreen(
   var showChatHistorySheet by remember { mutableStateOf(false) }
   var chatHistoryRefreshKey by remember { mutableStateOf(0) }
   val chatHistoryDao = remember(context) { GraphDatabase.getInstance(context).chatHistoryDao() }
+  val chatHistoryScope = rememberCoroutineScope()
 
   LlmChatScreen(
     modelManagerViewModel = modelManagerViewModel,
@@ -516,7 +518,17 @@ fun AgentChatScreen(
           showChatHistorySheet = false
         },
         onSessionDeleted = { sessionTaskId, modelName ->
-          viewModel.wipeGrid(sessionTaskId, task.models.find { it.name == modelName } ?: return@ChatHistorySheet)
+          // Delete from database directly. If the model matches the current session,
+          // also clear in-memory state.
+          val matchingModel = task.models.find { it.name == modelName }
+          if (matchingModel != null) {
+            viewModel.wipeGrid(sessionTaskId, matchingModel)
+          } else {
+            // Model may have been removed from the task — delete DB rows directly.
+            chatHistoryScope.launch {
+              chatHistoryDao.deleteMessages(taskId = sessionTaskId, modelName = modelName)
+            }
+          }
           // Bump refresh key to force LaunchedEffect in ChatHistorySheet to re-query
           chatHistoryRefreshKey++
         },

@@ -190,22 +190,8 @@ fun GalleryApp(
             initialTaskId = BuiltInTaskId.LLM_AGENT_CHAT,
           )
 
-          // VENDING_MACHINE: model management hub (now "MODELS").
-          OsModule.VENDING_MACHINE -> GlobalModelManager(
-            viewModel = modelManagerViewModel,
-            navigateUp = { activeModule = OsModule.CHAT_BOX },
-            onModelSelected = { task, model ->
-              chatNavController.navigate("$GALLERY_ROUTE_MODEL/${task.id}/${model.name}")
-              activeModule = OsModule.CHAT_BOX
-            },
-            onBenchmarkClicked = { model ->
-              chatNavController.navigate("$GALLERY_ROUTE_BENCHMARK/${model.name}")
-              activeModule = OsModule.CHAT_BOX
-            },
-          )
-
-          // SYS_SETTINGS: settings / model configuration hub.
-          OsModule.SYS_SETTINGS -> GlobalModelManager(
+          // VENDING_MACHINE (MODELS) / SYS_SETTINGS (SETTINGS): both render GlobalModelManager.
+          OsModule.VENDING_MACHINE, OsModule.SYS_SETTINGS -> GlobalModelManager(
             viewModel = modelManagerViewModel,
             navigateUp = { activeModule = OsModule.CHAT_BOX },
             onModelSelected = { task, model ->
