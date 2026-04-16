@@ -32,16 +32,15 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.BlendMode
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.graphics.toColorInt
 import com.google.ai.edge.gallery.R
+import com.google.ai.edge.gallery.ui.theme.absoluteBlack
+import com.google.ai.edge.gallery.ui.theme.neonGreen
 import kotlinx.coroutines.delay
 
 private const val DISMISS_DELAY_SECONDS = 5
@@ -56,12 +55,7 @@ fun PromoScreenGm4(onDismiss: () -> Unit) {
   Box(
     modifier =
       Modifier.fillMaxSize()
-        .background(
-          brush =
-            Brush.verticalGradient(
-              colors = listOf(Color("#183570".toColorInt()), Color("#0A122D".toColorInt()))
-            )
-        ),
+        .background(absoluteBlack),
     contentAlignment = Alignment.Center,
   ) {
     // Top bg.
@@ -71,7 +65,7 @@ fun PromoScreenGm4(onDismiss: () -> Unit) {
       contentDescription = null,
       modifier =
         Modifier.align(alignment = Alignment.TopCenter).graphicsLayer {
-          alpha = 0.46f
+          alpha = 0.15f
           blendMode = BlendMode.Multiply
 
           translationY = gemmaPromoBg.defaultHeight.toPx() * 0.2f
@@ -91,23 +85,23 @@ fun PromoScreenGm4(onDismiss: () -> Unit) {
       Text(
         "Introducing",
         style = MaterialTheme.typography.headlineSmall.copy(fontSize = 20.sp),
-        color = Color.White,
+        color = neonGreen.copy(alpha = 0.7f),
       )
       Text(
         "Gemma 4",
         style = MaterialTheme.typography.headlineSmall.copy(fontSize = 38.sp),
-        color = Color.White,
+        color = neonGreen,
       )
       Text(
         "Experience the world’s most capable open models, designed to run frontier-level intelligence directly on your hardware.",
         style = MaterialTheme.typography.headlineSmall.copy(fontSize = 16.sp, lineHeight = 21.sp),
         textAlign = TextAlign.Center,
-        color = Color(0xfff2f2f2),
+        color = neonGreen.copy(alpha = 0.5f),
       )
 
       // Dismiss button.
       TextButton(onClick = onDismiss, modifier = Modifier.padding(top = 24.dp)) {
-        Text("Dismiss", color = Color(0xFFA8C7FA))
+        Text("Dismiss", color = neonGreen)
       }
     }
   }

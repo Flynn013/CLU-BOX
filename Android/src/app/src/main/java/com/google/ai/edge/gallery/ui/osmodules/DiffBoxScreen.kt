@@ -95,7 +95,7 @@ fun DiffBoxScreen(sessionManager: TerminalSessionManager) {
     Row(
       modifier = Modifier
         .fillMaxWidth()
-        .background(Color(0xFF0D0D0D))
+        .background(absoluteBlack)
         .padding(horizontal = 12.dp, vertical = 8.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {

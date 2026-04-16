@@ -115,7 +115,7 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
     Row(
       modifier = Modifier
         .fillMaxWidth()
-        .background(Color(0xFF0D0D0D))
+        .background(absoluteBlack)
         .padding(horizontal = 8.dp, vertical = 6.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {

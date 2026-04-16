@@ -224,7 +224,7 @@ fun FileBoxScreen(fileBoxManager: FileBoxManager) {
       Box(
         modifier = Modifier
           .fillMaxSize()
-          .background(Color(0xFF0A0A0A), RoundedCornerShape(4.dp))
+          .background(absoluteBlack, RoundedCornerShape(4.dp))
           .padding(4.dp),
       ) {
         if (selectedFilePath != null) {
@@ -293,7 +293,7 @@ fun FileBoxScreen(fileBoxManager: FileBoxManager) {
             "Enter path relative to workspace root.\nNested folders are auto-created.",
             fontFamily = FontFamily.Monospace,
             fontSize = 12.sp,
-            color = Color.Gray,
+            color = neonGreen.copy(alpha = 0.4f),
           )
           Spacer(Modifier.height(8.dp))
           OutlinedTextField(
@@ -416,7 +416,7 @@ private fun FileTreeNode(
       Icon(
         Icons.AutoMirrored.Filled.InsertDriveFile,
         contentDescription = null,
-        tint = if (isSelected) neonGreen else Color.Gray,
+        tint = if (isSelected) neonGreen else neonGreen.copy(alpha = 0.4f),
         modifier = Modifier.size(14.dp),
       )
       Spacer(Modifier.width(4.dp))
@@ -424,7 +424,7 @@ private fun FileTreeNode(
         node.name,
         fontFamily = FontFamily.Monospace,
         fontSize = 11.sp,
-        color = if (isSelected) neonGreen else Color(0xFFAAAAAA),
+        color = if (isSelected) neonGreen else neonGreen.copy(alpha = 0.5f),
       )
     }
   }

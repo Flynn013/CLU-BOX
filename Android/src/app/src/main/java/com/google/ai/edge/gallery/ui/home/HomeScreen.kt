@@ -125,6 +125,7 @@ import com.google.ai.edge.gallery.ui.common.tos.TosViewModel
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import com.google.ai.edge.gallery.ui.theme.customColors
 import com.google.ai.edge.gallery.ui.theme.homePageTitleStyle
+import com.google.ai.edge.gallery.ui.theme.neonGreen
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -749,7 +750,7 @@ private fun CategoryTabHeader(
           modifier = Modifier.padding(horizontal = 16.dp),
           style = MaterialTheme.typography.labelLarge,
           color =
-            if (selectedIndex == index) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+            if (selectedIndex == index) neonGreen else MaterialTheme.colorScheme.onSurfaceVariant,
         )
       }
     }

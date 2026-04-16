@@ -100,6 +100,7 @@ import com.google.ai.edge.gallery.ui.llmchat.LlmChatViewModel
 import com.google.ai.edge.gallery.ui.modelmanager.ModelInitializationStatusType
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import com.google.ai.edge.gallery.data.brainbox.GraphDatabase
+import com.google.ai.edge.gallery.ui.theme.neonGreen
 import com.google.ai.edge.litertlm.tool
 import java.lang.Exception
 import kotlin.coroutines.resume
@@ -400,7 +401,7 @@ fun AgentChatScreen(
                 style =
                   MaterialTheme.typography.headlineLarge.copy(
                     fontWeight = FontWeight.Medium,
-                    color = Color(0xFF00FF41),
+                    color = neonGreen,
                   ),
                 modifier = Modifier.padding(top = 12.dp, bottom = 16.dp),
               )
