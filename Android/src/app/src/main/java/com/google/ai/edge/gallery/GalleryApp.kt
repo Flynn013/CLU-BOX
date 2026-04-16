@@ -38,6 +38,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Chat
+import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Psychology
@@ -71,6 +72,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.navigation.compose.rememberNavController
 import com.google.ai.edge.gallery.customtasks.agentchat.SkillManagerViewModel
 import com.google.ai.edge.gallery.data.BuiltInTaskId
+import com.google.ai.edge.gallery.data.FileBoxManager
 import com.google.ai.edge.gallery.data.brainbox.GraphDatabase
 import com.google.ai.edge.gallery.ui.modelmanager.GlobalModelManager
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
@@ -78,6 +80,7 @@ import com.google.ai.edge.gallery.ui.navigation.GALLERY_ROUTE_BENCHMARK
 import com.google.ai.edge.gallery.ui.navigation.GALLERY_ROUTE_MODEL
 import com.google.ai.edge.gallery.ui.navigation.GalleryNavHost
 import com.google.ai.edge.gallery.ui.osmodules.BrainBoxModuleScreen
+import com.google.ai.edge.gallery.ui.osmodules.FileBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.SkillBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.TheGridScreen
 import com.google.ai.edge.gallery.ui.theme.absoluteBlack
@@ -89,6 +92,7 @@ import kotlinx.coroutines.launch
 private enum class OsModule(val label: String, val icon: ImageVector) {
   CHAT_BOX("CHAT_BOX", Icons.Outlined.Chat),
   BRAIN_BOX("BRAIN_BOX", Icons.Outlined.Hub),
+  FILE_BOX("FILE_BOX", Icons.Outlined.Code),
   THE_GRID("THE_GRID", Icons.Outlined.GridView),
   SKILL_BOX("SKILL_BOX", Icons.Outlined.Psychology),
   VENDING_MACHINE("MODELS", Icons.Outlined.ShoppingCart),
@@ -116,6 +120,7 @@ fun GalleryApp(
   // Grid prompt override: when a Grid game is initialized, this holds the injected system prompt.
   var gridPromptOverride by remember { mutableStateOf<String?>(null) }
   val db = remember { GraphDatabase.getInstance(context) }
+  val fileBoxManager = remember { FileBoxManager(context) }
   val skillManagerViewModel: SkillManagerViewModel = hiltViewModel()
 
   // Separate nav controllers so each module retains its own back stack.
@@ -232,6 +237,7 @@ fun GalleryApp(
           Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
             when (activeModule) {
               OsModule.BRAIN_BOX -> BrainBoxModuleScreen(dao = db.brainBoxDao())
+              OsModule.FILE_BOX -> FileBoxScreen(fileBoxManager = fileBoxManager)
               OsModule.THE_GRID -> TheGridScreen(
                 onInitializeMatch = { systemPrompt ->
                   gridPromptOverride = systemPrompt
