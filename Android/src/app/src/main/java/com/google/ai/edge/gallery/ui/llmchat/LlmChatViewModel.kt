@@ -82,6 +82,12 @@ private const val COMPRESSION_SYSTEM_OVERRIDE =
   "Include ALL file paths and their purpose. Include any unfinished tasks. " +
   "Do NOT include pleasantries or filler — only technical state."
 
+/** Max chars to include when previewing a user message during compression. */
+private const val MAX_USER_MESSAGE_PREVIEW_LENGTH = 200
+
+/** Max chars to include when previewing the last agent response during compression. */
+private const val MAX_AGENT_RESPONSE_PREVIEW_LENGTH = 500
+
 @OptIn(ExperimentalApi::class)
 open class LlmChatViewModelBase(
   private val chatHistoryDao: ChatHistoryDao? = null,
@@ -272,11 +278,11 @@ open class LlmChatViewModelBase(
     compressedLines.add("## Session State (auto-compressed)")
     compressedLines.add("")
 
-    // Extract file paths mentioned anywhere.
-    val filePathPattern = Regex("""[\w\-./]+\.\w{1,10}""")
+    // Extract file paths mentioned anywhere — require at least one '/' to avoid
+    // matching plain property accesses like "object.property".
+    val filePathPattern = Regex("""[\w\-]+(?:/[\w\-]+)+\.\w{1,10}""")
     val mentionedFiles = filePathPattern.findAll(transcript)
       .map { it.value }
-      .filter { it.contains('/') || it.contains('.') }
       .distinct()
       .toList()
     if (mentionedFiles.isNotEmpty()) {
@@ -292,7 +298,7 @@ open class LlmChatViewModelBase(
       .takeLast(3)
     if (userMessages.isNotEmpty()) {
       compressedLines.add("### Recent User Goals")
-      userMessages.forEach { compressedLines.add("- ${it.content.take(200)}") }
+      userMessages.forEach { compressedLines.add("- ${it.content.take(MAX_USER_MESSAGE_PREVIEW_LENGTH)}") }
       compressedLines.add("")
     }
 
@@ -303,7 +309,7 @@ open class LlmChatViewModelBase(
       .lastOrNull()
     if (lastAgentMsg != null) {
       compressedLines.add("### Last CLU Response (truncated)")
-      compressedLines.add(lastAgentMsg.content.take(500))
+      compressedLines.add(lastAgentMsg.content.take(MAX_AGENT_RESPONSE_PREVIEW_LENGTH))
       compressedLines.add("")
     }
 
