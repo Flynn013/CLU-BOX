@@ -200,11 +200,8 @@ suspend fun importBrainFromMarkdownText(dao: BrainBoxDao, text: String): Int {
       isCore = isCore,
     )
 
-    if (id in existingIds) {
-      dao.updateNeuron(neuron)
-    } else {
-      dao.insertNeuron(neuron)
-    }
+    // insertNeuron uses REPLACE on conflict, so this handles both insert and update.
+    dao.insertNeuron(neuron)
     count++
   }
 
