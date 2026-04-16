@@ -364,6 +364,8 @@ class TerminalSessionManager(private val context: Context) {
     scope.launch {
       // Check for Termux's `pkg` binary purely in Kotlin — no shell invocation,
       // so zero chance of a "pkg: not found" error leaking to the terminal.
+      // Note: this is a best-effort probe for UI messaging only. The actual
+      // execution safety is handled by the shell command itself (|| fallback).
       val pkgBinary = File("/data/data/com.termux/files/usr/bin/pkg")
       val hasPkg = pkgBinary.exists() && pkgBinary.canExecute()
 

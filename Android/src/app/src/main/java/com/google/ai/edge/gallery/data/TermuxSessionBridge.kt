@@ -190,7 +190,9 @@ class TermuxSessionBridge(private val context: Context) {
       cwd,      // working directory
       args,     // arguments
       env,      // environment
-      TerminalEmulator.DEFAULT_TERMINAL_TRANSCRIPT_ROWS, // transcript rows
+      // Use the Termux library's default transcript size (typically 2000 rows).
+      // This provides a reasonable scrollback buffer for CLU-BOX workflows.
+      TerminalEmulator.DEFAULT_TERMINAL_TRANSCRIPT_ROWS,
       sessionClient,
     )
 

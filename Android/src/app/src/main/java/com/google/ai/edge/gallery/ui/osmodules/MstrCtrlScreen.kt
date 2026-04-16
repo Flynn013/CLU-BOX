@@ -135,6 +135,8 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
         },
         update = { view ->
           // Re-attach if the session was recreated.
+          // Note: `mTermSession` is a public field in Termux's TerminalView Java API.
+          // There is no getter method — direct access is the intended usage pattern.
           val session = bridge.terminalSession
           if (session != null && view.mTermSession !== session) {
             view.attachSession(session)
