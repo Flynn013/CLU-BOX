@@ -18,6 +18,7 @@ package com.google.ai.edge.gallery.data
 
 import android.util.Log
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 private const val TAG = "ShellManager"
 
@@ -44,16 +45,15 @@ fun executeCommand(command: String): String {
 
     // Read stdout and stderr on background threads so the pipe buffers don't fill up
     // and deadlock the process before waitFor returns.
-    // Use arrays as thread-safe holders since @Volatile cannot be applied to locals.
-    val stdoutHolder = arrayOf("")
-    val stderrHolder = arrayOf("")
+    val stdoutRef = AtomicReference("")
+    val stderrRef = AtomicReference("")
 
     val stdoutThread = Thread {
-      stdoutHolder[0] = process.inputStream.bufferedReader(Charsets.UTF_8).readText()
+      stdoutRef.set(process.inputStream.bufferedReader(Charsets.UTF_8).readText())
     }.also { it.start() }
 
     val stderrThread = Thread {
-      stderrHolder[0] = process.errorStream.bufferedReader(Charsets.UTF_8).readText()
+      stderrRef.set(process.errorStream.bufferedReader(Charsets.UTF_8).readText())
     }.also { it.start() }
 
     val finished = process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -66,12 +66,13 @@ fun executeCommand(command: String): String {
       return "TIMEOUT ERROR"
     }
 
-    // Ensure reader threads have finished.
-    stdoutThread.join(1_000)
-    stderrThread.join(1_000)
+    // Block until reader threads complete (no timeout — process already exited so
+    // streams will close and readText() will return).
+    stdoutThread.join()
+    stderrThread.join()
 
-    val stdout = stdoutHolder[0]
-    val stderr = stderrHolder[0]
+    val stdout = stdoutRef.get()
+    val stderr = stderrRef.get()
 
     val combined = buildString {
       if (stdout.isNotEmpty()) append(stdout)
