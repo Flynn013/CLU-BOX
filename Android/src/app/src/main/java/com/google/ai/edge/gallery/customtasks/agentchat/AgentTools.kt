@@ -899,6 +899,8 @@ class AgentTools() : ToolSet {
   }
 
   // =========================================================================
+  // OPERATOR_HALT — Suspend the autonomous loop for human review
+  // =========================================================================
 
   /**
    * Immediately suspends the ChatViewModel's autonomous worker loop and
