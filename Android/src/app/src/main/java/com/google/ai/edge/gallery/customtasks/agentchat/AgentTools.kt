@@ -404,9 +404,11 @@ class AgentTools() : ToolSet {
       val absolutePath = java.io.File(mgr.root, file_path).absolutePath
       val tsm = terminalSessionManager
 
+      // Escape the file path for safe shell interpolation (replace ' with '\'').
+      val escapedPath = absolutePath.replace("'", "'\\''")
       val validationCmd: String? = when (ext) {
-        "py" -> "python -m py_compile \"$absolutePath\""
-        "js" -> "node --check \"$absolutePath\""
+        "py" -> "python -m py_compile '$escapedPath'"
+        "js" -> "node --check '$escapedPath'"
         else -> null
       }
 

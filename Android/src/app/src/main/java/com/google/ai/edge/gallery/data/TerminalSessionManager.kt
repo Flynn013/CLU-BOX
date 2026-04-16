@@ -30,6 +30,7 @@ import java.io.File
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 private const val TAG = "TerminalSessionManager"
 
@@ -198,15 +199,15 @@ class TerminalSessionManager(private val context: Context) {
 
       val proc = pb.start()
 
-      @Volatile var stdout = ""
-      @Volatile var stderr = ""
+      val stdoutRef = AtomicReference("")
+      val stderrRef = AtomicReference("")
 
       val stdoutThread = Thread {
-        stdout = proc.inputStream.bufferedReader().readText()
+        stdoutRef.set(proc.inputStream.bufferedReader().readText())
       }.also { it.start() }
 
       val stderrThread = Thread {
-        stderr = proc.errorStream.bufferedReader().readText()
+        stderrRef.set(proc.errorStream.bufferedReader().readText())
       }.also { it.start() }
 
       val finished = proc.waitFor(CMD_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -222,6 +223,8 @@ class TerminalSessionManager(private val context: Context) {
       stdoutThread.join(1_000)
       stderrThread.join(1_000)
 
+      val stdout = stdoutRef.get()
+      val stderr = stderrRef.get()
       val combined = buildString {
         if (stdout.isNotEmpty()) append(stdout)
         if (stderr.isNotEmpty()) {
@@ -252,15 +255,15 @@ class TerminalSessionManager(private val context: Context) {
 
       val proc = pb.start()
 
-      @Volatile var stdout = ""
-      @Volatile var stderr = ""
+      val stdoutRef = AtomicReference("")
+      val stderrRef = AtomicReference("")
 
       val stdoutThread = Thread {
-        stdout = proc.inputStream.bufferedReader().readText()
+        stdoutRef.set(proc.inputStream.bufferedReader().readText())
       }.also { it.start() }
 
       val stderrThread = Thread {
-        stderr = proc.errorStream.bufferedReader().readText()
+        stderrRef.set(proc.errorStream.bufferedReader().readText())
       }.also { it.start() }
 
       val finished = proc.waitFor(CMD_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -275,6 +278,8 @@ class TerminalSessionManager(private val context: Context) {
       stdoutThread.join(1_000)
       stderrThread.join(1_000)
 
+      val stdout = stdoutRef.get()
+      val stderr = stderrRef.get()
       val combined = buildString {
         if (stdout.isNotEmpty()) append(stdout)
         if (stderr.isNotEmpty()) {
