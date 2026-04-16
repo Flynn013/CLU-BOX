@@ -39,6 +39,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.CompareArrows
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Psychology
@@ -82,6 +83,7 @@ import com.google.ai.edge.gallery.ui.navigation.GALLERY_ROUTE_MODEL
 import com.google.ai.edge.gallery.ui.navigation.GalleryNavHost
 import com.google.ai.edge.gallery.data.TerminalSessionManager
 import com.google.ai.edge.gallery.ui.osmodules.BrainBoxModuleScreen
+import com.google.ai.edge.gallery.ui.osmodules.DiffBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.FileBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.MstrCtrlScreen
 import com.google.ai.edge.gallery.ui.osmodules.SkillBoxScreen
@@ -97,6 +99,7 @@ private enum class OsModule(val label: String, val icon: ImageVector) {
   BRAIN_BOX("BRAIN_BOX", Icons.Outlined.Hub),
   FILE_BOX("FILE_BOX", Icons.Outlined.Code),
   MSTR_CTRL("MSTR_CTRL", Icons.Outlined.Terminal),
+  DIFF_BOX("DIFF_BOX", Icons.Outlined.CompareArrows),
   THE_GRID("THE_GRID", Icons.Outlined.GridView),
   SKILL_BOX("SKILL_BOX", Icons.Outlined.Psychology),
   VENDING_MACHINE("MODELS", Icons.Outlined.ShoppingCart),
@@ -244,6 +247,7 @@ fun GalleryApp(
               OsModule.BRAIN_BOX -> BrainBoxModuleScreen(dao = db.brainBoxDao())
               OsModule.FILE_BOX -> FileBoxScreen(fileBoxManager = fileBoxManager)
               OsModule.MSTR_CTRL -> MstrCtrlScreen(sessionManager = terminalSessionManager)
+              OsModule.DIFF_BOX -> DiffBoxScreen(sessionManager = terminalSessionManager)
               OsModule.THE_GRID -> TheGridScreen(
                 onInitializeMatch = { systemPrompt ->
                   gridPromptOverride = systemPrompt

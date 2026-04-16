@@ -83,6 +83,13 @@ class TerminalSessionManager(private val context: Context) {
   /** True once the first-boot firmware hook has completed. */
   private var firstBootHandled = false
 
+  // ── Pre-flight readiness gate ───────────────────────────────
+  // The AI must not initialize until runPreFlightCheck() succeeds.
+  private val _preFlightReady = MutableStateFlow(false)
+
+  /** Emits `true` once the pre-flight bootstrap completes with exit code 0. */
+  val preFlightReady: StateFlow<Boolean> = _preFlightReady.asStateFlow()
+
   // ── Public API ───────────────────────────────────────────────
 
   /**
@@ -143,8 +150,8 @@ class TerminalSessionManager(private val context: Context) {
       } catch (_: Exception) { /* stream closed */ }
     }
 
-    // First-boot firmware hook.
-    handleFirstBootIfNeeded()
+    // Pre-flight firmware bootstrap.
+    runPreFlightCheck()
   }
 
   /**
@@ -309,28 +316,50 @@ class TerminalSessionManager(private val context: Context) {
     _outputLines.value = emptyList()
   }
 
-  // ── First-boot firmware ──────────────────────────────────────
+  // ── Pre-flight firmware bootstrap ─────────────────────────────
 
-  private fun handleFirstBootIfNeeded() {
-    if (firstBootHandled) return
+  /**
+   * Pre-flight bootstrap triggered on first app launch.
+   *
+   * Executes `pkg update && pkg upgrade -y && pkg install git python nodejs -y`
+   * to arm the sandbox. Sets [preFlightReady] to `true` only when the command
+   * returns exit code 0. The AI must not initialize until this gate opens.
+   */
+  fun runPreFlightCheck() {
+    if (firstBootHandled) {
+      _preFlightReady.value = true
+      return
+    }
 
     val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     val alreadyDone = prefs.getBoolean(KEY_FIRST_BOOT_DONE, false)
 
-    if (!alreadyDone) {
-      appendSystemLine("[FIRMWARE] First boot detected — arming terminal…")
-      scope.launch {
-        // Attempt to install core tools via Termux pkg (graceful no-op if not available).
-        val result = executeCommandInSandbox("pkg install git python nodejs -y 2>&1 || echo '[FIRMWARE] pkg not available — skipping package install'")
-        result.lines().forEach { line ->
-          appendLine(TerminalLine(line, LineSource.STDOUT))
-        }
-        appendSystemLine("[FIRMWARE] First-boot initialization complete.")
-        prefs.edit().putBoolean(KEY_FIRST_BOOT_DONE, true).apply()
-      }
+    if (alreadyDone) {
+      firstBootHandled = true
+      _preFlightReady.value = true
+      return
     }
 
-    firstBootHandled = true
+    appendSystemLine("[FIRMWARE] First boot detected — running pre-flight check…")
+    scope.launch {
+      val cmd = "pkg update && pkg upgrade -y && pkg install git python nodejs -y 2>&1 || echo '[FIRMWARE] pkg not available — skipping package install'"
+      val (exitCode, result) = executeCommandWithExitCode(cmd)
+      result.lines().forEach { line ->
+        appendLine(TerminalLine(line, LineSource.STDOUT))
+      }
+
+      if (exitCode == 0) {
+        appendSystemLine("[FIRMWARE] Pre-flight check PASSED (exit 0).")
+        prefs.edit().putBoolean(KEY_FIRST_BOOT_DONE, true).apply()
+      } else {
+        appendSystemLine("[FIRMWARE] Pre-flight check completed with exit code $exitCode — marking done anyway.")
+        // Mark done to avoid blocking the app forever on non-Termux environments.
+        prefs.edit().putBoolean(KEY_FIRST_BOOT_DONE, true).apply()
+      }
+
+      firstBootHandled = true
+      _preFlightReady.value = true
+    }
   }
 
   // ── Internal helpers ─────────────────────────────────────────

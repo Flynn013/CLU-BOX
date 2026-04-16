@@ -53,6 +53,11 @@ class AgentTools() : ToolSet {
     com.google.ai.edge.gallery.data.FileBoxManager(context)
   }
 
+  /** Lazily initialized OracleManager for offline .zim search. */
+  val oracleManager: com.google.ai.edge.gallery.data.OracleManager by lazy {
+    com.google.ai.edge.gallery.data.OracleManager(context)
+  }
+
   private val _actionChannel = Channel<AgentAction>(Channel.UNLIMITED)
   val actionChannel: ReceiveChannel<AgentAction> = _actionChannel
   var resultImageToShow: CallJsSkillResultImage? = null
@@ -914,6 +919,123 @@ class AgentTools() : ToolSet {
       mapOf(
         "reason" to reason,
         "status" to "halted",
+      )
+    }
+  }
+
+  // =========================================================================
+  // ORACLE_SEARCH — Offline .zim archive search (token-capped)
+  // =========================================================================
+
+  /**
+   * Searches offline .zim archives (StackOverflow, docs) and returns
+   * token-optimized Markdown results. Capped to ~1500 tokens to keep
+   * the LLM context lean.
+   */
+  @Tool(
+    description = "Search offline documentation archives (.zim) for answers to technical " +
+      "questions. Returns token-optimized Markdown results. Use this to look up APIs, " +
+      "error messages, or programming concepts without internet access."
+  )
+  fun oracleSearch(
+    @ToolParam(description = "The search query (e.g. 'Python list comprehension', 'Kotlin coroutines', 'git rebase').")
+    query: String,
+  ): Map<String, String> {
+    return runBlocking(Dispatchers.Default) {
+      Log.d(TAG, "oracleSearch: query='$query'")
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = "Oracle: searching '$query'…",
+          inProgress = true,
+          addItemTitle = "Oracle_Search",
+          addItemDescription = "Query: $query",
+        )
+      )
+
+      val result = oracleManager.search(query)
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = "Oracle: search complete",
+          inProgress = false,
+          addItemTitle = "Oracle_Search",
+          addItemDescription = "Query: $query\n${result.take(200)}${if (result.length > 200) "…" else ""}",
+        )
+      )
+
+      mapOf(
+        "query" to query,
+        "result" to result,
+        "status" to "succeeded",
+      )
+    }
+  }
+
+  // =========================================================================
+  // GIT_DIFF_READ — Context-saving unified diff output
+  // =========================================================================
+
+  /**
+   * Returns the output of `git diff --unified=0` for a specific file path
+   * (or the entire workspace if path is empty). Uses minimal context to
+   * save token space.
+   */
+  @Tool(
+    description = "Returns the git diff for a file or the entire workspace. Uses " +
+      "--unified=0 to minimize context and save tokens. Use this to review code changes."
+  )
+  fun gitDiffRead(
+    @ToolParam(description = "Relative file path to diff (e.g. 'src/main.py'). Pass empty string for full workspace diff.")
+    path: String,
+  ): Map<String, String> {
+    return runBlocking(Dispatchers.Default) {
+      Log.d(TAG, "gitDiffRead: path='$path'")
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = "Git Diff: reading changes…",
+          inProgress = true,
+          addItemTitle = "Git_Diff_Read",
+          addItemDescription = "Path: ${path.ifEmpty { "(full workspace)" }}",
+        )
+      )
+
+      val tsm = terminalSessionManager
+      val cmd = if (path.isBlank()) {
+        "git diff --unified=0 2>&1"
+      } else {
+        val escapedPath = path.replace("'", "'\\''")
+        "git diff --unified=0 -- '$escapedPath' 2>&1"
+      }
+
+      val output = if (tsm != null) {
+        tsm.sendCommand(cmd, visible = false)
+      } else {
+        com.google.ai.edge.gallery.data.executeCommand(cmd)
+      }
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = "Git Diff: done",
+          inProgress = false,
+          addItemTitle = "Git_Diff_Read",
+          addItemDescription = "Path: ${path.ifEmpty { "(full workspace)" }}\n${output.take(200)}${if (output.length > 200) "…" else ""}",
+        )
+      )
+
+      val status = when {
+        output.contains("not a git repository") -> "not_git"
+        output == "TIMEOUT ERROR" -> "timeout"
+        output.startsWith("ERROR:") -> "error"
+        output.isBlank() || output == "(no output)" -> "no_changes"
+        else -> "succeeded"
+      }
+
+      mapOf(
+        "path" to path,
+        "diff" to output,
+        "status" to status,
       )
     }
   }

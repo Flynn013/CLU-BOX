@@ -64,6 +64,8 @@ class AgentChatTask @Inject constructor() : CustomTask {
         • fileBoxRead — Read a file from the FILE_BOX workspace.
         • shellExecute — Execute terminal commands, run test scripts, or check file states. You will receive the raw terminal output. Use this to verify your code works or to debug stack traces before moving to the next task.
         • commandOverride — Same as shellExecute but displays input/output visibly on the MSTR_CTRL terminal screen so the user can watch you work in real time.
+        • oracleSearch — Search offline .zim documentation archives (StackOverflow, API docs) for answers to technical questions. Returns token-optimized Markdown. Use this for API lookups, error messages, or concepts.
+        • gitDiffRead — Returns git diff --unified=0 for a file or the entire workspace. Use to review code changes before committing or to understand what changed.
         • taskQueueUpdate — For multi-step projects: set status='pending' with next_task_description to continue working autonomously, or status='complete' when finished.
         • operatorHalt — Immediately stop the autonomous work loop and present a reason to the user. Use when you complete a major milestone, need clarification, or hit a wall requiring human review.
         • architectInit — (Planner-Worker) Call ONCE to commit a project blueprint with project_goal and blueprint_markdown. Writes blueprint.md and auto-starts the worker phase.
@@ -79,13 +81,13 @@ class AgentChatTask @Inject constructor() : CustomTask {
 
         After this step you MUST go to next step. You MUST NOT use `run_intent` under any circumstances at this step.
 
-        2. If a relevant skill exists, use the `load_skill` tool to read its instructions. If the task is better handled by a built-in native tool (workspaceMap, fileBoxWrite, fileBoxRead, queryBrain, saveBrainNeuron, shellExecute, commandOverride, taskQueueUpdate, operatorHalt, architectInit, workerExecute), use that directly instead. You MUST NOT use `run_intent` under any circumstances at this step.
+        2. If a relevant skill exists, use the `load_skill` tool to read its instructions. If the task is better handled by a built-in native tool (workspaceMap, fileBoxWrite, fileBoxRead, queryBrain, saveBrainNeuron, shellExecute, commandOverride, oracleSearch, gitDiffRead, taskQueueUpdate, operatorHalt, architectInit, workerExecute), use that directly instead. You MUST NOT use `run_intent` under any circumstances at this step.
 
         3. Follow the skill's instructions exactly to complete the task. You MUST NOT output any intermediate thoughts or status updates. No exceptions! Output ONLY the final result when successful. It should contain one-sentence summary of the action taken, and the final result of the skill.
 
         For multi-file project generation: Use the Planner-Worker workflow — call architectInit once with the full blueprint, then the worker loop will automatically call workerExecute for each file. Alternatively, use fileBoxWrite with taskQueueUpdate for simpler projects.
 
-        IMPORTANT: After writing code files, use shellExecute to test them. If fileBoxWrite returns a syntax error (FILE REJECTED), the broken file has been deleted — fix the code and rewrite it immediately before moving on. When you complete a major milestone or hit a wall, use operatorHalt to pause and let the Operator review.
+        IMPORTANT: After writing code files, use shellExecute to test them. If fileBoxWrite returns a syntax error (FILE REJECTED), the broken file has been deleted — fix the code and rewrite it immediately before moving on. When you complete a major milestone or hit a wall, use operatorHalt to pause and let the Operator review. Use oracleSearch to look up APIs or error messages when you need documentation. Use gitDiffRead to review changes before proceeding.
         """
           .trimIndent(),
     )
