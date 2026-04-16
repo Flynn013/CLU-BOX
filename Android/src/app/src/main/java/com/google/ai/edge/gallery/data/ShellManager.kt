@@ -48,11 +48,11 @@ fun executeCommand(command: String): String {
     @Volatile var stderr = ""
 
     val stdoutThread = Thread {
-      stdout = process.inputStream.bufferedReader().readText()
+      stdout = process.inputStream.bufferedReader(Charsets.UTF_8).readText()
     }.also { it.start() }
 
     val stderrThread = Thread {
-      stderr = process.errorStream.bufferedReader().readText()
+      stderr = process.errorStream.bufferedReader(Charsets.UTF_8).readText()
     }.also { it.start() }
 
     val finished = process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS)

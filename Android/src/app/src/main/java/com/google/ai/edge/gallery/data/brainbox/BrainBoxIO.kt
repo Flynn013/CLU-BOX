@@ -108,7 +108,7 @@ fun saveBrainMarkdownToDownloads(context: Context, markdown: String): Boolean {
     return false
   }
   return try {
-    resolver.openOutputStream(uri)?.use { it.write(markdown.toByteArray()) }
+    resolver.openOutputStream(uri)?.use { it.write(markdown.toByteArray(Charsets.UTF_8)) }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
       values.clear()
       values.put(MediaStore.Downloads.IS_PENDING, 0)
@@ -139,7 +139,7 @@ fun saveBrainMarkdownToDownloads(context: Context, markdown: String): Boolean {
  */
 suspend fun importBrainFromMarkdown(context: Context, dao: BrainBoxDao, uri: Uri): Int {
   val text = context.contentResolver.openInputStream(uri)?.use { stream ->
-    BufferedReader(InputStreamReader(stream)).readText()
+    BufferedReader(InputStreamReader(stream, Charsets.UTF_8)).readText()
   } ?: throw IllegalArgumentException("Could not read file from uri: $uri")
 
   return importBrainFromMarkdownText(dao, text)

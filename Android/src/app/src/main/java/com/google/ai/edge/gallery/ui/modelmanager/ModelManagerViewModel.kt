@@ -1069,7 +1069,7 @@ constructor(
     try {
       Log.d(TAG, "Saving model allowlist to disk...")
       val file = File(externalFilesDir, MODEL_ALLOWLIST_FILENAME)
-      file.writeText(modelAllowlistContent)
+      file.writeText(modelAllowlistContent, Charsets.UTF_8)
       Log.d(TAG, "Done: saving model allowlist to disk.")
     } catch (e: Exception) {
       Log.e(TAG, "failed to write model allowlist to disk", e)
@@ -1085,7 +1085,7 @@ constructor(
         if (fileName == MODEL_ALLOWLIST_TEST_FILENAME) File("/data/local/tmp") else externalFilesDir
       val file = File(baseDir, fileName)
       if (file.exists()) {
-        val content = file.readText()
+        val content = file.readText(Charsets.UTF_8)
         Log.d(TAG, "Model allowlist content from local file: $content")
 
         val gson = Gson()

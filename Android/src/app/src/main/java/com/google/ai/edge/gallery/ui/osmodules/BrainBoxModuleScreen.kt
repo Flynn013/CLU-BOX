@@ -308,7 +308,7 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao) {
               if (uri != null) {
                 val stream = resolver.openOutputStream(uri)
                 if (stream != null) {
-                  stream.use { it.write(json.toByteArray()) }
+                  stream.use { it.write(json.toByteArray(Charsets.UTF_8)) }
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     values.clear()
                     values.put(MediaStore.Downloads.IS_PENDING, 0)

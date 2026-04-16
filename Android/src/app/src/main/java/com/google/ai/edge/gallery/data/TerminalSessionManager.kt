@@ -41,6 +41,9 @@ private const val KEY_FIRST_BOOT_DONE = "first_boot_done"
 /** Timeout for individual commands piped through the session (seconds). */
 private const val CMD_TIMEOUT_SECONDS = 10L
 
+/** Maximum number of lines retained in the visible output buffer to limit GC pressure. */
+private const val MAX_OUTPUT_LINES = 2000
+
 /**
  * Represents a single line of terminal output, tagged by source.
  */
@@ -117,7 +120,7 @@ class TerminalSessionManager(private val context: Context) {
 
     val proc = pb.start()
     process = proc
-    stdinWriter = OutputStreamWriter(proc.outputStream)
+    stdinWriter = OutputStreamWriter(proc.outputStream, Charsets.UTF_8)
     isSessionAlive = true
 
     appendSystemLine("[MSTR_CTRL] Session started — HOME=${sandboxRoot.absolutePath}")
@@ -125,7 +128,7 @@ class TerminalSessionManager(private val context: Context) {
     // Background reader for stdout.
     scope.launch {
       try {
-        BufferedReader(InputStreamReader(proc.inputStream)).use { reader ->
+        BufferedReader(InputStreamReader(proc.inputStream, Charsets.UTF_8)).use { reader ->
           var line = reader.readLine()
           while (line != null) {
             appendLine(TerminalLine(line, LineSource.STDOUT))
@@ -140,7 +143,7 @@ class TerminalSessionManager(private val context: Context) {
     // Background reader for stderr.
     scope.launch {
       try {
-        BufferedReader(InputStreamReader(proc.errorStream)).use { reader ->
+        BufferedReader(InputStreamReader(proc.errorStream, Charsets.UTF_8)).use { reader ->
           var line = reader.readLine()
           while (line != null) {
             appendLine(TerminalLine(line, LineSource.STDERR))
@@ -210,11 +213,11 @@ class TerminalSessionManager(private val context: Context) {
       val stderrRef = AtomicReference("")
 
       val stdoutThread = Thread {
-        stdoutRef.set(proc.inputStream.bufferedReader().readText())
+        stdoutRef.set(proc.inputStream.bufferedReader(Charsets.UTF_8).readText())
       }.also { it.start() }
 
       val stderrThread = Thread {
-        stderrRef.set(proc.errorStream.bufferedReader().readText())
+        stderrRef.set(proc.errorStream.bufferedReader(Charsets.UTF_8).readText())
       }.also { it.start() }
 
       val finished = proc.waitFor(CMD_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -266,11 +269,11 @@ class TerminalSessionManager(private val context: Context) {
       val stderrRef = AtomicReference("")
 
       val stdoutThread = Thread {
-        stdoutRef.set(proc.inputStream.bufferedReader().readText())
+        stdoutRef.set(proc.inputStream.bufferedReader(Charsets.UTF_8).readText())
       }.also { it.start() }
 
       val stderrThread = Thread {
-        stderrRef.set(proc.errorStream.bufferedReader().readText())
+        stderrRef.set(proc.errorStream.bufferedReader(Charsets.UTF_8).readText())
       }.also { it.start() }
 
       val finished = proc.waitFor(CMD_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -365,7 +368,12 @@ class TerminalSessionManager(private val context: Context) {
   // ── Internal helpers ─────────────────────────────────────────
 
   private fun appendLine(line: TerminalLine) {
-    _outputLines.value = _outputLines.value + line
+    val current = _outputLines.value
+    _outputLines.value = if (current.size >= MAX_OUTPUT_LINES) {
+      current.drop(current.size - MAX_OUTPUT_LINES + 1) + line
+    } else {
+      current + line
+    }
   }
 
   private fun appendSystemLine(text: String) {

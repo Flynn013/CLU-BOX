@@ -40,6 +40,22 @@ import kotlinx.coroutines.runBlocking
 
 private const val TAG = "AGAgentTools"
 
+/**
+ * Maximum character length for any single tool output field delivered to the LLM.
+ * Prevents runaway outputs (e.g. large file reads, verbose shell dumps) from
+ * consuming the context window. ~4096 chars ≈ 1000–1200 tokens for Gemma.
+ */
+private const val MAX_OUTPUT_CHARS = 4096
+
+/** Truncates [text] to [MAX_OUTPUT_CHARS] with a suffix marker when trimmed. */
+private fun capOutput(text: String): String {
+  return if (text.length > MAX_OUTPUT_CHARS) {
+    text.take(MAX_OUTPUT_CHARS) + "\n\n_[Output truncated to ${MAX_OUTPUT_CHARS} chars]_"
+  } else {
+    text
+  }
+}
+
 class AgentTools() : ToolSet {
   lateinit var context: Context
   lateinit var skillManagerViewModel: SkillManagerViewModel
@@ -524,7 +540,7 @@ class AgentTools() : ToolSet {
         )
       )
 
-      mapOf("file_path" to file_path, "content" to content, "status" to "succeeded")
+      mapOf("file_path" to file_path, "content" to capOutput(content), "status" to "succeeded")
     }
   }
 
@@ -815,7 +831,7 @@ class AgentTools() : ToolSet {
 
       mapOf(
         "command" to command,
-        "output" to output,
+        "output" to capOutput(output),
         "status" to status,
       )
     }
@@ -876,14 +892,12 @@ class AgentTools() : ToolSet {
 
       mapOf(
         "command" to command,
-        "output" to output,
+        "output" to capOutput(output),
         "status" to status,
       )
     }
   }
 
-  // =========================================================================
-  // OPERATOR_HALT — Suspend the autonomous loop for human review
   // =========================================================================
 
   /**
@@ -966,7 +980,7 @@ class AgentTools() : ToolSet {
 
       mapOf(
         "query" to query,
-        "result" to result,
+        "result" to capOutput(result),
         "status" to "succeeded",
       )
     }
@@ -1034,7 +1048,7 @@ class AgentTools() : ToolSet {
 
       mapOf(
         "path" to path,
-        "diff" to output,
+        "diff" to capOutput(output),
         "status" to status,
       )
     }

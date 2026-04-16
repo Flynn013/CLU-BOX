@@ -107,7 +107,7 @@ class OracleManager(context: Context) {
 
     for (file in textFiles) {
       try {
-        val lines = file.readLines()
+        val lines = file.readLines(Charsets.UTF_8)
         val matchingLines = lines.filter { it.lowercase().contains(queryLower) }
         if (matchingLines.isNotEmpty()) {
           matches.add("### ${file.name}\n${matchingLines.joinToString("\n")}")

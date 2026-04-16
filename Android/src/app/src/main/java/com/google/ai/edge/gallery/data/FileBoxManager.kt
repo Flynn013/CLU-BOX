@@ -76,9 +76,8 @@ class FileBoxManager(context: Context) {
   val revision: StateFlow<Int> = _revision.asStateFlow()
 
   /** Recursive FileObserver that watches the entire clu_file_box tree. */
-  @Suppress("deprecation") // Using the String path constructor for backward compat.
   private val fileObserver: FileObserver = object : FileObserver(
-    root.absolutePath,
+    root,
     CREATE or DELETE or MODIFY or MOVED_FROM or MOVED_TO or CLOSE_WRITE,
   ) {
     override fun onEvent(event: Int, path: String?) {
@@ -122,7 +121,7 @@ class FileBoxManager(context: Context) {
     return try {
       val target = File(root, relativePath)
       target.parentFile?.mkdirs()
-      target.writeText(content)
+      target.writeText(content, Charsets.UTF_8)
       Log.d(TAG, "writeCodeFile: wrote ${content.length} chars to '$relativePath'")
       true
     } catch (e: Exception) {
@@ -140,7 +139,7 @@ class FileBoxManager(context: Context) {
   fun readCodeFile(relativePath: String): String? {
     return try {
       val target = File(root, relativePath)
-      if (!target.exists() || target.isDirectory) null else target.readText()
+      if (!target.exists() || target.isDirectory) null else target.readText(Charsets.UTF_8)
     } catch (e: Exception) {
       Log.e(TAG, "readCodeFile: failed for '$relativePath'", e)
       null
