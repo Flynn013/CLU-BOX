@@ -122,13 +122,15 @@ fun AgentChatScreen(
   skillManagerViewModel: SkillManagerViewModel = hiltViewModel(),
 ) {
   val context = LocalContext.current
-  viewModel.initAppContext(context)
   agentTools.context = context
   agentTools.skillManagerViewModel = skillManagerViewModel
   agentTools.brainBoxDao = remember(context) { GraphDatabase.getInstance(context).brainBoxDao() }
   agentTools.terminalSessionManager = remember(context) {
     com.google.ai.edge.gallery.data.TerminalSessionManager(context)
   }
+
+  // Initialise the app context once for the TokenMonitor file-writing path.
+  LaunchedEffect(Unit) { viewModel.initAppContext(context) }
   val density = LocalDensity.current
   val windowInfo = LocalWindowInfo.current
   val screenWidthDp = remember { with(density) { windowInfo.containerSize.width.toDp() } }

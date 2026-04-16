@@ -539,11 +539,6 @@ open class LlmChatViewModelBase(
       setInProgress(true)
       setPreparing(true)
 
-      // Track user input tokens.
-      if (input.isNotEmpty()) {
-        monitor.trackMessage(input)
-      }
-
       // Persist user message immediately.
       if (taskId.isNotEmpty() && input.isNotEmpty()) {
         persistMessage(taskId = taskId, model = model, side = ChatSide.USER, content = input)
@@ -761,11 +756,10 @@ open class LlmChatViewModelBase(
             input
           }
 
-        // Track the augmented input tokens (includes RAG context) since
-        // that is the full payload hitting the LLM context window.
-        if (augmentedInput.length > input.length) {
-          val injectedChars = augmentedInput.length - input.length
-          monitor.trackMessage(augmentedInput.substring(0, injectedChars))
+        // Track the full augmented input tokens (user message + RAG context)
+        // since that is the complete payload hitting the LLM context window.
+        if (augmentedInput.isNotEmpty()) {
+          monitor.trackMessage(augmentedInput)
         }
 
         model.runtimeHelper.runInference(
