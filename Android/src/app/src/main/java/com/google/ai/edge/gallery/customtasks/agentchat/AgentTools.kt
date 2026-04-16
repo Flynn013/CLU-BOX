@@ -45,6 +45,9 @@ class AgentTools() : ToolSet {
   lateinit var skillManagerViewModel: SkillManagerViewModel
   var brainBoxDao: BrainBoxDao? = null
 
+  /** Optional reference to the MSTR_CTRL terminal session for shell tools. */
+  var terminalSessionManager: com.google.ai.edge.gallery.data.TerminalSessionManager? = null
+
   /** Lazily initialized FileBoxManager for file workspace operations. */
   val fileBoxManager: com.google.ai.edge.gallery.data.FileBoxManager by lazy {
     com.google.ai.edge.gallery.data.FileBoxManager(context)
@@ -394,7 +397,47 @@ class AgentTools() : ToolSet {
         }
       }
 
-      mapOf("file_path" to file_path, "status" to "succeeded")
+      // ── Phase 5: Auto-Validator Interceptor (Syntax Gatekeeper) ──
+      // After saving, inspect the file extension and run a syntax check.
+      // If validation fails, return the error to force the LLM to debug.
+      val ext = file_path.substringAfterLast('.', "").lowercase()
+      val absolutePath = java.io.File(mgr.root, file_path).absolutePath
+      val tsm = terminalSessionManager
+
+      val validationCmd: String? = when (ext) {
+        "py" -> "python -m py_compile \"$absolutePath\""
+        "js" -> "node --check \"$absolutePath\""
+        else -> null
+      }
+
+      if (validationCmd != null && tsm != null) {
+        Log.d(TAG, "fileBoxWrite: running auto-validation: $validationCmd")
+        val (exitCode, validationOutput) = tsm.executeCommandWithExitCode(validationCmd)
+        if (exitCode != 0) {
+          val errMsg = validationOutput.ifEmpty { "Unknown syntax error" }
+          Log.w(TAG, "fileBoxWrite: validation FAILED for '$file_path': $errMsg")
+          _actionChannel.send(
+            SkillProgressAgentAction(
+              label = "FILE_BOX: syntax error in '$file_path'",
+              inProgress = false,
+              addItemTitle = "Auto-Validator",
+              addItemDescription = "REJECTED: $errMsg",
+            )
+          )
+          return@runBlocking mapOf(
+            "file_path" to file_path,
+            "status" to "rejected",
+            "error" to "FILE REJECTED. Syntax Error: $errMsg",
+          )
+        }
+        Log.d(TAG, "fileBoxWrite: validation PASSED for '$file_path'")
+      }
+
+      mapOf(
+        "file_path" to file_path,
+        "status" to "succeeded",
+        "message" to if (validationCmd != null) "File written and validated successfully" else "File written successfully",
+      )
     }
   }
 
@@ -670,14 +713,16 @@ class AgentTools() : ToolSet {
   }
 
   // =========================================================================
-  // SHELL_EXECUTE — Run terminal commands and return raw output
+  // SHELL_EXECUTE — Run terminal commands invisibly and return raw output
   // =========================================================================
 
   /**
-   * Executes a shell command on the device and returns the combined stdout + stderr output.
+   * Executes a shell command and returns the combined stdout + stderr output.
+   * Pipes through [TerminalSessionManager] when available (invisible mode —
+   * output is NOT printed to the MstrCtrlScreen). Falls back to the standalone
+   * [executeCommand] if the terminal session is not wired.
    *
-   * A strict 10-second timeout is enforced; if the process hangs it is killed and
-   * "TIMEOUT ERROR" is returned.
+   * A strict 10-second timeout is enforced.
    */
   @Tool(
     description = "Use this to execute terminal commands, run test scripts, or check file states. " +
@@ -700,13 +745,79 @@ class AgentTools() : ToolSet {
         )
       )
 
-      val output = com.google.ai.edge.gallery.data.executeCommand(command)
+      val tsm = terminalSessionManager
+      val output = if (tsm != null) {
+        tsm.sendCommand(command, visible = false)
+      } else {
+        com.google.ai.edge.gallery.data.executeCommand(command)
+      }
 
       _actionChannel.send(
         SkillProgressAgentAction(
           label = "Shell: command finished",
           inProgress = false,
           addItemTitle = "Shell_Execute",
+          addItemDescription = "$ $command\n${output.take(200)}${if (output.length > 200) "…" else ""}",
+        )
+      )
+
+      val status = when {
+        output == "TIMEOUT ERROR" -> "timeout"
+        output.startsWith("ERROR:") -> "error"
+        else -> "succeeded"
+      }
+
+      mapOf(
+        "command" to command,
+        "output" to output,
+        "status" to status,
+      )
+    }
+  }
+
+  // =========================================================================
+  // COMMAND_OVERRIDE — Run terminal commands visibly on MstrCtrlScreen
+  // =========================================================================
+
+  /**
+   * Same as [shellExecute] but explicitly prints the AI's input and output
+   * visibly onto the MstrCtrlScreen so the user can watch the AI work in
+   * real time.
+   */
+  @Tool(
+    description = "Execute a terminal command and display both input and output visibly on the " +
+      "MSTR_CTRL terminal screen so the user can watch in real time. Use this when you want the " +
+      "user to see what you are doing. You will also receive the raw output."
+  )
+  fun commandOverride(
+    @ToolParam(description = "The shell command to execute visibly (e.g. 'git status', 'npm test').")
+    command: String,
+  ): Map<String, String> {
+    return runBlocking(Dispatchers.Default) {
+      Log.d(TAG, "commandOverride: command='$command'")
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = "MSTR_CTRL: running visible command…",
+          inProgress = true,
+          addItemTitle = "Command_Override",
+          addItemDescription = "$ $command",
+        )
+      )
+
+      val tsm = terminalSessionManager
+      val output = if (tsm != null) {
+        tsm.sendCommand(command, visible = true)
+      } else {
+        // Fallback: run silently if terminal session is not available.
+        com.google.ai.edge.gallery.data.executeCommand(command)
+      }
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = "MSTR_CTRL: command complete",
+          inProgress = false,
+          addItemTitle = "Command_Override",
           addItemDescription = "$ $command\n${output.take(200)}${if (output.length > 200) "…" else ""}",
         )
       )
