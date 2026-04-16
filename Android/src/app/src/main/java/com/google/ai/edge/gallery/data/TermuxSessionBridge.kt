@@ -1,0 +1,225 @@
+/*
+ * Copyright 2026 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.ai.edge.gallery.data
+
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.util.Log
+import com.termux.terminal.TerminalEmulator
+import com.termux.terminal.TerminalSession
+import com.termux.terminal.TerminalSessionClient
+import java.io.File
+
+private const val TAG = "TermuxSessionBridge"
+
+/**
+ * Wraps the Termux [TerminalSession] to provide a PTY-backed shell inside
+ * the CLU-BOX sandbox.
+ *
+ * A PTY (pseudo-terminal) gives the shell a real terminal device, so:
+ * - ANSI escape codes (colours, cursor movement) work correctly.
+ * - Interactive tools (vim, less, top) work.
+ * - Job control (Ctrl-C, Ctrl-Z) works.
+ * - No separate stdout/stderr demux is needed — everything flows through the PTY.
+ *
+ * The bridge is created lazily by [TerminalSessionManager] and destroyed when
+ * the session ends.
+ */
+class TermuxSessionBridge(private val context: Context) {
+
+  /** The underlying Termux terminal session. `null` until [createSession]. */
+  var terminalSession: TerminalSession? = null
+    private set
+
+  /** Callback interface for the UI to receive terminal updates. */
+  interface Callback {
+    /** Called when new text arrives in the terminal. */
+    fun onTextChanged()
+    /** Called when the terminal title changes (e.g. from shell prompt). */
+    fun onTitleChanged(title: String)
+    /** Called when a bell character is received. */
+    fun onBell()
+    /** Called when the session finishes. */
+    fun onSessionFinished()
+  }
+
+  private var callback: Callback? = null
+
+  fun setCallback(cb: Callback) {
+    callback = cb
+  }
+
+  /**
+   * The [TerminalSessionClient] implementation wired into every
+   * [TerminalSession] created by this bridge.
+   */
+  val sessionClient: TerminalSessionClient = object : TerminalSessionClient {
+
+    override fun onTextChanged(changedSession: TerminalSession) {
+      callback?.onTextChanged()
+    }
+
+    override fun onTitleChanged(changedSession: TerminalSession) {
+      callback?.onTitleChanged(changedSession.title ?: "")
+    }
+
+    override fun onSessionFinished(finishedSession: TerminalSession) {
+      Log.d(TAG, "Terminal session finished")
+      callback?.onSessionFinished()
+    }
+
+    override fun onBell(session: TerminalSession) {
+      callback?.onBell()
+    }
+
+    override fun onColorsChanged(session: TerminalSession) {
+      // Colour palette update — UI will pick up on next render.
+    }
+
+    override fun onTerminalCursorStateChange(state: Boolean) {
+      // Cursor blink state changed — no special handling needed.
+    }
+
+    override fun setTerminalShellPid(session: TerminalSession, pid: Int) {
+      Log.d(TAG, "Shell PID: $pid")
+    }
+
+    override fun getTerminalCursorStyle(): Int? {
+      // Return null to use the default cursor style.
+      return null
+    }
+
+    override fun onCopyTextToClipboard(session: TerminalSession, text: String?) {
+      if (text != null) {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
+            as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("Terminal", text))
+      }
+    }
+
+    override fun onPasteTextFromClipboard(session: TerminalSession?) {
+      val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
+          as ClipboardManager
+      val clip = clipboard.primaryClip
+      if (clip != null && clip.itemCount > 0) {
+        val text = clip.getItemAt(0).coerceToText(context).toString()
+        session?.write(text)
+      }
+    }
+
+    override fun logError(tag: String?, message: String?) {
+      Log.e(tag ?: TAG, message ?: "(null)")
+    }
+
+    override fun logWarn(tag: String?, message: String?) {
+      Log.w(tag ?: TAG, message ?: "(null)")
+    }
+
+    override fun logInfo(tag: String?, message: String?) {
+      Log.i(tag ?: TAG, message ?: "(null)")
+    }
+
+    override fun logDebug(tag: String?, message: String?) {
+      Log.d(tag ?: TAG, message ?: "(null)")
+    }
+
+    override fun logVerbose(tag: String?, message: String?) {
+      Log.v(tag ?: TAG, message ?: "(null)")
+    }
+
+    override fun logStackTraceWithMessage(tag: String?, message: String?, e: Exception?) {
+      Log.e(tag ?: TAG, message, e)
+    }
+
+    override fun logStackTrace(tag: String?, e: Exception?) {
+      Log.e(tag ?: TAG, "Stack trace", e)
+    }
+  }
+
+  /**
+   * Creates and starts a new PTY-backed shell session.
+   *
+   * The shell process is not started until the [com.termux.view.TerminalView]
+   * calls [TerminalSession.updateSize] during layout.
+   *
+   * @param sandboxRoot The directory to use as `$HOME` and initial cwd.
+   * @param shell       Path to the shell binary (default: `/system/bin/sh`).
+   */
+  fun createSession(sandboxRoot: File, shell: String = "/system/bin/sh") {
+    if (terminalSession != null) {
+      Log.w(TAG, "Session already exists — destroying old one first")
+      destroySession()
+    }
+
+    val cwd = sandboxRoot.absolutePath
+    val home = sandboxRoot.absolutePath
+
+    // Build the environment for the shell.
+    val termuxBin = "/data/data/com.termux/files/usr/bin"
+    val basePath = "/system/bin:/system/xbin"
+    val effectivePath = if (File(termuxBin).isDirectory) "$termuxBin:$basePath" else basePath
+
+    val env = arrayOf(
+      "HOME=$home",
+      "TERM=xterm-256color",
+      "PATH=$effectivePath",
+      "COLORTERM=truecolor",
+      "LANG=en_US.UTF-8",
+    )
+
+    val args = arrayOf(shell)
+
+    Log.d(TAG, "Creating PTY session — shell=$shell, cwd=$cwd")
+    terminalSession = TerminalSession(
+      shell,    // executable
+      cwd,      // working directory
+      args,     // arguments
+      env,      // environment
+      TerminalEmulator.DEFAULT_TERMINAL_TRANSCRIPT_ROWS, // transcript rows
+      sessionClient,
+    )
+
+    Log.i(TAG, "PTY session created — waiting for TerminalView layout to start shell")
+  }
+
+  /**
+   * Writes [text] into the terminal's stdin (PTY master side).
+   * Use this to send commands or user keystrokes.
+   */
+  fun write(text: String) {
+    terminalSession?.write(text)
+  }
+
+  /**
+   * Sends a command followed by a newline (Enter key).
+   */
+  fun sendCommand(command: String) {
+    write("$command\n")
+  }
+
+  /** True if a session exists and its process is still alive. */
+  val isAlive: Boolean
+    get() = terminalSession?.isRunning == true
+
+  /** Destroys the current session, killing the shell process. */
+  fun destroySession() {
+    terminalSession?.finishIfRunning()
+    terminalSession = null
+    Log.d(TAG, "Session destroyed")
+  }
+}

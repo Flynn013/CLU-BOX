@@ -16,6 +16,9 @@
 
 package com.google.ai.edge.gallery.ui.osmodules
 
+import android.graphics.Typeface
+import android.view.KeyEvent
+import android.view.MotionEvent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,12 +26,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -37,8 +36,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,51 +45,60 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.google.ai.edge.gallery.data.LineSource
-import com.google.ai.edge.gallery.data.TerminalLine
+import androidx.compose.ui.viewinterop.AndroidView
 import com.google.ai.edge.gallery.data.TerminalSessionManager
+import com.google.ai.edge.gallery.data.TermuxSessionBridge
 import com.google.ai.edge.gallery.ui.theme.absoluteBlack
 import com.google.ai.edge.gallery.ui.theme.neonGreen
+import com.termux.terminal.TerminalSession
+import com.termux.view.TerminalView
+import com.termux.view.TerminalViewClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
-// ── Colour map for terminal output sources ──────────────────────────────
-private val stdinColor = Color(0xFF8BE9FD)    // cyan — echoed user input
-private val stdoutColor = neonGreen            // green — standard output
-private val stderrColor = Color(0xFFFF5555)    // red — errors
-private val systemColor = Color(0xFFBD93F9)    // purple — system messages
-
 /**
- * MSTR_CTRL — full-screen terminal UI backed by [TerminalSessionManager].
+ * MSTR_CTRL — full-screen terminal UI powered by the Termux terminal-emulator
+ * library.
+ *
+ * The screen embeds the native [TerminalView] via [AndroidView], giving the
+ * user a real PTY-backed shell with ANSI colour support, interactive programs,
+ * and job control.
+ *
+ * The [TerminalSessionManager] is still started for:
+ * - The pre-flight firmware check (first-boot detection).
+ * - Agent-initiated `Shell_Execute` / `executeCommandWithExitCode` calls
+ *   (which use isolated one-shot `sh -c` processes for timeout safety).
  *
  * UI rules:
  * • Pure black background, neon green text.
- * • Scrollable output area with colour-coded lines.
- * • Bottom input row for manual user commands.
+ * • Full-screen TerminalView for interactive shell.
+ * • Bottom input row for quick command injection.
  */
 @Composable
 fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
-  val outputLines by sessionManager.outputLines.collectAsState()
-  var inputText by remember { mutableStateOf("") }
-  val listState = rememberLazyListState()
+  val context = LocalContext.current
   val scope = rememberCoroutineScope()
+  var inputText by remember { mutableStateOf("") }
 
-  // Start the session on first composition.
+  // Create the Termux PTY bridge.
+  val bridge = remember { TermuxSessionBridge(context) }
+
+  // Start the legacy session manager (pre-flight + agent tools) and
+  // create the PTY session for the interactive terminal view.
   LaunchedEffect(Unit) {
     sessionManager.startSession()
+    bridge.createSession(sessionManager.sandboxRoot)
   }
 
-  // Auto-scroll to bottom when new lines arrive.
-  LaunchedEffect(outputLines.size) {
-    if (outputLines.isNotEmpty()) {
-      listState.animateScrollToItem(outputLines.size - 1)
-    }
+  // Clean up PTY on disposal.
+  DisposableEffect(Unit) {
+    onDispose { bridge.destroySession() }
   }
 
   Column(
@@ -98,20 +106,44 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
       .fillMaxSize()
       .background(absoluteBlack),
   ) {
-    // ── Output area ──────────────────────────────────────────
-    LazyColumn(
-      state = listState,
+    // ── Termux TerminalView (main content area) ────────────────
+    Box(
       modifier = Modifier
         .weight(1f)
-        .fillMaxWidth()
-        .padding(horizontal = 8.dp, vertical = 4.dp),
+        .fillMaxWidth(),
     ) {
-      items(outputLines) { line ->
-        TerminalOutputLine(line)
-      }
+      AndroidView(
+        modifier = Modifier.fillMaxSize(),
+        factory = { ctx ->
+          TerminalView(ctx, null).apply {
+            // Wire up the view client that handles keyboard/touch events.
+            setTerminalViewClient(CluTerminalViewClient())
+
+            // Style: monospace font, neon-green on black.
+            setTextSize(13)
+            setTypeface(Typeface.MONOSPACE)
+
+            // Black background to match CLU/BOX aesthetic.
+            setBackgroundColor(android.graphics.Color.BLACK)
+
+            // Attach the PTY session — the shell starts once the view measures.
+            val session = bridge.terminalSession
+            if (session != null) {
+              attachSession(session)
+            }
+          }
+        },
+        update = { view ->
+          // Re-attach if the session was recreated.
+          val session = bridge.terminalSession
+          if (session != null && view.mTermSession !== session) {
+            view.attachSession(session)
+          }
+        },
+      )
     }
 
-    // ── Bottom input row ─────────────────────────────────────
+    // ── Bottom input row (quick command injection) ─────────────
     Row(
       modifier = Modifier
         .fillMaxWidth()
@@ -144,15 +176,13 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
 
       Spacer(Modifier.width(4.dp))
 
-      // Send button.
+      // Send button — injects command into the PTY.
       IconButton(
         onClick = {
           val cmd = inputText.trim()
           if (cmd.isNotEmpty()) {
             inputText = ""
-            scope.launch(Dispatchers.IO) {
-              sessionManager.sendCommand(cmd, visible = true)
-            }
+            bridge.sendCommand(cmd)
           }
         },
       ) {
@@ -163,11 +193,18 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
         )
       }
 
-      // Clear output button.
-      IconButton(onClick = { sessionManager.clearOutput() }) {
+      // Clear / restart session.
+      IconButton(
+        onClick = {
+          scope.launch(Dispatchers.IO) {
+            bridge.destroySession()
+            bridge.createSession(sessionManager.sandboxRoot)
+          }
+        },
+      ) {
         Icon(
           Icons.Default.DeleteSweep,
-          contentDescription = "Clear",
+          contentDescription = "Restart terminal",
           tint = neonGreen.copy(alpha = 0.6f),
         )
       }
@@ -175,23 +212,56 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
   }
 }
 
-// ── Single terminal line composable ─────────────────────────────────────
+// ── TerminalViewClient implementation ────────────────────────────────────
+//
+// Handles keyboard, touch, and IME events for the embedded TerminalView.
 
-@Composable
-private fun TerminalOutputLine(line: TerminalLine) {
-  val color = when (line.source) {
-    LineSource.STDIN -> stdinColor
-    LineSource.STDOUT -> stdoutColor
-    LineSource.STDERR -> stderrColor
-    LineSource.SYSTEM -> systemColor
+private class CluTerminalViewClient : TerminalViewClient {
+
+  override fun onScale(scale: Float): Float = 1.0f // Disable pinch-to-zoom.
+
+  override fun onSingleTapUp(e: MotionEvent) {
+    // Default: request focus so the soft keyboard appears.
   }
-  Text(
-    text = line.text,
-    color = color,
-    fontFamily = FontFamily.Monospace,
-    fontSize = 12.sp,
-    modifier = Modifier
-      .fillMaxWidth()
-      .padding(vertical = 1.dp),
-  )
+
+  override fun shouldBackButtonBeMappedToEscape(): Boolean = false
+
+  override fun shouldEnforceCharBasedInput(): Boolean = true
+
+  override fun shouldUseCtrlSpaceWorkaround(): Boolean = false
+
+  override fun isTerminalViewSelected(): Boolean = true
+
+  override fun copyModeChanged(copyMode: Boolean) {
+    // No-op — copy mode UI not needed in CLU/BOX.
+  }
+
+  override fun onKeyDown(keyCode: Int, e: KeyEvent, session: TerminalSession): Boolean = false
+
+  override fun onKeyUp(keyCode: Int, e: KeyEvent): Boolean = false
+
+  override fun onLongPress(event: MotionEvent): Boolean = false
+
+  override fun readControlKey(): Boolean = false
+
+  override fun readAltKey(): Boolean = false
+
+  override fun readShiftKey(): Boolean = false
+
+  override fun readFnKey(): Boolean = false
+
+  override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession): Boolean =
+    false
+
+  override fun onEmulatorSet() {
+    // Terminal emulator initialized — the shell is about to start.
+  }
+
+  override fun logError(tag: String?, message: String?) {}
+  override fun logWarn(tag: String?, message: String?) {}
+  override fun logInfo(tag: String?, message: String?) {}
+  override fun logDebug(tag: String?, message: String?) {}
+  override fun logVerbose(tag: String?, message: String?) {}
+  override fun logStackTraceWithMessage(tag: String?, message: String?, e: Exception?) {}
+  override fun logStackTrace(tag: String?, e: Exception?) {}
 }

@@ -127,6 +127,12 @@ dependencies {
   implementation(libs.mlkit.genai.prompt)
   implementation(libs.room.runtime)
   implementation(libs.room.ktx)
+
+  // ── Termux terminal emulator (PTY-backed shell sessions + TerminalView) ──
+  // From JitPack — https://github.com/termux/termux-app/wiki/Termux-Libraries
+  implementation("com.termux.termux-app:terminal-view:0.118.0")
+  // Avoid Guava ListenableFuture classpath collision with Termux/shared deps.
+  implementation("com.google.guava:listenablefuture:9999.0-empty-to-avoid-conflict-with-guava")
 }
 
 protobuf {

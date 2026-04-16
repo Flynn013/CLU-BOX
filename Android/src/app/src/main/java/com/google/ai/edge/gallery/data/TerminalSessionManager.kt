@@ -62,8 +62,14 @@ enum class LineSource { STDIN, STDOUT, STDERR, SYSTEM }
  * across screen rotations and navigation events as long as the hosting
  * [Context] (Application) is alive.
  *
- * On first boot, an initialization hook runs `pkg install git python nodejs -y`
- * to arm the terminal before the AI wakes up.
+ * On first boot, an initialization hook detects whether the Termux `pkg`
+ * binary exists on disk. If found it runs
+ * `pkg install git python nodejs -y` to arm the terminal. If absent (standard
+ * Android without Termux) the step is cleanly skipped.
+ *
+ * The Termux `terminal-emulator` / `terminal-view` libraries are included as
+ * JitPack dependencies, providing PTY-based terminal sessions and a native
+ * [TerminalView] widget. See [TermuxSessionBridge] for the PTY integration.
  */
 class TerminalSessionManager(private val context: Context) {
 
@@ -356,9 +362,10 @@ class TerminalSessionManager(private val context: Context) {
 
     appendSystemLine("[FIRMWARE] First boot detected — running pre-flight check…")
     scope.launch {
-      // Probe for `pkg` silently — `command -v` never prints "not found" errors.
-      val (probeExit, _) = executeCommandWithExitCode("command -v pkg >/dev/null 2>&1")
-      val hasPkg = probeExit == 0
+      // Check for Termux's `pkg` binary purely in Kotlin — no shell invocation,
+      // so zero chance of a "pkg: not found" error leaking to the terminal.
+      val pkgBinary = File("/data/data/com.termux/files/usr/bin/pkg")
+      val hasPkg = pkgBinary.exists() && pkgBinary.canExecute()
 
       if (hasPkg) {
         appendSystemLine("[FIRMWARE] pkg detected — installing packages…")
