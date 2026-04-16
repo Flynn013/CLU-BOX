@@ -44,15 +44,16 @@ fun executeCommand(command: String): String {
 
     // Read stdout and stderr on background threads so the pipe buffers don't fill up
     // and deadlock the process before waitFor returns.
-    @Volatile var stdout = ""
-    @Volatile var stderr = ""
+    // Use arrays as thread-safe holders since @Volatile cannot be applied to locals.
+    val stdoutHolder = arrayOf("")
+    val stderrHolder = arrayOf("")
 
     val stdoutThread = Thread {
-      stdout = process.inputStream.bufferedReader(Charsets.UTF_8).readText()
+      stdoutHolder[0] = process.inputStream.bufferedReader(Charsets.UTF_8).readText()
     }.also { it.start() }
 
     val stderrThread = Thread {
-      stderr = process.errorStream.bufferedReader(Charsets.UTF_8).readText()
+      stderrHolder[0] = process.errorStream.bufferedReader(Charsets.UTF_8).readText()
     }.also { it.start() }
 
     val finished = process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -68,6 +69,9 @@ fun executeCommand(command: String): String {
     // Ensure reader threads have finished.
     stdoutThread.join(1_000)
     stderrThread.join(1_000)
+
+    val stdout = stdoutHolder[0]
+    val stderr = stderrHolder[0]
 
     val combined = buildString {
       if (stdout.isNotEmpty()) append(stdout)

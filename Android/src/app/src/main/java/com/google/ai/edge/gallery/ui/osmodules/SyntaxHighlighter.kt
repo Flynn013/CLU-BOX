@@ -437,7 +437,8 @@ private fun highlightJson(code: String): AnnotatedString = buildAnnotatedString 
 // ── Markdown ────────────────────────────────────────────────────────────
 
 private fun highlightMarkdown(code: String): AnnotatedString = buildAnnotatedString {
-  for (line in code.lines()) {
+  val lines = code.lines()
+  for ((index, line) in lines.withIndex()) {
     when {
       line.startsWith("# ") || line.startsWith("## ") || line.startsWith("### ") -> {
         pushStyle(SpanStyle(color = colorKeyword, fontWeight = FontWeight.Bold))
@@ -460,10 +461,8 @@ private fun highlightMarkdown(code: String): AnnotatedString = buildAnnotatedStr
         pop()
       }
     }
-    append("\n")
-  }
-  // Remove trailing newline.
-  if (length > 0 && this[length - 1] == '\n') {
-    delete(length - 1, length)
+    if (index < lines.lastIndex) {
+      append("\n")
+    }
   }
 }
