@@ -195,7 +195,7 @@ fun AgentChatScreen(
 
       updateProgressPanel(viewModel = viewModel, model = model, agentTools = agentTools)
 
-      // Phase 5: Autonomous Supervisor — if a pending task was queued via Task_Queue_Update,
+      // Phase 5: Autonomous Supervisor — if a pending task was queued via taskQueueUpdate,
       // silently re-trigger inference with the next task description.
       val pendingTask = agentTools.pendingTaskDescription
       if (pendingTask != null) {
