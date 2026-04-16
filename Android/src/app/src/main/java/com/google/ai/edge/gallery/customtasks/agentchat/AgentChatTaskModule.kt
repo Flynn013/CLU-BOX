@@ -62,6 +62,8 @@ class AgentChatTask @Inject constructor() : CustomTask {
         • fileBoxWrite — Write a text/code file to the FILE_BOX workspace. Nested folders are created automatically (e.g. 'project/src/main.kt').
         • fileBoxRead — Read a file from the FILE_BOX workspace.
         • taskQueueUpdate — For multi-step projects: set status='pending' with next_task_description to continue working autonomously, or status='complete' when finished.
+        • architectInit — (Planner-Worker) Call ONCE to commit a project blueprint with project_goal and blueprint_markdown. Writes blueprint.md and auto-starts the worker phase.
+        • workerExecute — (Planner-Worker) Call once per file: writes target_file_path with code_content, marks it DONE in blueprint.md, and auto-continues until is_project_finished is true.
 
         For EVERY new task or request or question, you MUST execute the following steps in exact order. You MUST NOT skip any steps.
 
@@ -73,11 +75,11 @@ class AgentChatTask @Inject constructor() : CustomTask {
 
         After this step you MUST go to next step. You MUST NOT use `run_intent` under any circumstances at this step.
 
-        2. If a relevant skill exists, use the `load_skill` tool to read its instructions. If the task is better handled by a built-in native tool (fileBoxWrite, fileBoxRead, queryBrain, saveBrainNeuron, taskQueueUpdate), use that directly instead. You MUST NOT use `run_intent` under any circumstances at this step.
+        2. If a relevant skill exists, use the `load_skill` tool to read its instructions. If the task is better handled by a built-in native tool (fileBoxWrite, fileBoxRead, queryBrain, saveBrainNeuron, taskQueueUpdate, architectInit, workerExecute), use that directly instead. You MUST NOT use `run_intent` under any circumstances at this step.
 
         3. Follow the skill's instructions exactly to complete the task. You MUST NOT output any intermediate thoughts or status updates. No exceptions! Output ONLY the final result when successful. It should contain one-sentence summary of the action taken, and the final result of the skill.
 
-        For multi-file project generation: Use fileBoxWrite to create each file, and use taskQueueUpdate with status='pending' to queue the next file until all files are written, then use taskQueueUpdate with status='complete'.
+        For multi-file project generation: Use the Planner-Worker workflow — call architectInit once with the full blueprint, then the worker loop will automatically call workerExecute for each file. Alternatively, use fileBoxWrite with taskQueueUpdate for simpler projects.
         """
           .trimIndent(),
     )

@@ -499,6 +499,176 @@ class AgentTools() : ToolSet {
     }
   }
 
+  // =========================================================================
+  // Planner-Worker — Dual-agent autonomous project generation
+  // =========================================================================
+
+  /** Blueprint file path inside FILE_BOX. */
+  private val BLUEPRINT_PATH = "blueprint.md"
+
+  /**
+   * Architect_Init: the planning phase of the dual-agent workflow.
+   *
+   * The LLM calls this once to commit a project blueprint. The callback:
+   * 1. Writes [blueprint_markdown] to `clu_file_box/blueprint.md`.
+   * 2. Queues a pending task that instructs the worker to begin executing
+   *    the first pending file from the blueprint.
+   */
+  @Tool(
+    description = "Architect phase: commits a project blueprint. Call this ONCE at the start of " +
+      "a multi-file project. Provide the full project goal and a markdown blueprint that lists " +
+      "every file to create with its path and status (PENDING/DONE). After this call the worker " +
+      "phase begins automatically."
+  )
+  fun architectInit(
+    @ToolParam(description = "High-level description of the project goal.")
+    project_goal: String,
+    @ToolParam(description = "Full markdown blueprint listing every file to generate. " +
+      "Each file entry should be on its own line in the format: '- [ ] path/to/file.ext' " +
+      "(PENDING) or '- [x] path/to/file.ext' (DONE).")
+    blueprint_markdown: String,
+  ): Map<String, String> {
+    return runBlocking(Dispatchers.Default) {
+      Log.d(TAG, "architectInit: goal='${project_goal.take(80)}', blueprint=${blueprint_markdown.length} chars")
+
+      // Write the blueprint to FILE_BOX.
+      val mgr = fileBoxManager
+      val written = mgr.writeCodeFile(BLUEPRINT_PATH, blueprint_markdown)
+      if (!written) {
+        return@runBlocking mapOf(
+          "error" to "Failed to write blueprint.md",
+          "status" to "failed",
+        )
+      }
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = "Architect: blueprint committed (${blueprint_markdown.lines().size} lines)",
+          inProgress = true,
+          addItemTitle = "Architect_Init",
+          addItemDescription = "Goal: ${project_goal.take(120)}\nBlueprint written to $BLUEPRINT_PATH",
+        )
+      )
+
+      // Log goal to BrainBox.
+      val dao = brainBoxDao
+      if (dao != null) {
+        dao.insertNeuron(
+          NeuronEntity(
+            id = UUID.randomUUID().toString(),
+            label = "Project_Goal",
+            type = "Architect",
+            content = project_goal,
+          )
+        )
+      }
+
+      // Auto-trigger the worker phase.
+      pendingTaskDescription =
+        "WORKER PHASE: Read blueprint.md from FILE_BOX using fileBoxRead(file_path='blueprint.md'). " +
+        "Find the first file marked as '- [ ]' (PENDING). Generate its full content and call " +
+        "workerExecute with the target_file_path, code_content, and is_project_finished=false. " +
+        "Continue until all files are DONE, then call workerExecute with is_project_finished=true."
+
+      mapOf(
+        "blueprint_path" to BLUEPRINT_PATH,
+        "project_goal" to project_goal,
+        "status" to "succeeded",
+      )
+    }
+  }
+
+  /**
+   * Worker_Execute: the execution phase of the dual-agent workflow.
+   *
+   * Called once per file. The callback:
+   * 1. Writes [code_content] to [target_file_path] via FileBoxManager.
+   * 2. Reads blueprint.md, marks the target file as DONE.
+   * 3. If [is_project_finished] is false, queues the next pending file.
+   */
+  @Tool(
+    description = "Worker phase: writes a single file and updates the blueprint. Call this for " +
+      "each file in the project. Set is_project_finished to true only when every file in the " +
+      "blueprint is DONE."
+  )
+  fun workerExecute(
+    @ToolParam(description = "Relative file path to write (e.g. 'my_app/src/main.kt').")
+    target_file_path: String,
+    @ToolParam(description = "The full text/code content for the file.")
+    code_content: String,
+    @ToolParam(description = "Set to 'true' when ALL files in the blueprint are complete, 'false' otherwise.")
+    is_project_finished: String,
+  ): Map<String, String> {
+    return runBlocking(Dispatchers.Default) {
+      val finished = is_project_finished.trim().lowercase() == "true"
+      Log.d(TAG, "workerExecute: path='$target_file_path', finished=$finished, content=${code_content.length} chars")
+
+      // 1. Write the file via FileBoxManager.
+      val mgr = fileBoxManager
+      if (!mgr.isAllowedExtension(target_file_path)) {
+        return@runBlocking mapOf(
+          "error" to "Extension not allowed for '$target_file_path'.",
+          "status" to "failed",
+        )
+      }
+      val isNew = !java.io.File(mgr.root, target_file_path).exists()
+      val ok = mgr.writeCodeFile(target_file_path, code_content)
+      if (!ok) {
+        return@runBlocking mapOf("error" to "Failed to write $target_file_path", "status" to "failed")
+      }
+
+      // BrainBox telemetry for new files.
+      if (isNew) {
+        brainBoxDao?.insertNeuron(
+          NeuronEntity(
+            id = UUID.randomUUID().toString(),
+            label = target_file_path,
+            type = "File_Creation_Log",
+            content = code_content,
+          )
+        )
+      }
+
+      // 2. Read and update blueprint.md — mark target file as DONE.
+      val blueprint = mgr.readCodeFile(BLUEPRINT_PATH)
+      if (blueprint != null) {
+        // Replace the first occurrence of "- [ ] target_file_path" with "- [x] target_file_path"
+        val updatedBlueprint = blueprint.replaceFirst(
+          "- [ ] $target_file_path",
+          "- [x] $target_file_path",
+        )
+        mgr.writeCodeFile(BLUEPRINT_PATH, updatedBlueprint)
+      }
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = if (finished) "Worker: project complete ✓" else "Worker: wrote '$target_file_path'",
+          inProgress = !finished,
+          addItemTitle = "Worker_Execute",
+          addItemDescription = "Path: $target_file_path (${code_content.length} chars)" +
+            if (finished) "\n✓ All files complete." else "",
+        )
+      )
+
+      // 3. Queue next iteration or signal completion.
+      if (!finished) {
+        pendingTaskDescription =
+          "WORKER PHASE: Read the updated blueprint.md using fileBoxRead(file_path='blueprint.md'). " +
+          "Find the next file marked as '- [ ]' (PENDING). Generate its full content and call " +
+          "workerExecute with the target_file_path, code_content, and is_project_finished set " +
+          "appropriately (true only if this is the last file)."
+      } else {
+        pendingTaskDescription = null
+      }
+
+      mapOf(
+        "file_path" to target_file_path,
+        "is_project_finished" to finished.toString(),
+        "status" to "succeeded",
+      )
+    }
+  }
+
   fun sendAgentAction(action: AgentAction) {
     runBlocking(Dispatchers.Default) { _actionChannel.send(action) }
   }
