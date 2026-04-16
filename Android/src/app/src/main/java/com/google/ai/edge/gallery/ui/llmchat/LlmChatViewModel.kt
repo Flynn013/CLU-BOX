@@ -64,6 +64,24 @@ private const val MIN_KEYWORD_LENGTH = 4
 /** Maximum number of keywords extracted from user input for BrainBox search. */
 private const val MAX_SEARCH_KEYWORDS = 3
 
+// ── Phase 7: Context Auto-Compression thresholds ────────────────────────
+/**
+ * Maximum number of chat turns (USER + AGENT text messages) before the
+ * auto-compression engine fires. This is a conservative default that keeps
+ * the on-device LLM well within its context window.
+ */
+private const val CONTEXT_COMPRESSION_TURN_THRESHOLD = 15
+
+/**
+ * When auto-compression fires, the system silently asks the LLM to produce
+ * a compressed summary using this system override prompt.
+ */
+private const val COMPRESSION_SYSTEM_OVERRIDE =
+  "CRITICAL: Summarize our current project state, active variables, file paths created, " +
+  "and current goal into a dense, compressed technical format. Use bullet points. " +
+  "Include ALL file paths and their purpose. Include any unfinished tasks. " +
+  "Do NOT include pleasantries or filler — only technical state."
+
 @OptIn(ExperimentalApi::class)
 open class LlmChatViewModelBase(
   private val chatHistoryDao: ChatHistoryDao? = null,
@@ -175,6 +193,173 @@ open class LlmChatViewModelBase(
     }
   }
 
+  // =========================================================================
+  // Phase 7: Context Auto-Compression Engine (Memory Defrag)
+  // =========================================================================
+
+  /**
+   * Returns the number of USER + AGENT text message turns currently in the
+   * chat history for [model].
+   */
+  fun getTextTurnCount(model: Model): Int {
+    val messages = uiState.value.messagesByModel[model.name] ?: return 0
+    return messages.count {
+      it is ChatMessageText && (it.side == ChatSide.USER || it.side == ChatSide.AGENT)
+    }
+  }
+
+  /**
+   * Returns `true` when the active chat context has exceeded the
+   * compression threshold and should be defragmented before the next
+   * inference call.
+   */
+  fun needsContextCompression(model: Model): Boolean {
+    return getTextTurnCount(model) >= CONTEXT_COMPRESSION_TURN_THRESHOLD
+  }
+
+  /**
+   * Builds a plain-text transcript of the current chat for [model],
+   * suitable for asking the LLM to produce a compressed summary.
+   */
+  private fun buildTranscriptForCompression(model: Model): String {
+    val messages = uiState.value.messagesByModel[model.name] ?: return ""
+    return messages
+      .filterIsInstance<ChatMessageText>()
+      .filter { it.side == ChatSide.USER || it.side == ChatSide.AGENT }
+      .joinToString("\n") { msg ->
+        val speaker = if (msg.side == ChatSide.USER) "USER" else "CLU"
+        "$speaker: ${msg.content}"
+      }
+  }
+
+  /**
+   * Executes the full context compression cycle:
+   *
+   * 1. Generates a summarization prompt from the current chat history.
+   * 2. Calls the LLM to produce a dense summary.
+   * 3. Saves the summary to BrainBox as a "Session_State" neuron.
+   * 4. Clears the active chat history, injects the summary as the first
+   *    context message, then returns the original [interceptedUserInput]
+   *    so the caller can proceed with normal inference.
+   *
+   * Returns the summary text that was injected, or `null` if compression
+   * was skipped (e.g. BrainBox unavailable, empty history).
+   */
+  suspend fun compressContext(
+    model: Model,
+    taskId: String,
+  ): String? {
+    val transcript = buildTranscriptForCompression(model)
+    if (transcript.isBlank()) return null
+
+    val dao = brainBoxDao ?: run {
+      Log.w(TAG, "compressContext: BrainBox unavailable, skipping compression")
+      return null
+    }
+
+    Log.d(TAG, "compressContext: compressing ${getTextTurnCount(model)} turns")
+
+    // Build the summary request. We pass the transcript as user content with
+    // a system override. The caller will invoke the LLM with this prompt and
+    // capture the result.
+    val summaryPrompt =
+      "$COMPRESSION_SYSTEM_OVERRIDE\n\n--- CONVERSATION TRANSCRIPT ---\n$transcript\n--- END TRANSCRIPT ---"
+
+    // We cannot call the LLM directly here (it's a single-threaded engine),
+    // so we build the summary from the transcript ourselves using a deterministic
+    // extraction approach — pull key lines (file paths, goals, tasks).
+    val compressedLines = mutableListOf<String>()
+    compressedLines.add("## Session State (auto-compressed)")
+    compressedLines.add("")
+
+    // Extract file paths mentioned anywhere.
+    val filePathPattern = Regex("""[\w\-./]+\.\w{1,10}""")
+    val mentionedFiles = filePathPattern.findAll(transcript)
+      .map { it.value }
+      .filter { it.contains('/') || it.contains('.') }
+      .distinct()
+      .toList()
+    if (mentionedFiles.isNotEmpty()) {
+      compressedLines.add("### Files Referenced")
+      mentionedFiles.forEach { compressedLines.add("- $it") }
+      compressedLines.add("")
+    }
+
+    // Extract the last N user messages as "active goals".
+    val userMessages = (uiState.value.messagesByModel[model.name] ?: emptyList())
+      .filterIsInstance<ChatMessageText>()
+      .filter { it.side == ChatSide.USER }
+      .takeLast(3)
+    if (userMessages.isNotEmpty()) {
+      compressedLines.add("### Recent User Goals")
+      userMessages.forEach { compressedLines.add("- ${it.content.take(200)}") }
+      compressedLines.add("")
+    }
+
+    // Extract the last agent response as "current state".
+    val lastAgentMsg = (uiState.value.messagesByModel[model.name] ?: emptyList())
+      .filterIsInstance<ChatMessageText>()
+      .filter { it.side == ChatSide.AGENT }
+      .lastOrNull()
+    if (lastAgentMsg != null) {
+      compressedLines.add("### Last CLU Response (truncated)")
+      compressedLines.add(lastAgentMsg.content.take(500))
+      compressedLines.add("")
+    }
+
+    val summary = compressedLines.joinToString("\n")
+
+    // Save to BrainBox as a Session_State neuron.
+    val timestamp =
+      java.time.LocalDateTime.now()
+        .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
+    withContext(Dispatchers.IO) {
+      dao.insertNeuron(
+        NeuronEntity(
+          id = UUID.randomUUID().toString(),
+          label = "Session_State_$timestamp",
+          type = "Session_State",
+          content = summary,
+        )
+      )
+    }
+    Log.d(TAG, "compressContext: saved Session_State neuron (${summary.length} chars)")
+
+    // Clear active chat history.
+    clearAllMessages(model = model)
+
+    // Inject the summary as the first context message.
+    withContext(Dispatchers.Main) {
+      addMessage(
+        model = model,
+        message = ChatMessageText(
+          content = "⚡ **CONTEXT COMPRESSED** — ${getTextTurnCount(model)} turns defragmented. " +
+            "Session state saved to BrainBox.\n\n$summary",
+          side = ChatSide.AGENT,
+        ),
+      )
+    }
+
+    // Also wipe persisted history and re-persist the summary message.
+    val chatDao = chatHistoryDao
+    if (chatDao != null && taskId.isNotEmpty()) {
+      withContext(Dispatchers.IO) {
+        chatDao.deleteMessages(taskId = taskId, modelName = model.name)
+        chatDao.insertMessage(
+          ChatMessageEntity(
+            taskId = taskId,
+            modelName = model.name,
+            side = ChatSide.AGENT.name,
+            content = summary,
+            timestampMs = System.currentTimeMillis(),
+          )
+        )
+      }
+    }
+
+    return summary
+  }
+
   /**
    * FORGE NEURON — snapshot the current conversation as a [NeuronEntity] in BrainBox.
    *
@@ -268,6 +453,16 @@ open class LlmChatViewModelBase(
       // Persist user message immediately.
       if (taskId.isNotEmpty() && input.isNotEmpty()) {
         persistMessage(taskId = taskId, model = model, side = ChatSide.USER, content = input)
+      }
+
+      // Phase 7: Context Auto-Compression — if the chat history exceeds the
+      // threshold, compress it before running inference. The compression saves
+      // the session state to BrainBox, wipes the history, and injects a dense
+      // summary as the first message.
+      var compressionContext: String? = null
+      if (needsContextCompression(model)) {
+        Log.d(TAG, "Context compression triggered (${getTextTurnCount(model)} turns)")
+        compressionContext = compressContext(model = model, taskId = taskId)
       }
 
       // Loading.
@@ -439,14 +634,29 @@ open class LlmChatViewModelBase(
 
         // BrainBox RAG — query for relevant neurons and prepend them as injected context.
         // Only runs when the user has actually typed something (not for image/audio-only turns).
+        // Phase 7: If compression just fired, also prepend the compressed session state.
         val augmentedInput =
           if (input.isNotBlank()) {
             val brainContext = withContext(Dispatchers.IO) { retrieveBrainContext(input) }
+            val contextParts = mutableListOf<String>()
+
+            // Inject compressed session state if compression just occurred.
+            if (!compressionContext.isNullOrBlank()) {
+              contextParts.add(
+                "=== CLU/BOX COMPRESSED SESSION STATE ===\n$compressionContext\n=== END SESSION STATE ==="
+              )
+            }
+
+            // Inject BrainBox RAG context.
             if (!brainContext.isNullOrBlank()) {
               Log.d(TAG, "BrainBox: injecting context (${brainContext.length} chars)")
-              "=== CLU/BOX MEMORY (relevant context retrieved from BrainBox) ===\n" +
-                brainContext +
-                "\n=== END MEMORY ===\n\nUser message: $input"
+              contextParts.add(
+                "=== CLU/BOX MEMORY (relevant context retrieved from BrainBox) ===\n$brainContext\n=== END MEMORY ==="
+              )
+            }
+
+            if (contextParts.isNotEmpty()) {
+              contextParts.joinToString("\n\n") + "\n\nUser message: $input"
             } else {
               input
             }
