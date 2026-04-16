@@ -44,8 +44,8 @@ fun executeCommand(command: String): String {
 
     // Read stdout and stderr on background threads so the pipe buffers don't fill up
     // and deadlock the process before waitFor returns.
-    var stdout = ""
-    var stderr = ""
+    @Volatile var stdout = ""
+    @Volatile var stderr = ""
 
     val stdoutThread = Thread {
       stdout = process.inputStream.bufferedReader().readText()

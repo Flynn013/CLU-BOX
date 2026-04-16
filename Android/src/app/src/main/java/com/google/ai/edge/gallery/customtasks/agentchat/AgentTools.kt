@@ -711,10 +711,16 @@ class AgentTools() : ToolSet {
         )
       )
 
+      val status = when {
+        output == "TIMEOUT ERROR" -> "timeout"
+        output.startsWith("ERROR:") -> "error"
+        else -> "succeeded"
+      }
+
       mapOf(
         "command" to command,
         "output" to output,
-        "status" to if (output == "TIMEOUT ERROR") "timeout" else "succeeded",
+        "status" to status,
       )
     }
   }
