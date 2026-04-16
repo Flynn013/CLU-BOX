@@ -669,6 +669,56 @@ class AgentTools() : ToolSet {
     }
   }
 
+  // =========================================================================
+  // SHELL_EXECUTE — Run terminal commands and return raw output
+  // =========================================================================
+
+  /**
+   * Executes a shell command on the device and returns the combined stdout + stderr output.
+   *
+   * A strict 10-second timeout is enforced; if the process hangs it is killed and
+   * "TIMEOUT ERROR" is returned.
+   */
+  @Tool(
+    description = "Use this to execute terminal commands, run test scripts, or check file states. " +
+      "You will receive the raw terminal output. Use this to verify your code works or to debug " +
+      "stack traces before moving to the next task."
+  )
+  fun shellExecute(
+    @ToolParam(description = "The shell command to execute (e.g. 'ls -la', 'cat file.txt', 'python3 test.py').")
+    command: String,
+  ): Map<String, String> {
+    return runBlocking(Dispatchers.Default) {
+      Log.d(TAG, "shellExecute: command='$command'")
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = "Shell: executing command…",
+          inProgress = true,
+          addItemTitle = "Shell_Execute",
+          addItemDescription = "$ $command",
+        )
+      )
+
+      val output = com.google.ai.edge.gallery.data.executeCommand(command)
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = "Shell: command finished",
+          inProgress = false,
+          addItemTitle = "Shell_Execute",
+          addItemDescription = "$ $command\n${output.take(200)}${if (output.length > 200) "…" else ""}",
+        )
+      )
+
+      mapOf(
+        "command" to command,
+        "output" to output,
+        "status" to if (output == "TIMEOUT ERROR") "timeout" else "succeeded",
+      )
+    }
+  }
+
   fun sendAgentAction(action: AgentAction) {
     runBlocking(Dispatchers.Default) { _actionChannel.send(action) }
   }
