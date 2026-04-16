@@ -45,6 +45,11 @@ class AgentTools() : ToolSet {
   lateinit var skillManagerViewModel: SkillManagerViewModel
   var brainBoxDao: BrainBoxDao? = null
 
+  /** Lazily initialized FileBoxManager for file workspace operations. */
+  val fileBoxManager: com.google.ai.edge.gallery.data.FileBoxManager by lazy {
+    com.google.ai.edge.gallery.data.FileBoxManager(context)
+  }
+
   private val _actionChannel = Channel<AgentAction>(Channel.UNLIMITED)
   val actionChannel: ReceiveChannel<AgentAction> = _actionChannel
   var resultImageToShow: CallJsSkillResultImage? = null
@@ -316,6 +321,181 @@ class AgentTools() : ToolSet {
       dao.insertNeuron(neuron)
       Log.d(TAG, "saveBrainNeuron saved neuron label='$label' (${if (existing != null) "updated" else "created"})")
       mapOf("label" to label, "type" to type, "status" to "succeeded")
+    }
+  }
+
+  // =========================================================================
+  // FILE_BOX — Sandboxed code workspace
+  // =========================================================================
+
+  /**
+   * Write a text/code file to the CLU/BOX FILE_BOX workspace.
+   *
+   * Nested folders are created automatically — include them in the file_path
+   * (e.g. "new_project/backend/src/api.js").
+   */
+  @Tool(
+    description = "Writes a text or code file to the CLU/BOX FILE_BOX workspace. " +
+      "You can create nested folders automatically by including them in the file_path " +
+      "(e.g. 'new_project/folder/file.txt'). Only text-based extensions are allowed " +
+      "(e.g. .txt, .kt, .js, .json, .md, .html, .py, .ts, .css, .xml, .yaml)."
+  )
+  fun fileBoxWrite(
+    @ToolParam(description = "Relative path inside FILE_BOX (e.g. 'my_app/src/main.kt'). Nested directories are auto-created.")
+    file_path: String,
+    @ToolParam(description = "The full text/code content to write to the file.")
+    content: String,
+  ): Map<String, String> {
+    return runBlocking(Dispatchers.Default) {
+      Log.d(TAG, "fileBoxWrite: path='$file_path' content=${content.length} chars")
+      val mgr = fileBoxManager
+
+      if (!mgr.isAllowedExtension(file_path)) {
+        _actionChannel.send(
+          SkillProgressAgentAction(
+            label = "FILE_BOX: rejected '$file_path' (extension not allowed)",
+            inProgress = false,
+          )
+        )
+        return@runBlocking mapOf(
+          "error" to "Extension not allowed. Only text/code files are permitted.",
+          "status" to "failed",
+        )
+      }
+
+      val isNew = !java.io.File(mgr.root, file_path).exists()
+      val ok = mgr.writeCodeFile(file_path, content)
+
+      if (!ok) {
+        return@runBlocking mapOf("error" to "Failed to write file", "status" to "failed")
+      }
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = "FILE_BOX: wrote '$file_path'",
+          inProgress = false,
+          addItemTitle = "FILE_BOX Write",
+          addItemDescription = "Path: $file_path (${content.length} chars)",
+        )
+      )
+
+      // Phase 4: BrainBox telemetry — log new file creations as neurons.
+      if (isNew) {
+        val dao = brainBoxDao
+        if (dao != null) {
+          val neuron = NeuronEntity(
+            id = UUID.randomUUID().toString(),
+            label = file_path,
+            type = "File_Creation_Log",
+            content = content,
+          )
+          dao.insertNeuron(neuron)
+          Log.d(TAG, "fileBoxWrite: logged new file creation to BrainBox: $file_path")
+        }
+      }
+
+      mapOf("file_path" to file_path, "status" to "succeeded")
+    }
+  }
+
+  /**
+   * Read a file from the CLU/BOX FILE_BOX workspace.
+   */
+  @Tool(
+    description = "Reads a text or code file from the CLU/BOX FILE_BOX workspace. " +
+      "Returns the file content as a string."
+  )
+  fun fileBoxRead(
+    @ToolParam(description = "Relative path of the file to read inside FILE_BOX (e.g. 'my_app/src/main.kt').")
+    file_path: String,
+  ): Map<String, String> {
+    return runBlocking(Dispatchers.Default) {
+      Log.d(TAG, "fileBoxRead: path='$file_path'")
+      val content = fileBoxManager.readCodeFile(file_path)
+
+      if (content == null) {
+        _actionChannel.send(
+          SkillProgressAgentAction(
+            label = "FILE_BOX: file not found '$file_path'",
+            inProgress = false,
+          )
+        )
+        return@runBlocking mapOf(
+          "error" to "File not found or is not readable: $file_path",
+          "status" to "failed",
+        )
+      }
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = "FILE_BOX: read '$file_path'",
+          inProgress = false,
+          addItemTitle = "FILE_BOX Read",
+          addItemDescription = "Path: $file_path (${content.length} chars)",
+        )
+      )
+
+      mapOf("file_path" to file_path, "content" to content, "status" to "succeeded")
+    }
+  }
+
+  // =========================================================================
+  // Task Queue — Autonomous supervisor loop
+  // =========================================================================
+
+  /** Volatile flag: when a pending task is queued, the ViewModel can read it. */
+  @Volatile var pendingTaskDescription: String? = null
+
+  /**
+   * Updates the autonomous task queue.  When [status] is "pending", the ViewModel's
+   * inference loop will automatically re-invoke inference with [next_task_description]
+   * as a system-level instruction, creating a continuous work loop until the task queue
+   * is empty (status = "complete").
+   */
+  @Tool(
+    description = "Updates the autonomous task queue. Use status='pending' and provide " +
+      "a next_task_description to continue working on a multi-step project without user " +
+      "prompting. Use status='complete' when all tasks are finished."
+  )
+  fun taskQueueUpdate(
+    @ToolParam(description = "Description of the next task to perform. Only used when status is 'pending'.")
+    next_task_description: String,
+    @ToolParam(description = "Either 'pending' (more work to do) or 'complete' (all tasks finished).")
+    status: String,
+  ): Map<String, String> {
+    return runBlocking(Dispatchers.Default) {
+      val normalizedStatus = status.trim().lowercase()
+      Log.d(TAG, "taskQueueUpdate: status='$normalizedStatus', desc='$next_task_description'")
+
+      when (normalizedStatus) {
+        "pending" -> {
+          pendingTaskDescription = next_task_description.trim()
+          _actionChannel.send(
+            SkillProgressAgentAction(
+              label = "Task queued: ${next_task_description.take(60)}…",
+              inProgress = true,
+              addItemTitle = "Task Queue: Pending",
+              addItemDescription = next_task_description,
+            )
+          )
+          mapOf("status" to "pending", "queued_task" to next_task_description)
+        }
+        "complete" -> {
+          pendingTaskDescription = null
+          _actionChannel.send(
+            SkillProgressAgentAction(
+              label = "Task queue complete ✓",
+              inProgress = false,
+              addItemTitle = "Task Queue: Complete",
+              addItemDescription = "All tasks finished.",
+            )
+          )
+          mapOf("status" to "complete")
+        }
+        else -> {
+          mapOf("error" to "Invalid status '$status'. Use 'pending' or 'complete'.", "status" to "failed")
+        }
+      }
     }
   }
 

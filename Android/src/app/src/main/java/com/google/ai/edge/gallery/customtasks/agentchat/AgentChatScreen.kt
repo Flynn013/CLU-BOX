@@ -194,6 +194,23 @@ fun AgentChatScreen(
       }
 
       updateProgressPanel(viewModel = viewModel, model = model, agentTools = agentTools)
+
+      // Phase 5: Autonomous Supervisor — if a pending task was queued via Task_Queue_Update,
+      // silently re-trigger inference with the next task description.
+      val pendingTask = agentTools.pendingTaskDescription
+      if (pendingTask != null) {
+        agentTools.pendingTaskDescription = null
+        Log.d(TAG, "Autonomous loop: re-triggering inference with task='$pendingTask'")
+        sendMessageTrigger = SendMessageTrigger(
+          model = model,
+          messages = listOf(
+            ChatMessageText(
+              content = "[AUTO-TASK] $pendingTask",
+              side = ChatSide.USER,
+            ),
+          ),
+        )
+      }
     },
     onResetSessionClickedOverride = { task, model ->
       resetSessionWithCurrentSkills(
