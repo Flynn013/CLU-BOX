@@ -467,7 +467,7 @@ class AgentTools() : ToolSet {
           )
           return@runBlocking mapOf(
             "file_path" to file_path,
-            "status" to "rejected",
+            "status" to "rejected_and_deleted",
             "error" to "FILE REJECTED. Syntax Error: $errMsg",
           )
         }

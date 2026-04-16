@@ -76,7 +76,7 @@ class FileBoxManager(context: Context) {
   val revision: StateFlow<Int> = _revision.asStateFlow()
 
   /** Recursive FileObserver that watches the entire clu_file_box tree. */
-  @Suppress("deprecation") // FileObserver(File, Int) requires API 29; string ctor used for compat.
+  @Suppress("deprecation") // Using the String path constructor for backward compat.
   private val fileObserver: FileObserver = object : FileObserver(
     root.absolutePath,
     CREATE or DELETE or MODIFY or MOVED_FROM or MOVED_TO or CLOSE_WRITE,
