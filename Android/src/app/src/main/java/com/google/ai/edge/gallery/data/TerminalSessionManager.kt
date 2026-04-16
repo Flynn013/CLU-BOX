@@ -104,12 +104,15 @@ class TerminalSessionManager(private val context: Context) {
     if (isSessionAlive) return
     Log.d(TAG, "Starting persistent shell session (HOME=${sandboxRoot.absolutePath})")
 
+    // Build PATH: include Termux bin dir only if it actually exists on this device.
+    val termuxBin = "/data/data/com.termux/files/usr/bin"
+    val basePath = "/system/bin:/system/xbin:" + (System.getenv("PATH") ?: "")
+    val effectivePath = if (java.io.File(termuxBin).isDirectory) "$termuxBin:$basePath" else basePath
+
     val env = mapOf(
       "HOME" to sandboxRoot.absolutePath,
       "TERM" to "dumb",
-      "PATH" to "/data/data/com.termux/files/usr/bin:" +
-        "/system/bin:/system/xbin:" +
-        (System.getenv("PATH") ?: ""),
+      "PATH" to effectivePath,
     )
 
     val pb = ProcessBuilder("sh")
@@ -230,8 +233,10 @@ class TerminalSessionManager(private val context: Context) {
         return "TIMEOUT ERROR"
       }
 
-      stdoutThread.join(1_000)
-      stderrThread.join(1_000)
+      // Block until reader threads complete — process already exited so
+      // streams will close and readText() will return promptly.
+      stdoutThread.join()
+      stderrThread.join()
 
       val stdout = stdoutRef.get()
       val stderr = stderrRef.get()
@@ -285,8 +290,10 @@ class TerminalSessionManager(private val context: Context) {
         return Pair(-1, "TIMEOUT ERROR")
       }
 
-      stdoutThread.join(1_000)
-      stderrThread.join(1_000)
+      // Block until reader threads complete — process already exited so
+      // streams will close and readText() will return promptly.
+      stdoutThread.join()
+      stderrThread.join()
 
       val stdout = stdoutRef.get()
       val stderr = stderrRef.get()
@@ -324,9 +331,13 @@ class TerminalSessionManager(private val context: Context) {
   /**
    * Pre-flight bootstrap triggered on first app launch.
    *
-   * Executes `pkg update && pkg upgrade -y && pkg install git python nodejs -y`
-   * to arm the sandbox. Sets [preFlightReady] to `true` only when the command
-   * returns exit code 0. The AI must not initialize until this gate opens.
+   * If a Termux-compatible `pkg` binary is found on `$PATH`, the check runs
+   * `pkg update && pkg upgrade -y && pkg install git python nodejs -y` to arm
+   * the sandbox.  On standard Android (no Termux) the step is cleanly skipped
+   * with an informational message — no shell errors leak to the user.
+   *
+   * Sets [preFlightReady] to `true` once the gate is clear so the AI can
+   * initialize.
    */
   fun runPreFlightCheck() {
     if (firstBootHandled) {
@@ -345,20 +356,29 @@ class TerminalSessionManager(private val context: Context) {
 
     appendSystemLine("[FIRMWARE] First boot detected — running pre-flight check…")
     scope.launch {
-      val cmd = "pkg update && pkg upgrade -y && pkg install git python nodejs -y 2>&1 || echo '[FIRMWARE] pkg not available — skipping package install'"
-      val (exitCode, result) = executeCommandWithExitCode(cmd)
-      result.lines().forEach { line ->
-        appendLine(TerminalLine(line, LineSource.STDOUT))
+      // Probe for `pkg` silently — `command -v` never prints "not found" errors.
+      val (probeExit, _) = executeCommandWithExitCode("command -v pkg >/dev/null 2>&1")
+      val hasPkg = probeExit == 0
+
+      if (hasPkg) {
+        appendSystemLine("[FIRMWARE] pkg detected — installing packages…")
+        val cmd = "pkg update -y && pkg upgrade -y && pkg install git python nodejs -y 2>&1"
+        val (exitCode, result) = executeCommandWithExitCode(cmd)
+        result.lines().forEach { line ->
+          appendLine(TerminalLine(line, LineSource.STDOUT))
+        }
+
+        if (exitCode == 0) {
+          appendSystemLine("[FIRMWARE] Pre-flight package install PASSED (exit 0).")
+        } else {
+          appendSystemLine("[FIRMWARE] Pre-flight install finished with exit code $exitCode — continuing.")
+        }
+      } else {
+        appendSystemLine("[FIRMWARE] pkg not available — running in standard Android mode.")
       }
 
-      if (exitCode == 0) {
-        appendSystemLine("[FIRMWARE] Pre-flight check PASSED (exit 0).")
-        prefs.edit().putBoolean(KEY_FIRST_BOOT_DONE, true).apply()
-      } else {
-        appendSystemLine("[FIRMWARE] Pre-flight check completed with exit code $exitCode — marking done anyway.")
-        // Mark done to avoid blocking the app forever on non-Termux environments.
-        prefs.edit().putBoolean(KEY_FIRST_BOOT_DONE, true).apply()
-      }
+      appendSystemLine("[FIRMWARE] Pre-flight check complete.")
+      prefs.edit().putBoolean(KEY_FIRST_BOOT_DONE, true).apply()
 
       firstBootHandled = true
       _preFlightReady.value = true
