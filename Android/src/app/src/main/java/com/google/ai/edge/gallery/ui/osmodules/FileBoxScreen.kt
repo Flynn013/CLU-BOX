@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
@@ -63,9 +64,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.ai.edge.gallery.data.FileBoxManager
@@ -211,7 +216,7 @@ fun FileBoxScreen(fileBoxManager: FileBoxManager) {
         }
       }
 
-      // Editor (right panel)
+      // Editor (right panel) — syntax-highlighted code editor
       Box(
         modifier = Modifier
           .fillMaxSize()
@@ -219,6 +224,9 @@ fun FileBoxScreen(fileBoxManager: FileBoxManager) {
           .padding(4.dp),
       ) {
         if (selectedFilePath != null) {
+          val ext = remember(selectedFilePath) {
+            selectedFilePath?.substringAfterLast('.', "") ?: ""
+          }
           Column(modifier = Modifier.fillMaxSize()) {
             Text(
               selectedFilePath ?: "",
@@ -227,23 +235,31 @@ fun FileBoxScreen(fileBoxManager: FileBoxManager) {
               fontSize = 10.sp,
               modifier = Modifier.padding(bottom = 4.dp),
             )
-            OutlinedTextField(
+            // Syntax-highlighting visual transformation for BasicTextField.
+            val syntaxTransformation = remember(ext) {
+              VisualTransformation { text ->
+                val highlighted = highlightSyntax(text.text, ext)
+                TransformedText(highlighted, OffsetMapping.Identity)
+              }
+            }
+            BasicTextField(
               value = editorContent,
               onValueChange = {
                 editorContent = it
                 editorDirty = true
               },
-              modifier = Modifier.fillMaxSize(),
+              modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .horizontalScroll(rememberScrollState())
+                .padding(4.dp),
               textStyle = TextStyle(
                 fontFamily = FontFamily.Monospace,
                 fontSize = 12.sp,
-                color = Color(0xFFCCCCCC),
+                color = Color(0xFFF8F8F2),
               ),
-              colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = neonGreen.copy(alpha = 0.4f),
-                unfocusedBorderColor = neonGreen.copy(alpha = 0.2f),
-                cursorColor = neonGreen,
-              ),
+              cursorBrush = SolidColor(neonGreen),
+              visualTransformation = syntaxTransformation,
             )
           }
         } else {
