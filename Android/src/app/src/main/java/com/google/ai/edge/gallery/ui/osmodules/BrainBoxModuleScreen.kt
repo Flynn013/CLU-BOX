@@ -16,6 +16,12 @@
 
 package com.google.ai.edge.gallery.ui.osmodules
 
+import android.content.ContentValues
+import android.os.Build
+import android.provider.MediaStore
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,6 +39,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.LockOpen
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -42,15 +50,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import android.content.ContentValues
-import android.os.Build
-import android.provider.MediaStore
-import android.widget.Toast
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -66,7 +71,10 @@ import androidx.compose.ui.unit.dp
 import com.google.ai.edge.gallery.data.brainbox.BrainBoxDao
 import com.google.ai.edge.gallery.data.brainbox.NeuronEntity
 import com.google.ai.edge.gallery.data.brainbox.exportBrain
+import com.google.ai.edge.gallery.data.brainbox.exportBrainToMarkdown
 import com.google.ai.edge.gallery.data.brainbox.importBrain
+import com.google.ai.edge.gallery.data.brainbox.importBrainFromMarkdown
+import com.google.ai.edge.gallery.data.brainbox.saveBrainMarkdownToDownloads
 import com.google.ai.edge.gallery.ui.theme.absoluteBlack
 import com.google.ai.edge.gallery.ui.theme.neonGreen
 import java.util.UUID
@@ -85,10 +93,28 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao) {
   var editTarget by remember { mutableStateOf<NeuronEntity?>(null) }
   var showDeleteDialog by remember { mutableStateOf<NeuronEntity?>(null) }
 
-  // Upload (import) state
+  // Upload (import) state — legacy JSON
   var showImportDialog by remember { mutableStateOf(false) }
   var importJson by remember { mutableStateOf("") }
   var importError by remember { mutableStateOf("") }
+
+  // Markdown file picker launcher (Phase 3).
+  val mdImportLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.OpenDocument(),
+  ) { uri ->
+    if (uri != null) {
+      scope.launch {
+        try {
+          val count = importBrainFromMarkdown(context, dao, uri)
+          neurons.clear()
+          neurons.addAll(dao.getAllNeurons())
+          Toast.makeText(context, "Imported $count neuron(s) from Markdown", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+          Toast.makeText(context, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+      }
+    }
+  }
 
   // Load all neurons on entry.
   LaunchedEffect(Unit) {
@@ -104,6 +130,7 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao) {
     var type by remember(existing) { mutableStateOf(existing?.type ?: "") }
     var content by remember(existing) { mutableStateOf(existing?.content ?: "") }
     var synapses by remember(existing) { mutableStateOf(existing?.synapses ?: "") }
+    var isCore by remember(existing) { mutableStateOf(existing?.isCore ?: false) }
     AlertDialog(
       onDismissRequest = { showAddDialog = false; editTarget = null },
       title = {
@@ -119,6 +146,29 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao) {
           NeonTextField(value = type, onValueChange = { type = it }, label = "Type (Concept/Code/Session_Log/Lore)")
           NeonTextField(value = content, onValueChange = { content = it }, label = "Content (markdown)", singleLine = false)
           NeonTextField(value = synapses, onValueChange = { synapses = it }, label = "Synapses ([[Wiki-Links]])", singleLine = false)
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+          ) {
+            Icon(
+              if (isCore) Icons.Outlined.Lock else Icons.Outlined.LockOpen,
+              contentDescription = null,
+              tint = if (isCore) neonGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+              "CORE MEMORY",
+              fontFamily = FontFamily.Monospace,
+              color = if (isCore) neonGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Switch(
+              checked = isCore,
+              onCheckedChange = { isCore = it },
+              colors = SwitchDefaults.colors(
+                checkedThumbColor = absoluteBlack,
+                checkedTrackColor = neonGreen,
+              ),
+            )
+          }
         }
       },
       confirmButton = {
@@ -130,6 +180,7 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao) {
               type = type.trim(),
               content = content.trim(),
               synapses = synapses.trim(),
+              isCore = isCore,
             )
             dao.insertNeuron(neuron)
             neurons.clear()
@@ -236,6 +287,8 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao) {
         fontFamily = FontFamily.Monospace,
       )
       Spacer(Modifier.height(12.dp))
+
+      // Row 1: Legacy JSON I/O
       Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedButton(
           onClick = {
@@ -271,12 +324,37 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao) {
             }
           },
           colors = ButtonDefaults.outlinedButtonColors(contentColor = neonGreen),
-        ) { Text("↓ DOWNLOAD BRAIN", fontFamily = FontFamily.Monospace) }
+        ) { Text("↓ JSON", fontFamily = FontFamily.Monospace) }
         OutlinedButton(
           onClick = { showImportDialog = true },
           colors = ButtonDefaults.outlinedButtonColors(contentColor = neonGreen),
-        ) { Text("↑ UPLOAD BRAIN", fontFamily = FontFamily.Monospace) }
+        ) { Text("↑ JSON", fontFamily = FontFamily.Monospace) }
       }
+
+      Spacer(Modifier.height(4.dp))
+
+      // Row 2: Markdown Review I/O (Phase 2 & 3)
+      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(
+          onClick = {
+            scope.launch {
+              val md = exportBrainToMarkdown(dao, includeCore = true)
+              val ok = saveBrainMarkdownToDownloads(context, md)
+              if (ok) {
+                Toast.makeText(context, "Saved CLU_BRAIN_REVIEW.md to Downloads", Toast.LENGTH_LONG).show()
+              } else {
+                Toast.makeText(context, "Markdown export failed", Toast.LENGTH_LONG).show()
+              }
+            }
+          },
+          colors = ButtonDefaults.outlinedButtonColors(contentColor = neonGreen),
+        ) { Text("↓ REVIEW MD", fontFamily = FontFamily.Monospace) }
+        OutlinedButton(
+          onClick = { mdImportLauncher.launch(arrayOf("text/*")) },
+          colors = ButtonDefaults.outlinedButtonColors(contentColor = neonGreen),
+        ) { Text("↑ FLASH BRAIN", fontFamily = FontFamily.Monospace) }
+      }
+
       Spacer(Modifier.height(12.dp))
       if (neurons.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -289,6 +367,14 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao) {
               neuron = neuron,
               onEdit = { editTarget = neuron },
               onDelete = { showDeleteDialog = neuron },
+              onToggleCore = {
+                scope.launch {
+                  val updated = neuron.copy(isCore = !neuron.isCore)
+                  dao.updateNeuron(updated)
+                  val idx = neurons.indexOfFirst { it.id == neuron.id }
+                  if (idx >= 0) neurons[idx] = updated
+                }
+              },
             )
           }
         }
@@ -298,10 +384,19 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao) {
 }
 
 @Composable
-private fun NeuronCard(neuron: NeuronEntity, onEdit: () -> Unit, onDelete: () -> Unit) {
+private fun NeuronCard(
+  neuron: NeuronEntity,
+  onEdit: () -> Unit,
+  onDelete: () -> Unit,
+  onToggleCore: () -> Unit,
+) {
   Card(
     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    modifier = Modifier.fillMaxWidth().border(1.dp, neonGreen, RoundedCornerShape(4.dp)),
+    modifier = Modifier.fillMaxWidth().border(
+      width = 1.dp,
+      color = if (neuron.isCore) neonGreen else neonGreen.copy(alpha = 0.4f),
+      shape = RoundedCornerShape(4.dp),
+    ),
   ) {
     Row(
       modifier = Modifier.padding(12.dp),
@@ -309,7 +404,12 @@ private fun NeuronCard(neuron: NeuronEntity, onEdit: () -> Unit, onDelete: () ->
       verticalAlignment = Alignment.Top,
     ) {
       Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(neuron.label, color = neonGreen, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.titleSmall)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+          if (neuron.isCore) {
+            Icon(Icons.Outlined.Lock, contentDescription = "Core", tint = neonGreen, modifier = Modifier.padding(end = 2.dp))
+          }
+          Text(neuron.label, color = neonGreen, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.titleSmall)
+        }
         Text("[${neuron.type}]", color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelSmall)
         Text(neuron.content, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, maxLines = 3)
         if (neuron.synapses.isNotBlank()) {
@@ -317,6 +417,13 @@ private fun NeuronCard(neuron: NeuronEntity, onEdit: () -> Unit, onDelete: () ->
         }
       }
       Row {
+        IconButton(onClick = onToggleCore) {
+          Icon(
+            if (neuron.isCore) Icons.Outlined.Lock else Icons.Outlined.LockOpen,
+            contentDescription = if (neuron.isCore) "Unlock (make malleable)" else "Lock (make core)",
+            tint = if (neuron.isCore) neonGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+          )
+        }
         IconButton(onClick = onEdit) { Icon(Icons.Outlined.Edit, contentDescription = "Edit", tint = neonGreen) }
         IconButton(onClick = onDelete) { Icon(Icons.Outlined.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error) }
       }

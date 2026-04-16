@@ -35,6 +35,14 @@ interface BrainBoxDao {
   @Query("SELECT * FROM neurons")
   suspend fun getAllNeurons(): List<NeuronEntity>
 
+  /** Returns only Malleable (non-core) neurons. */
+  @Query("SELECT * FROM neurons WHERE isCore = 0")
+  suspend fun getMalleableNeurons(): List<NeuronEntity>
+
+  /** Returns only Core neurons. */
+  @Query("SELECT * FROM neurons WHERE isCore = 1")
+  suspend fun getCoreNeurons(): List<NeuronEntity>
+
   /** Deletes the given neuron from the knowledge graph. */
   @Delete
   suspend fun deleteNeuron(neuron: NeuronEntity)

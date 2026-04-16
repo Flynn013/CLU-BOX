@@ -30,7 +30,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  */
 @Database(
   entities = [NeuronEntity::class, ChatMessageEntity::class],
-  version = 3,
+  version = 4,
   exportSchema = false,
 )
 abstract class GraphDatabase : RoomDatabase() {
@@ -50,6 +50,14 @@ abstract class GraphDatabase : RoomDatabase() {
         }
       }
 
+    /** Migration from v3 → v4: add the isCore column to the neurons table. */
+    private val MIGRATION_3_4 =
+      object : Migration(3, 4) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+          db.execSQL("ALTER TABLE neurons ADD COLUMN isCore INTEGER NOT NULL DEFAULT 0")
+        }
+      }
+
     fun getInstance(context: Context): GraphDatabase {
       return INSTANCE
         ?: synchronized(this) {
@@ -58,7 +66,7 @@ abstract class GraphDatabase : RoomDatabase() {
               GraphDatabase::class.java,
               "brainbox.db",
             )
-            .addMigrations(MIGRATION_2_3)
+            .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
             .fallbackToDestructiveMigration() // TODO: replace with proper migrations before release
             .build()
             .also { INSTANCE = it }

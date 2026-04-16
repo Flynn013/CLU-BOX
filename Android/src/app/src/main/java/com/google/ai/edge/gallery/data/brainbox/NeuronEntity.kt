@@ -28,6 +28,8 @@ import androidx.room.PrimaryKey
  * @param content  The raw text content stored at this node (markdown / code).
  * @param synapses Comma-separated [[Wiki-Links]] referencing other Neuron labels.
  *                 Example: "[[M-CLU_Architecture_v1]],[[Icarus_Base_Design]]"
+ * @param isCore   When `true` the neuron is a **Core Memory** — protected from bulk deletion
+ *                 and auto-compression. Default is `false` (Malleable).
  */
 @Entity(tableName = "neurons")
 data class NeuronEntity(
@@ -36,4 +38,6 @@ data class NeuronEntity(
   val type: String,
   val content: String,
   val synapses: String = "",
+  /** When `true` the neuron is a Core Memory and is protected from bulk deletion / compression. */
+  val isCore: Boolean = false,
 )
