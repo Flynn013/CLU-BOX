@@ -56,6 +56,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -91,14 +92,17 @@ fun FileBoxScreen(fileBoxManager: FileBoxManager) {
   val context = LocalContext.current
   // Bump to force recomposition after file writes/deletes.
   var refreshKey by remember { mutableIntStateOf(0) }
+  // Inotify bridge: collect the FileObserver revision counter so that
+  // terminal-originated file changes also refresh the tree automatically.
+  val fsRevision by fileBoxManager.revision.collectAsState()
   var selectedFilePath by remember { mutableStateOf<String?>(null) }
   var editorContent by remember { mutableStateOf("") }
   var editorDirty by remember { mutableStateOf(false) }
   var showNewFileDialog by remember { mutableStateOf(false) }
   var showDeleteConfirm by remember { mutableStateOf(false) }
 
-  // Rebuild the tree whenever refreshKey changes.
-  val fileTree = remember(refreshKey) { fileBoxManager.getFileTree() }
+  // Rebuild the tree whenever refreshKey changes OR the FileObserver detects changes.
+  val fileTree = remember(refreshKey, fsRevision) { fileBoxManager.getFileTree() }
 
   // Load file content when selection changes.
   LaunchedEffect(selectedFilePath) {

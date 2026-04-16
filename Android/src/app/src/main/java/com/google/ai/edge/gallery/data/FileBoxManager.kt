@@ -17,7 +17,13 @@
 package com.google.ai.edge.gallery.data
 
 import android.content.Context
+import android.os.FileObserver
 import android.util.Log
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 
 private const val TAG = "FileBoxManager"
@@ -57,6 +63,38 @@ private val REJECTED_EXTENSIONS = setOf(
 class FileBoxManager(context: Context) {
 
   val root: File = File(context.filesDir, ROOT_DIR_NAME).also { it.mkdirs() }
+
+  // ── Inotify Bridge ──────────────────────────────────────────
+  // A monotonically-increasing revision counter bumped whenever a file-system
+  // event is detected in the sandbox. The FILE_BOX UI collects this flow and
+  // rebuilds the tree automatically — even when changes originate from the
+  // MSTR_CTRL terminal writing directly to the shared directory.
+
+  private val _revision = MutableStateFlow(0)
+
+  /** Collect this in the UI to trigger automatic file-tree rebuilds. */
+  val revision: StateFlow<Int> = _revision.asStateFlow()
+
+  /** Recursive FileObserver that watches the entire clu_file_box tree. */
+  @Suppress("deprecation") // FileObserver(File, Int) requires API 29; string ctor used for compat.
+  private val fileObserver: FileObserver = object : FileObserver(
+    root.absolutePath,
+    CREATE or DELETE or MODIFY or MOVED_FROM or MOVED_TO or CLOSE_WRITE,
+  ) {
+    override fun onEvent(event: Int, path: String?) {
+      Log.d(TAG, "FileObserver event=$event path=$path")
+      _revision.value = _revision.value + 1
+    }
+  }
+
+  init {
+    fileObserver.startWatching()
+  }
+
+  /** Stop watching (called if the manager is ever disposed). */
+  fun stopWatching() {
+    fileObserver.stopWatching()
+  }
 
   // ── Extension validation ─────────────────────────────────────
 
@@ -148,6 +186,31 @@ class FileBoxManager(context: Context) {
       isDirectory = true,
       children = children,
     )
+  }
+
+  // ── Workspace Map (JSON) ────────────────────────────────────
+
+  /**
+   * Returns a clean JSON string representing the current file/folder tree
+   * of the sandbox. Used by the AI's `Workspace_Map` skill to orient itself.
+   */
+  fun workspaceMapJson(): String {
+    return fileNodeToJson(getFileTree()).toString(2)
+  }
+
+  private fun fileNodeToJson(node: FileNode): JSONObject {
+    val obj = JSONObject()
+    obj.put("name", node.name)
+    obj.put("path", node.relativePath)
+    obj.put("type", if (node.isDirectory) "directory" else "file")
+    if (node.isDirectory && node.children.isNotEmpty()) {
+      val arr = JSONArray()
+      for (child in node.children) {
+        arr.put(fileNodeToJson(child))
+      }
+      obj.put("children", arr)
+    }
+    return obj
   }
 }
 

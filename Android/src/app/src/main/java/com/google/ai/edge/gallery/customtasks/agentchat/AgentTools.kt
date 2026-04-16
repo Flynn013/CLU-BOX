@@ -328,6 +328,40 @@ class AgentTools() : ToolSet {
   }
 
   // =========================================================================
+  // WORKSPACE_MAP — JSON file/folder tree for AI orientation
+  // =========================================================================
+
+  /**
+   * Scans the `clu_file_box` sandbox and returns a clean JSON representation
+   * of the current file/folder tree. Used by the AI to orient itself before
+   * reading, writing, or navigating the workspace.
+   */
+  @Tool(
+    description = "Scans the clu_file_box workspace and returns a JSON tree of all files " +
+      "and folders. Use this to orient yourself before reading or writing files."
+  )
+  fun workspaceMap(): Map<String, String> {
+    return runBlocking(Dispatchers.Default) {
+      Log.d(TAG, "workspaceMap: scanning workspace")
+      val json = fileBoxManager.workspaceMapJson()
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = "Workspace_Map: scanned file tree",
+          inProgress = false,
+          addItemTitle = "Workspace_Map",
+          addItemDescription = "Returned workspace JSON tree",
+        )
+      )
+
+      mapOf(
+        "workspace_tree" to json,
+        "status" to "succeeded",
+      )
+    }
+  }
+
+  // =========================================================================
   // FILE_BOX — Sandboxed code workspace
   // =========================================================================
 
@@ -418,12 +452,17 @@ class AgentTools() : ToolSet {
         if (exitCode != 0) {
           val errMsg = validationOutput.ifEmpty { "Unknown syntax error" }
           Log.w(TAG, "fileBoxWrite: validation FAILED for '$file_path': $errMsg")
+
+          // Delete the rejected file to keep the sandbox clean.
+          mgr.deleteFile(file_path)
+          Log.d(TAG, "fileBoxWrite: deleted rejected file '$file_path'")
+
           _actionChannel.send(
             SkillProgressAgentAction(
-              label = "FILE_BOX: syntax error in '$file_path'",
+              label = "FILE_BOX: syntax error in '$file_path' — file deleted",
               inProgress = false,
               addItemTitle = "Auto-Validator",
-              addItemDescription = "REJECTED: $errMsg",
+              addItemDescription = "REJECTED & DELETED: $errMsg",
             )
           )
           return@runBlocking mapOf(
@@ -834,6 +873,47 @@ class AgentTools() : ToolSet {
         "command" to command,
         "output" to output,
         "status" to status,
+      )
+    }
+  }
+
+  // =========================================================================
+  // OPERATOR_HALT — Suspend the autonomous loop for human review
+  // =========================================================================
+
+  /**
+   * Immediately suspends the ChatViewModel's autonomous worker loop and
+   * outputs the [reason] to the user UI. Used when the AI completes a
+   * major milestone or hits a wall and requires the Operator (Flynn) to
+   * review the codebase or issue the next directive.
+   */
+  @Tool(
+    description = "Immediately stops the autonomous work loop and presents the reason " +
+      "to the user. Use this when you complete a major milestone, need clarification, " +
+      "or hit a wall that requires human review."
+  )
+  fun operatorHalt(
+    @ToolParam(description = "A clear explanation of why you are stopping (milestone reached, blocker, need user decision, etc.).")
+    reason: String,
+  ): Map<String, String> {
+    return runBlocking(Dispatchers.Default) {
+      Log.d(TAG, "operatorHalt: reason='$reason'")
+
+      // Clear any pending task to break the autonomous loop.
+      pendingTaskDescription = null
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = "⛔ OPERATOR HALT",
+          inProgress = false,
+          addItemTitle = "Operator_Halt",
+          addItemDescription = reason,
+        )
+      )
+
+      mapOf(
+        "reason" to reason,
+        "status" to "halted",
       )
     }
   }
