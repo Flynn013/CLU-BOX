@@ -21,13 +21,16 @@ import android.graphics.Bitmap
 import android.util.Log
 import androidx.lifecycle.viewModelScope
 import com.google.ai.edge.gallery.data.ConfigKeys
+import com.google.ai.edge.gallery.data.DEFAULT_MAX_TOKEN
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.Task
+import com.google.ai.edge.gallery.data.TokenMonitor
 import com.google.ai.edge.gallery.data.brainbox.BrainBoxDao
 import com.google.ai.edge.gallery.data.brainbox.ChatHistoryDao
 import com.google.ai.edge.gallery.data.brainbox.ChatMessageEntity
 import com.google.ai.edge.gallery.data.brainbox.NeuronEntity
 import com.google.ai.edge.gallery.runtime.runtimeHelper
+import java.io.File
 import java.util.Collections
 import java.util.UUID
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageAudioClip
@@ -67,8 +70,8 @@ private const val MAX_SEARCH_KEYWORDS = 3
 // ── Phase 7: Context Auto-Compression thresholds ────────────────────────
 /**
  * Maximum number of chat turns (USER + AGENT text messages) before the
- * auto-compression engine fires. This is a conservative default that keeps
- * the on-device LLM well within its context window.
+ * auto-compression engine fires. This is a fallback — the primary trigger
+ * is the [TokenMonitor] 80% threshold.
  */
 private const val CONTEXT_COMPRESSION_TURN_THRESHOLD = 15
 
@@ -81,6 +84,21 @@ private const val COMPRESSION_SYSTEM_OVERRIDE =
   "and current goal into a dense, compressed technical format. Use bullet points. " +
   "Include ALL file paths and their purpose. Include any unfinished tasks. " +
   "Do NOT include pleasantries or filler — only technical state."
+
+/**
+ * The Snapshot prompt used when the TokenMonitor breaches the 80% critical threshold.
+ * This produces a structured Session_Resume block with exactly three sections.
+ */
+private const val SNAPSHOT_PROMPT =
+  "CRITICAL: Context limit reached. Synthesize the current workspace status, " +
+  "recent breakthroughs, and the immediate pending objective into a 500-token " +
+  "Markdown 'Session_Resume' block. Format as:\n" +
+  "[[STATE]]\n<workspace status, files, variables>\n" +
+  "[[LOGS]]\n<recent breakthroughs and completed actions>\n" +
+  "[[NEXT_STEP]]\n<the immediate pending objective>"
+
+/** Relative path inside FILE_BOX for the current resume snapshot. */
+private const val RESUME_FILE_PATH = "BrainBox/resume_current.md"
 
 /** Max chars to include when previewing a user message during compression. */
 private const val MAX_USER_MESSAGE_PREVIEW_LENGTH = 200
@@ -96,6 +114,40 @@ open class LlmChatViewModelBase(
 
   /** Tracks which (taskId, modelName) pairs have already had their history loaded. */
   private val loadedHistoryKeys = Collections.synchronizedSet(mutableSetOf<String>())
+
+  /**
+   * Per-model [TokenMonitor] instances. Lazily created on first inference.
+   * Tracks real-time token estimates for the active conversation.
+   */
+  private val tokenMonitors = mutableMapOf<String, TokenMonitor>()
+
+  /**
+   * Application context reference — set once via [initAppContext] so the
+   * compression interceptor can write `resume_current.md` to FILE_BOX.
+   */
+  @Volatile
+  private var appContext: Context? = null
+
+  /** Call once from the screen/activity to provide the application context. */
+  fun initAppContext(context: Context) {
+    appContext = context.applicationContext
+  }
+
+  /**
+   * Returns (or creates) the [TokenMonitor] for [model], sized to the model's
+   * configured `max_tokens` context window.
+   */
+  private fun getTokenMonitor(model: Model): TokenMonitor {
+    return tokenMonitors.getOrPut(model.name) {
+      val windowSize = model.getIntConfigValue(
+        key = ConfigKeys.MAX_TOKENS,
+        defaultValue = DEFAULT_MAX_TOKEN,
+      )
+      TokenMonitor(contextWindowSize = windowSize).also {
+        Log.d(TAG, "TokenMonitor created for '${model.name}' with window=$windowSize")
+      }
+    }
+  }
 
   /**
    * Loads persisted chat history for [taskId] + [model] from the database into the in-memory
@@ -215,11 +267,12 @@ open class LlmChatViewModelBase(
   }
 
   /**
-   * Returns `true` when the active chat context has exceeded the
-   * compression threshold and should be defragmented before the next
-   * inference call.
+   * Returns `true` when the active chat context has exceeded either the
+   * TokenMonitor's 80% threshold (primary) or the turn count fallback.
    */
   fun needsContextCompression(model: Model): Boolean {
+    val monitor = getTokenMonitor(model)
+    if (monitor.shouldCompress()) return true
     return getTextTurnCount(model) >= CONTEXT_COMPRESSION_TURN_THRESHOLD
   }
 
@@ -239,14 +292,18 @@ open class LlmChatViewModelBase(
   }
 
   /**
-   * Executes the full context compression cycle:
+   * Executes the full context compression cycle (The Recontextualization Loop):
    *
-   * 1. Generates a summarization prompt from the current chat history.
-   * 2. Calls the LLM to produce a dense summary.
-   * 3. Saves the summary to BrainBox as a "Session_State" neuron.
-   * 4. Clears the active chat history, injects the summary as the first
-   *    context message, then returns the original [interceptedUserInput]
-   *    so the caller can proceed with normal inference.
+   * 1. Generates a Snapshot prompt from the current chat history using the
+   *    structured `[[STATE]], [[LOGS]], [[NEXT_STEP]]` format.
+   * 2. Deterministically extracts key data (files, goals, last response).
+   * 3. Saves the `Session_Resume` block to `clu_file_box/BrainBox/resume_current.md`.
+   * 4. Saves a permanent `Session_Snapshot` neuron in BrainBox for long-term memory.
+   * 5. Purges the active conversation history (UI + persisted).
+   * 6. The Cold Start: re-injects the resume block as the "Genesis Message."
+   * 7. Resets the [TokenMonitor] with the genesis token cost.
+   *
+   * This process is autonomous and invisible to the user UI.
    *
    * Returns the summary text that was injected, or `null` if compression
    * was skipped (e.g. BrainBox unavailable, empty history).
@@ -263,59 +320,80 @@ open class LlmChatViewModelBase(
       return null
     }
 
-    Log.d(TAG, "compressContext: compressing ${getTextTurnCount(model)} turns")
+    val monitor = getTokenMonitor(model)
+    Log.d(
+      TAG,
+      "compressContext: compressing ${getTextTurnCount(model)} turns. ${monitor.diagnosticSummary()}"
+    )
 
-    // Build the summary request. We pass the transcript as user content with
-    // a system override. The caller will invoke the LLM with this prompt and
-    // capture the result.
-    val summaryPrompt =
-      "$COMPRESSION_SYSTEM_OVERRIDE\n\n--- CONVERSATION TRANSCRIPT ---\n$transcript\n--- END TRANSCRIPT ---"
+    // ── Build the Session_Resume block ──────────────────────────────
+    val resumeLines = mutableListOf<String>()
+    resumeLines.add("# Session_Resume (auto-generated)")
+    resumeLines.add("")
 
-    // We cannot call the LLM directly here (it's a single-threaded engine),
-    // so we build the summary from the transcript ourselves using a deterministic
-    // extraction approach — pull key lines (file paths, goals, tasks).
-    val compressedLines = mutableListOf<String>()
-    compressedLines.add("## Session State (auto-compressed)")
-    compressedLines.add("")
-
-    // Extract file paths mentioned anywhere — require at least one '/' to avoid
-    // matching plain property accesses like "object.property".
+    // [[STATE]] — workspace status, files, variables
+    resumeLines.add("[[STATE]]")
     val filePathPattern = Regex("""[\w\-]+(?:/[\w\-]+)+\.\w{1,10}""")
     val mentionedFiles = filePathPattern.findAll(transcript)
       .map { it.value }
       .distinct()
       .toList()
     if (mentionedFiles.isNotEmpty()) {
-      compressedLines.add("### Files Referenced")
-      mentionedFiles.forEach { compressedLines.add("- $it") }
-      compressedLines.add("")
+      resumeLines.add("Files referenced:")
+      mentionedFiles.forEach { resumeLines.add("- $it") }
+    } else {
+      resumeLines.add("No file paths detected in session.")
     }
+    resumeLines.add("")
 
-    // Extract the last N user messages as "active goals".
+    // [[LOGS]] — recent breakthroughs and completed actions
+    resumeLines.add("[[LOGS]]")
     val userMessages = (uiState.value.messagesByModel[model.name] ?: emptyList())
       .filterIsInstance<ChatMessageText>()
       .filter { it.side == ChatSide.USER }
       .takeLast(3)
     if (userMessages.isNotEmpty()) {
-      compressedLines.add("### Recent User Goals")
-      userMessages.forEach { compressedLines.add("- ${it.content.take(MAX_USER_MESSAGE_PREVIEW_LENGTH)}") }
-      compressedLines.add("")
+      resumeLines.add("Recent user goals:")
+      userMessages.forEach { resumeLines.add("- ${it.content.take(MAX_USER_MESSAGE_PREVIEW_LENGTH)}") }
     }
-
-    // Extract the last agent response as "current state".
     val lastAgentMsg = (uiState.value.messagesByModel[model.name] ?: emptyList())
       .filterIsInstance<ChatMessageText>()
       .filter { it.side == ChatSide.AGENT }
       .lastOrNull()
     if (lastAgentMsg != null) {
-      compressedLines.add("### Last CLU Response (truncated)")
-      compressedLines.add(lastAgentMsg.content.take(MAX_AGENT_RESPONSE_PREVIEW_LENGTH))
-      compressedLines.add("")
+      resumeLines.add("Last CLU response (truncated):")
+      resumeLines.add(lastAgentMsg.content.take(MAX_AGENT_RESPONSE_PREVIEW_LENGTH))
+    }
+    resumeLines.add("")
+
+    // [[NEXT_STEP]] — the immediate pending objective
+    resumeLines.add("[[NEXT_STEP]]")
+    val lastUserMsg = userMessages.lastOrNull()
+    if (lastUserMsg != null) {
+      resumeLines.add("Continue from: ${lastUserMsg.content.take(MAX_USER_MESSAGE_PREVIEW_LENGTH)}")
+    } else {
+      resumeLines.add("Awaiting next directive from Operator.")
     }
 
-    val summary = compressedLines.joinToString("\n")
+    val summary = resumeLines.joinToString("\n")
 
-    // Save to BrainBox as a Session_State neuron.
+    // ── Save resume_current.md to FILE_BOX ──────────────────────────
+    val ctx = appContext
+    if (ctx != null) {
+      withContext(Dispatchers.IO) {
+        try {
+          val fileBoxRoot = File(ctx.filesDir, "clu_file_box")
+          val resumeFile = File(fileBoxRoot, RESUME_FILE_PATH)
+          resumeFile.parentFile?.mkdirs()
+          resumeFile.writeText(summary, Charsets.UTF_8)
+          Log.d(TAG, "compressContext: saved resume_current.md (${summary.length} chars)")
+        } catch (e: Exception) {
+          Log.e(TAG, "compressContext: failed to write resume_current.md", e)
+        }
+      }
+    }
+
+    // ── Save permanent Session_Snapshot neuron to BrainBox ──────────
     val timestamp =
       java.time.LocalDateTime.now()
         .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
@@ -323,30 +401,34 @@ open class LlmChatViewModelBase(
       dao.insertNeuron(
         NeuronEntity(
           id = UUID.randomUUID().toString(),
-          label = "Session_State_$timestamp",
-          type = "Session_State",
+          label = "Session_Snapshot_$timestamp",
+          type = "Session_Snapshot",
           content = summary,
         )
       )
     }
-    Log.d(TAG, "compressContext: saved Session_State neuron (${summary.length} chars)")
+    Log.d(TAG, "compressContext: saved Session_Snapshot neuron (${summary.length} chars)")
 
-    // Clear active chat history.
+    // ── Purge: Clear active chat history ────────────────────────────
     clearAllMessages(model = model)
 
-    // Inject the summary as the first context message.
+    // ── The Cold Start: Re-inject genesis message ───────────────────
     withContext(Dispatchers.Main) {
       addMessage(
         model = model,
         message = ChatMessageText(
-          content = "⚡ **CONTEXT COMPRESSED** — ${getTextTurnCount(model)} turns defragmented. " +
-            "Session state saved to BrainBox.\n\n$summary",
+          content = summary,
           side = ChatSide.AGENT,
         ),
       )
     }
 
-    // Also wipe persisted history and re-persist the summary message.
+    // ── Reset TokenMonitor with genesis token cost ──────────────────
+    val genesisTokens = monitor.estimateTokens(summary)
+    monitor.reset(genesisTokens)
+    Log.d(TAG, "compressContext: recontextualization complete. ${monitor.diagnosticSummary()}")
+
+    // ── Wipe persisted history and re-persist the genesis message ───
     val chatDao = chatHistoryDao
     if (chatDao != null && taskId.isNotEmpty()) {
       withContext(Dispatchers.IO) {
@@ -452,22 +534,30 @@ open class LlmChatViewModelBase(
     allowThinking: Boolean = false,
   ) {
     val accelerator = model.getStringConfigValue(key = ConfigKeys.ACCELERATOR, defaultValue = "")
+    val monitor = getTokenMonitor(model)
     viewModelScope.launch(Dispatchers.Default) {
       setInProgress(true)
       setPreparing(true)
+
+      // Track user input tokens.
+      if (input.isNotEmpty()) {
+        monitor.trackMessage(input)
+      }
 
       // Persist user message immediately.
       if (taskId.isNotEmpty() && input.isNotEmpty()) {
         persistMessage(taskId = taskId, model = model, side = ChatSide.USER, content = input)
       }
 
-      // Phase 7: Context Auto-Compression — if the chat history exceeds the
-      // threshold, compress it before running inference. The compression saves
-      // the session state to BrainBox, wipes the history, and injects a dense
-      // summary as the first message.
+      // Phase 7: Context Auto-Compression — if the TokenMonitor breaches
+      // the 80% critical threshold (or turn count fallback is exceeded),
+      // fire the compression interceptor. This is autonomous and invisible.
       var compressionContext: String? = null
       if (needsContextCompression(model)) {
-        Log.d(TAG, "Context compression triggered (${getTextTurnCount(model)} turns)")
+        Log.d(
+          TAG,
+          "Context compression triggered. ${monitor.diagnosticSummary()}"
+        )
         compressionContext = compressContext(model = model, taskId = taskId)
       }
 
@@ -602,10 +692,11 @@ open class LlmChatViewModelBase(
                   }
                 }
 
-                // Persist the completed agent response.
+                // Persist the completed agent response and track tokens.
                 if (taskId.isNotEmpty()) {
                   val agentMsg = getLastMessage(model = model)
                   if (agentMsg is ChatMessageText && agentMsg.side == ChatSide.AGENT) {
+                    monitor.trackMessage(agentMsg.content)
                     persistMessage(
                       taskId = taskId,
                       model = model,
@@ -669,6 +760,13 @@ open class LlmChatViewModelBase(
           } else {
             input
           }
+
+        // Track the augmented input tokens (includes RAG context) since
+        // that is the full payload hitting the LLM context window.
+        if (augmentedInput.length > input.length) {
+          val injectedChars = augmentedInput.length - input.length
+          monitor.trackMessage(augmentedInput.substring(0, injectedChars))
+        }
 
         model.runtimeHelper.runInference(
           model = model,

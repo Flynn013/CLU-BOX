@@ -215,6 +215,7 @@ fun ChatViewWrapper(
 
   // Load persisted chat history whenever the selected model changes.
   LaunchedEffect(selectedModel.name) {
+    viewModel.initAppContext(context)
     viewModel.loadChatHistory(taskId, selectedModel)
   }
 

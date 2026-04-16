@@ -122,6 +122,7 @@ fun AgentChatScreen(
   skillManagerViewModel: SkillManagerViewModel = hiltViewModel(),
 ) {
   val context = LocalContext.current
+  viewModel.initAppContext(context)
   agentTools.context = context
   agentTools.skillManagerViewModel = skillManagerViewModel
   agentTools.brainBoxDao = remember(context) { GraphDatabase.getInstance(context).brainBoxDao() }
