@@ -75,6 +75,8 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.navigation.compose.rememberNavController
 import androidx.compose.runtime.collectAsState
+import com.google.ai.edge.gallery.customtasks.agentchat.AgentTools
+import com.google.ai.edge.gallery.customtasks.agentchat.SkillManagerBottomSheet
 import com.google.ai.edge.gallery.customtasks.agentchat.SkillManagerViewModel
 import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.ConfigKeys
@@ -94,7 +96,6 @@ import com.google.ai.edge.gallery.ui.osmodules.CommandCenterScreen
 import com.google.ai.edge.gallery.ui.osmodules.DiffBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.FileBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.MstrCtrlScreen
-import com.google.ai.edge.gallery.ui.osmodules.SkillBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.TheGridScreen
 import com.google.ai.edge.gallery.ui.theme.absoluteBlack
 import com.google.ai.edge.gallery.ui.theme.neonGreen
@@ -134,12 +135,23 @@ fun GalleryApp(
   var activeModule by remember { mutableStateOf(OsModule.CHAT_BOX) }
   // True when the SYS_SETTINGS drawer item is tapped — shows the ConfigDialog overlay.
   var showSysSettingsDialog by remember { mutableStateOf(false) }
+  // True when the SKILL_BOX drawer item is tapped — shows the SkillManagerBottomSheet overlay.
+  var showSkillBoxSheet by remember { mutableStateOf(false) }
   // Grid prompt override: when a Grid game is initialized, this holds the injected system prompt.
   var gridPromptOverride by remember { mutableStateOf<String?>(null) }
   val db = remember { GraphDatabase.getInstance(context) }
   val fileBoxManager = remember { FileBoxManager(context) }
   val terminalSessionManager = remember { TerminalSessionManager(context) }
   val skillManagerViewModel: SkillManagerViewModel = hiltViewModel()
+  // AgentTools instance used by the SkillManagerBottomSheet for skill testing.
+  val agentTools = remember {
+    AgentTools().apply {
+      this.skillManagerViewModel = skillManagerViewModel
+    }
+  }
+  agentTools.context = context
+  agentTools.brainBoxDao = remember(context) { GraphDatabase.getInstance(context).brainBoxDao() }
+  agentTools.terminalSessionManager = terminalSessionManager
 
   // Separate nav controllers so each module retains its own back stack.
   val chatNavController = rememberNavController()
@@ -191,6 +203,9 @@ fun GalleryApp(
                 if (module == OsModule.SYS_SETTINGS) {
                   // Show the Configurations dialog over the current module.
                   showSysSettingsDialog = true
+                } else if (module == OsModule.SKILL_BOX) {
+                  // Show the Skill Manager bottom sheet over the current module.
+                  showSkillBoxSheet = true
                 } else {
                   activeModule = module
                 }
@@ -208,7 +223,7 @@ fun GalleryApp(
     // ============================================================
     Box(modifier = Modifier.fillMaxSize()) {
       // Full-screen modules manage their own Scaffold / window insets.
-      // Shell modules (BRAIN_BOX, THE_GRID, SKILL_BOX) use the CLU/BOX Scaffold.
+      // Shell modules (BRAIN_BOX, THE_GRID, etc.) use the CLU/BOX Scaffold.
       if (activeModule.isFullScreenModule) {
         when (activeModule) {
           // CHAT_BOX: the CLU/BOX Chat — primary AI interaction window.
@@ -272,9 +287,6 @@ fun GalleryApp(
                   gridPromptOverride = systemPrompt
                   activeModule = OsModule.CHAT_BOX
                 },
-              )
-              OsModule.SKILL_BOX -> SkillBoxScreen(
-                skillManagerViewModel = skillManagerViewModel,
               )
               else -> {} // all shell and full-screen modules covered above
             }
@@ -359,6 +371,16 @@ fun GalleryApp(
           // No model selected or no configs — dismiss immediately.
           LaunchedEffect(Unit) { showSysSettingsDialog = false }
         }
+      }
+
+      // ── SKILL_BOX skill manager bottom sheet ───────────────────
+      // Shown as an overlay when the user taps the SKILL_BOX drawer item.
+      if (showSkillBoxSheet) {
+        SkillManagerBottomSheet(
+          agentTools = agentTools,
+          skillManagerViewModel = skillManagerViewModel,
+          onDismiss = { _ -> showSkillBoxSheet = false },
+        )
       }
     }
   }
