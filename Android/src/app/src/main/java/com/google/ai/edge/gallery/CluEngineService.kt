@@ -111,6 +111,7 @@ class CluEngineService : Service() {
    * Call this immediately before [generateResponseAsync] or shell execution begins.
    * Safe to call multiple times — only the first call acquires.
    */
+  @Synchronized
   fun acquireInferenceWakeLock() {
     if (wakeLock?.isHeld == true) return
     try {
@@ -128,6 +129,7 @@ class CluEngineService : Service() {
    * Release the wakelock. Must be called in a `finally` block after inference
    * completes, is cancelled, or errors out.
    */
+  @Synchronized
   fun releaseInferenceWakeLock() {
     try {
       wakeLock?.let {

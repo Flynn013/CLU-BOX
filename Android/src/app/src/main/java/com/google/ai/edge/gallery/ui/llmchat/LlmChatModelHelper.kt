@@ -163,9 +163,11 @@ object LlmChatModelHelper : LlmModelHelper {
       // Explicit OOM recovery: release resources before reporting.
       if (e is OutOfMemoryError) {
         Log.e("CLU_CRASH_REPORT", "OOM during engine init — forcing GC and releasing model")
-        try { model.instance = null } catch (_: Throwable) {}
+        try { model.instance = null } catch (cleanup: Throwable) {
+          Log.e("CLU_CRASH_REPORT", "Cleanup after OOM failed: ${cleanup.message}")
+        }
         System.gc()
-        onDone("OutOfMemoryError: Device does not have enough RAM for this model. Try a smaller model.")
+        onDone("OutOfMemoryError: Device does not have enough RAM for this model. Try selecting a smaller model from the model list.")
       } else {
         onDone(cleanUpMediapipeTaskErrorMessage(e.message ?: "Unknown error"))
       }
