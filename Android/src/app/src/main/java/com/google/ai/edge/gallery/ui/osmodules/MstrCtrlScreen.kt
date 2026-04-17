@@ -16,9 +16,11 @@
 
 package com.google.ai.edge.gallery.ui.osmodules
 
+import android.content.Context
 import android.graphics.Typeface
 import android.view.KeyEvent
 import android.view.MotionEvent
+import android.view.inputmethod.InputMethodManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -86,14 +88,40 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
   val scope = rememberCoroutineScope()
   var inputText by remember { mutableStateOf("") }
 
-  // Create the Termux PTY bridge.
-  val bridge = remember { TermuxSessionBridge(context) }
+  // Hold a reference to the TerminalView so we can invalidate it
+  // when new output arrives from the PTY.
+  var terminalViewRef by remember { mutableStateOf<TerminalView?>(null) }
 
-  // Start the legacy session manager (pre-flight + agent tools) and
-  // create the PTY session for the interactive terminal view.
+  // Create the Termux PTY bridge and session eagerly so the session
+  // is ready before the AndroidView factory runs.  Previously this was
+  // in a LaunchedEffect which ran *after* the first composition,
+  // causing the TerminalView factory to see a null session.
+  val bridge = remember {
+    TermuxSessionBridge(context).also { b ->
+      b.createSession(sessionManager.sandboxRoot)
+    }
+  }
+
+  // Start the legacy session manager (pre-flight + agent tools).
   LaunchedEffect(Unit) {
     sessionManager.startSession()
-    bridge.createSession(sessionManager.sandboxRoot)
+  }
+
+  // Wire up the bridge callback to invalidate the TerminalView whenever
+  // new text arrives from the PTY.  Re-wires when the view ref changes.
+  LaunchedEffect(terminalViewRef) {
+    bridge.setCallback(object : TermuxSessionBridge.Callback {
+      override fun onTextChanged() {
+        // onScreenUpdated() handles scroll tracking and triggers invalidate().
+        // Post to the UI thread since this callback fires from the PTY reader.
+        val view = terminalViewRef ?: return
+        view.post { view.onScreenUpdated() }
+      }
+
+      override fun onTitleChanged(title: String) {}
+      override fun onBell() {}
+      override fun onSessionFinished() {}
+    })
   }
 
   // Clean up PTY on disposal.
@@ -117,7 +145,7 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
         factory = { ctx ->
           TerminalView(ctx, null).apply {
             // Wire up the view client that handles keyboard/touch events.
-            setTerminalViewClient(CluTerminalViewClient())
+            setTerminalViewClient(CluTerminalViewClient(this))
 
             // Style: monospace font, neon-green on black.
             setTextSize(13)
@@ -126,14 +154,23 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
             // Black background to match CLU/BOX aesthetic.
             setBackgroundColor(android.graphics.Color.BLACK)
 
+            // Make the view focusable so it can receive keyboard input.
+            isFocusable = true
+            isFocusableInTouchMode = true
+
             // Attach the PTY session — the shell starts once the view measures.
             val session = bridge.terminalSession
             if (session != null) {
               attachSession(session)
             }
+
+            // Store reference so the bridge callback can invalidate this view.
+            terminalViewRef = this
           }
         },
         update = { view ->
+          // Keep the view reference current.
+          terminalViewRef = view
           // Re-attach if the session was recreated.
           // Note: `mTermSession` is a public field in Termux's TerminalView Java API.
           // There is no getter method — direct access is the intended usage pattern.
@@ -218,12 +255,18 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
 //
 // Handles keyboard, touch, and IME events for the embedded TerminalView.
 
-private class CluTerminalViewClient : TerminalViewClient {
+private class CluTerminalViewClient(
+  private val terminalView: TerminalView,
+) : TerminalViewClient {
 
   override fun onScale(scale: Float): Float = 1.0f // Disable pinch-to-zoom.
 
   override fun onSingleTapUp(e: MotionEvent) {
-    // Default: request focus so the soft keyboard appears.
+    // Request focus and show the soft keyboard so the user can type.
+    terminalView.requestFocus()
+    val imm = terminalView.context.getSystemService(Context.INPUT_METHOD_SERVICE)
+        as InputMethodManager
+    imm.showSoftInput(terminalView, InputMethodManager.SHOW_IMPLICIT)
   }
 
   override fun shouldBackButtonBeMappedToEscape(): Boolean = false
