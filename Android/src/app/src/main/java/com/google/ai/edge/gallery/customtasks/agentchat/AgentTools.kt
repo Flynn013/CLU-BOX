@@ -56,6 +56,47 @@ private fun capOutput(text: String): String {
   }
 }
 
+// ── Resolution Token Formatters ────────────────────────────────────
+// Every tool result map gets a "resolution" key that contains a strict,
+// formatted token telling the LLM the execution loop is officially over.
+// This prevents the model from re-invoking a tool on the next turn.
+
+/** Injects a `resolution` field into a success result map. */
+private fun withSuccessResolution(result: Map<String, String>): Map<String, String> {
+  val output = result.entries.joinToString(", ") { "${it.key}=${it.value.take(120)}" }
+  return result + ("resolution" to "[System: Tool executed successfully. Result: $output]")
+}
+
+/** Injects a `resolution` field into a failure result map. */
+private fun withFailureResolution(result: Map<String, String>): Map<String, String> {
+  val error = result["error"] ?: "unknown error"
+  return result + ("resolution" to "[System: Tool failed with error: $error. Task aborted. Await further instructions.]")
+}
+
+/** Auto-selects success or failure resolution based on the `status` field. */
+private fun withResolution(result: Map<String, String>): Map<String, String> {
+  val status = result["status"]?.lowercase() ?: ""
+  return if (status == "failed" || result.containsKey("error")) {
+    withFailureResolution(result)
+  } else {
+    withSuccessResolution(result)
+  }
+}
+
+/** Overload for Map<String, Any> (used by runJs). */
+@Suppress("UNCHECKED_CAST")
+private fun withResolutionAny(result: Map<String, Any>): Map<String, Any> {
+  val status = (result["status"] as? String)?.lowercase() ?: ""
+  val error = result["error"] as? String
+  val resolution = if (status == "failed" || error != null) {
+    "[System: Tool failed with error: ${error ?: "unknown error"}. Task aborted. Await further instructions.]"
+  } else {
+    val output = result.entries.joinToString(", ") { "${it.key}=${it.value.toString().take(120)}" }
+    "[System: Tool executed successfully. Result: $output]"
+  }
+  return result + ("resolution" to resolution)
+}
+
 class AgentTools() : ToolSet {
   lateinit var context: Context
   lateinit var skillManagerViewModel: SkillManagerViewModel
@@ -84,7 +125,7 @@ class AgentTools() : ToolSet {
   fun loadSkill(
     @ToolParam(description = "The name of the skill to load.") skillName: String
   ): Map<String, String> {
-    return runBlocking(Dispatchers.IO) {
+    return withResolution(runBlocking(Dispatchers.IO) {
       try {
       val skills = skillManagerViewModel.getSelectedSkills()
       val skill = skills.find { it.name == skillName.trim() }
@@ -119,7 +160,7 @@ class AgentTools() : ToolSet {
         Log.e(TAG, "loadSkill: unexpected error", e)
         mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
       }
-    }
+    })
   }
 
   /** Call JS skill */
@@ -133,7 +174,7 @@ class AgentTools() : ToolSet {
     )
     data: String,
   ): Map<String, Any> {
-    return runBlocking(Dispatchers.IO) {
+    return withResolutionAny(runBlocking(Dispatchers.IO) {
       try {
       Log.d(
         TAG,
@@ -258,7 +299,7 @@ class AgentTools() : ToolSet {
         Log.e(TAG, "runJs: unexpected error", e)
         mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed" as Any)
       }
-    }
+    })
   }
 
   @Tool(
@@ -272,7 +313,7 @@ class AgentTools() : ToolSet {
     )
     parameters: String,
   ): Map<String, String> {
-    return runBlocking(Dispatchers.IO) {
+    return withResolution(runBlocking(Dispatchers.IO) {
       try {
       Log.d(TAG, "Run intent. Intent: '$intent', parameters: '$parameters'")
       _actionChannel.send(
@@ -300,7 +341,7 @@ class AgentTools() : ToolSet {
         Log.e(TAG, "runIntent: unexpected error", e)
         mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
       }
-    }
+    })
   }
 
   /**
@@ -313,7 +354,7 @@ class AgentTools() : ToolSet {
   fun queryBrain(
     @ToolParam(description = "The search term. Pass an empty string to retrieve all neurons.") query: String,
   ): Map<String, String> {
-    return runBlocking(Dispatchers.IO) {
+    return withResolution(runBlocking(Dispatchers.IO) {
       try {
       val dao = brainBoxDao
       if (dao == null) {
@@ -334,7 +375,7 @@ class AgentTools() : ToolSet {
         Log.e(TAG, "queryBrain: unexpected error", e)
         mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
       }
-    }
+    })
   }
 
   /**
@@ -348,7 +389,7 @@ class AgentTools() : ToolSet {
     @ToolParam(description = "The category or type of memory (e.g. 'preference', 'fact', 'context', 'task').") type: String,
     @ToolParam(description = "The full content to store.") content: String,
   ): Map<String, String> {
-    return runBlocking(Dispatchers.IO) {
+    return withResolution(runBlocking(Dispatchers.IO) {
       try {
       val dao = brainBoxDao
       if (dao == null) {
@@ -370,7 +411,7 @@ class AgentTools() : ToolSet {
         Log.e(TAG, "saveBrainNeuron: unexpected error", e)
         mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
       }
-    }
+    })
   }
 
   // =========================================================================
@@ -387,7 +428,7 @@ class AgentTools() : ToolSet {
       "and folders. Use this to orient yourself before reading or writing files."
   )
   fun workspaceMap(): Map<String, String> {
-    return runBlocking(Dispatchers.IO) {
+    return withResolution(runBlocking(Dispatchers.IO) {
       try {
       Log.d(TAG, "workspaceMap: scanning workspace")
       val json = fileBoxManager.workspaceMapJson()
@@ -409,7 +450,7 @@ class AgentTools() : ToolSet {
         Log.e(TAG, "workspaceMap: unexpected error", e)
         mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
       }
-    }
+    })
   }
 
   // =========================================================================
@@ -434,7 +475,7 @@ class AgentTools() : ToolSet {
     @ToolParam(description = "The full text/code content to write to the file.")
     content: String,
   ): Map<String, String> {
-    return runBlocking(Dispatchers.IO) {
+    return withResolution(runBlocking(Dispatchers.IO) {
       try {
       Log.d(TAG, "fileBoxWrite: path='$file_path' content=${content.length} chars")
       val mgr = fileBoxManager
@@ -535,7 +576,7 @@ class AgentTools() : ToolSet {
         Log.e(TAG, "fileBoxWrite: unexpected error", e)
         mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
       }
-    }
+    })
   }
 
   /**
@@ -549,7 +590,7 @@ class AgentTools() : ToolSet {
     @ToolParam(description = "Relative path of the file to read inside FILE_BOX (e.g. 'my_app/src/main.kt').")
     file_path: String,
   ): Map<String, String> {
-    return runBlocking(Dispatchers.IO) {
+    return withResolution(runBlocking(Dispatchers.IO) {
       try {
       Log.d(TAG, "fileBoxRead: path='$file_path'")
       val content = fileBoxManager.readCodeFile(file_path)
@@ -581,7 +622,7 @@ class AgentTools() : ToolSet {
         Log.e(TAG, "fileBoxRead: unexpected error", e)
         mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
       }
-    }
+    })
   }
 
   // =========================================================================
@@ -608,7 +649,7 @@ class AgentTools() : ToolSet {
     @ToolParam(description = "Either 'pending' (more work to do) or 'complete' (all tasks finished).")
     status: String,
   ): Map<String, String> {
-    return runBlocking(Dispatchers.IO) {
+    return withResolution(runBlocking(Dispatchers.IO) {
       try {
       val normalizedStatus = status.trim().lowercase()
       Log.d(TAG, "taskQueueUpdate: status='$normalizedStatus', desc='$next_task_description'")
@@ -646,7 +687,7 @@ class AgentTools() : ToolSet {
         Log.e(TAG, "taskQueueUpdate: unexpected error", e)
         mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
       }
-    }
+    })
   }
 
   // =========================================================================
@@ -678,7 +719,7 @@ class AgentTools() : ToolSet {
       "(PENDING) or '- [x] path/to/file.ext' (DONE).")
     blueprint_markdown: String,
   ): Map<String, String> {
-    return runBlocking(Dispatchers.IO) {
+    return withResolution(runBlocking(Dispatchers.IO) {
       try {
       Log.d(TAG, "architectInit: goal='${project_goal.take(80)}', blueprint=${blueprint_markdown.length} chars")
 
@@ -728,9 +769,10 @@ class AgentTools() : ToolSet {
       )
       } catch (e: Exception) {
         Log.e(TAG, "architectInit: unexpected error", e)
+        pendingTaskDescription = null  // Circuit breaker: clear queue on fatal error.
         mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
       }
-    }
+    })
   }
 
   /**
@@ -754,7 +796,7 @@ class AgentTools() : ToolSet {
     @ToolParam(description = "Set to 'true' when ALL files in the blueprint are complete, 'false' otherwise.")
     is_project_finished: String,
   ): Map<String, String> {
-    return runBlocking(Dispatchers.IO) {
+    return withResolution(runBlocking(Dispatchers.IO) {
       try {
       val finished = is_project_finished.trim().lowercase() == "true"
       Log.d(TAG, "workerExecute: path='$target_file_path', finished=$finished, content=${code_content.length} chars")
@@ -824,9 +866,10 @@ class AgentTools() : ToolSet {
       )
       } catch (e: Exception) {
         Log.e(TAG, "workerExecute: unexpected error", e)
+        pendingTaskDescription = null  // Circuit breaker: clear queue on fatal error.
         mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
       }
-    }
+    })
   }
 
   // =========================================================================
@@ -850,7 +893,7 @@ class AgentTools() : ToolSet {
     @ToolParam(description = "The shell command to execute (e.g. 'ls -la', 'cat file.txt', 'python3 test.py').")
     command: String,
   ): Map<String, String> {
-    return runBlocking(Dispatchers.IO) {
+    return withResolution(runBlocking(Dispatchers.IO) {
       try {
       Log.d(TAG, "shellExecute: command='$command'")
 
@@ -894,7 +937,7 @@ class AgentTools() : ToolSet {
         Log.e(TAG, "shellExecute: unexpected error", e)
         mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
       }
-    }
+    })
   }
 
   // =========================================================================
@@ -915,7 +958,7 @@ class AgentTools() : ToolSet {
     @ToolParam(description = "The shell command to execute visibly (e.g. 'git status', 'npm test').")
     command: String,
   ): Map<String, String> {
-    return runBlocking(Dispatchers.IO) {
+    return withResolution(runBlocking(Dispatchers.IO) {
       try {
       Log.d(TAG, "commandOverride: command='$command'")
 
@@ -960,7 +1003,7 @@ class AgentTools() : ToolSet {
         Log.e(TAG, "commandOverride: unexpected error", e)
         mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
       }
-    }
+    })
   }
 
   // =========================================================================
@@ -982,7 +1025,7 @@ class AgentTools() : ToolSet {
     @ToolParam(description = "A clear explanation of why you are stopping (milestone reached, blocker, need user decision, etc.).")
     reason: String,
   ): Map<String, String> {
-    return runBlocking(Dispatchers.IO) {
+    return withResolution(runBlocking(Dispatchers.IO) {
       try {
       Log.d(TAG, "operatorHalt: reason='$reason'")
 
@@ -1006,7 +1049,7 @@ class AgentTools() : ToolSet {
         Log.e(TAG, "operatorHalt: unexpected error", e)
         mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
       }
-    }
+    })
   }
 
   // =========================================================================
@@ -1027,7 +1070,7 @@ class AgentTools() : ToolSet {
     @ToolParam(description = "The search query (e.g. 'Python list comprehension', 'Kotlin coroutines', 'git rebase').")
     query: String,
   ): Map<String, String> {
-    return runBlocking(Dispatchers.IO) {
+    return withResolution(runBlocking(Dispatchers.IO) {
       try {
       Log.d(TAG, "oracleSearch: query='$query'")
 
@@ -1060,7 +1103,7 @@ class AgentTools() : ToolSet {
         Log.e(TAG, "oracleSearch: unexpected error", e)
         mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
       }
-    }
+    })
   }
 
   // =========================================================================
@@ -1080,7 +1123,7 @@ class AgentTools() : ToolSet {
     @ToolParam(description = "Relative file path to diff (e.g. 'src/main.py'). Pass empty string for full workspace diff.")
     path: String,
   ): Map<String, String> {
-    return runBlocking(Dispatchers.IO) {
+    return withResolution(runBlocking(Dispatchers.IO) {
       try {
       Log.d(TAG, "gitDiffRead: path='$path'")
 
@@ -1133,7 +1176,7 @@ class AgentTools() : ToolSet {
         Log.e(TAG, "gitDiffRead: unexpected error", e)
         mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
       }
-    }
+    })
   }
 
   fun sendAgentAction(action: AgentAction) {
@@ -1155,7 +1198,7 @@ class AgentTools() : ToolSet {
       "editor. Returns current_file, cursor_line, terminal_cwd, and terminal_last_output."
   )
   fun workspaceSyncSnapshot(): Map<String, String> {
-    return runBlocking(Dispatchers.IO) {
+    return withResolution(runBlocking(Dispatchers.IO) {
       try {
       Log.d(TAG, "workspaceSyncSnapshot")
 
@@ -1193,7 +1236,7 @@ class AgentTools() : ToolSet {
         Log.e(TAG, "workspaceSyncSnapshot: unexpected error", e)
         mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
       }
-    }
+    })
   }
 
   // =========================================================================
@@ -1215,7 +1258,7 @@ class AgentTools() : ToolSet {
     @ToolParam(description = "Optional override file path. If empty, uses the file currently open in the editor.")
     file_path: String,
   ): Map<String, String> {
-    return runBlocking(Dispatchers.IO) {
+    return withResolution(runBlocking(Dispatchers.IO) {
       try {
       val mgr = fileBoxManager
       val tsm = terminalSessionManager
@@ -1317,7 +1360,7 @@ class AgentTools() : ToolSet {
         Log.e(TAG, "editorTerminalPipe: unexpected error", e)
         mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
       }
-    }
+    })
   }
 }
 

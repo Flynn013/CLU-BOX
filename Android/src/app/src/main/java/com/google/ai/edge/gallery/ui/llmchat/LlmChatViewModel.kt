@@ -117,6 +117,11 @@ private val TOOL_CALL_CLOSE_TAGS = listOf("</tool_call>", "<end_of_turn>")
 private const val TOOL_CALL_SCRUB_NOTICE =
   "[System: Tool execution interrupted or malformed. Proceed with standard text.]"
 
+/** Cancellation token force-appended by the circuit breaker when an unresolved
+ *  tool call is detected at the start of a new user turn. */
+private const val TOOL_CALL_CIRCUIT_BREAKER_NOTICE =
+  "[System: Previous tool execution forcefully aborted by new user input. Clear active tasks.]"
+
 /**
  * Scrubs incomplete or malformed tool-call blocks from [text] before it is
  * persisted to chat history, BrainBox, or Session_Resume.
@@ -633,6 +638,40 @@ open class LlmChatViewModelBase(
       // Persist user message immediately.
       if (taskId.isNotEmpty() && input.isNotEmpty()) {
         persistMessage(taskId = taskId, model = model, side = ChatSide.USER, content = input)
+      }
+
+      // ── Circuit Breaker: detect unresolved tool calls ──────────────
+      // If the last agent message contains an unclosed <|tool_call> block
+      // (opened but never completed), the LLM may try to re-invoke it on
+      // the next turn. Force-append a cancellation token so the model
+      // knows the previous task is dead and can respond normally.
+      val lastAgentMsg = getLastMessageWithTypeAndSide(
+        model = model,
+        type = ChatMessageType.TEXT,
+        side = ChatSide.AGENT,
+      )
+      if (lastAgentMsg is ChatMessageText) {
+        val content = lastAgentMsg.content
+        val hasOpen = content.contains(TOOL_CALL_OPEN_TAG)
+        val hasClosed = TOOL_CALL_CLOSE_TAGS.any { content.contains(it) }
+        if (hasOpen && !hasClosed) {
+          Log.w(TAG, "Circuit breaker: unresolved tool call detected — injecting cancellation token")
+          addMessage(
+            model = model,
+            message = ChatMessageText(
+              content = TOOL_CALL_CIRCUIT_BREAKER_NOTICE,
+              side = ChatSide.AGENT,
+            ),
+          )
+          if (taskId.isNotEmpty()) {
+            persistMessage(
+              taskId = taskId,
+              model = model,
+              side = ChatSide.AGENT,
+              content = TOOL_CALL_CIRCUIT_BREAKER_NOTICE,
+            )
+          }
+        }
       }
 
       // Phase 7: Context Auto-Compression — if the TokenMonitor breaches
