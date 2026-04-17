@@ -72,6 +72,7 @@ import androidx.navigation.navArgument
 import com.google.ai.edge.gallery.GalleryEvent
 import com.google.ai.edge.gallery.customtasks.common.CustomTaskData
 import com.google.ai.edge.gallery.customtasks.common.CustomTaskDataForBuiltinTask
+import com.google.ai.edge.gallery.data.EMPTY_MODEL
 import com.google.ai.edge.gallery.data.ModelDownloadStatusType
 import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.data.isLegacyTasks
@@ -490,9 +491,12 @@ private fun CustomTaskScreen(
   BackHandler { handleNavigateUp() }
 
   // Initialize model when model/download state changes.
-  val curDownloadStatus = modelManagerUiState.modelDownloadStatus[selectedModel.name]
+  // Guard against EMPTY_MODEL (no model selected yet — e.g. before any download).
+  val curDownloadStatus =
+    if (selectedModel != EMPTY_MODEL) modelManagerUiState.modelDownloadStatus[selectedModel.name]
+    else null
   LaunchedEffect(curDownloadStatus, selectedModel.name) {
-    if (!navigatingUp) {
+    if (!navigatingUp && selectedModel != EMPTY_MODEL) {
       if (curDownloadStatus?.status == ModelDownloadStatusType.SUCCEEDED) {
         Log.d(
           TAG,
@@ -503,7 +507,9 @@ private fun CustomTaskScreen(
     }
   }
 
-  val modelInitializationStatus = modelManagerUiState.modelInitializationStatus[selectedModel.name]
+  val modelInitializationStatus =
+    if (selectedModel != EMPTY_MODEL) modelManagerUiState.modelInitializationStatus[selectedModel.name]
+    else null
   LaunchedEffect(modelInitializationStatus) {
     showErrorDialog = modelInitializationStatus?.status == ModelInitializationStatusType.ERROR
   }

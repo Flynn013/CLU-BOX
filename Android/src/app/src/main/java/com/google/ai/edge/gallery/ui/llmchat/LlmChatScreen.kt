@@ -49,6 +49,7 @@ import androidx.core.os.bundleOf
 import com.google.ai.edge.gallery.GalleryEvent
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.data.BuiltInTaskId
+import com.google.ai.edge.gallery.data.EMPTY_MODEL
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.RuntimeType
 import com.google.ai.edge.gallery.data.Task
@@ -207,16 +208,21 @@ fun ChatViewWrapper(
   onChatHistoryClicked: (() -> Unit)? = null,
 ) {
   val context = LocalContext.current
-  val task = modelManagerViewModel.getTaskById(id = taskId)!!
+  // Guard: if the task doesn't exist yet (e.g. before model download) bail out
+  // instead of crashing on a null pointer.
+  val task = modelManagerViewModel.getTaskById(id = taskId) ?: return
   val allowThinking = task.allowThinking()
   val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
   val selectedModel = modelManagerUiState.selectedModel
   var showWipeConfirmDialog by remember { mutableStateOf(false) }
 
-  // Load persisted chat history whenever the selected model changes.
+  // Load persisted chat history whenever the selected model changes,
+  // but only when a real model is selected (not the EMPTY_MODEL sentinel).
   LaunchedEffect(selectedModel.name) {
     viewModel.initAppContext(context)
-    viewModel.loadChatHistory(taskId, selectedModel)
+    if (selectedModel != EMPTY_MODEL) {
+      viewModel.loadChatHistory(taskId, selectedModel)
+    }
   }
 
   if (showWipeConfirmDialog) {

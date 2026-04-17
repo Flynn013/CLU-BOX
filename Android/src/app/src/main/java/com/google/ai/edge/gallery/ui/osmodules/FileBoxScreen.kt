@@ -206,7 +206,7 @@ fun FileBoxScreen(fileBoxManager: FileBoxManager) {
         if (fileTree.children.isEmpty()) {
           Text(
             "Empty workspace.\nUse 'New File' or let\nthe AI create files.",
-            color = neonGreen.copy(alpha = 0.5f),
+            color = neonGreen.copy(alpha = 0.7f),
             fontFamily = FontFamily.Monospace,
             fontSize = 11.sp,
             modifier = Modifier.padding(8.dp),
@@ -237,7 +237,7 @@ fun FileBoxScreen(fileBoxManager: FileBoxManager) {
           Column(modifier = Modifier.fillMaxSize()) {
             Text(
               selectedFilePath ?: "",
-              color = neonGreen.copy(alpha = 0.7f),
+              color = neonGreen,
               fontFamily = FontFamily.Monospace,
               fontSize = 10.sp,
               modifier = Modifier.padding(bottom = 4.dp),
@@ -263,7 +263,7 @@ fun FileBoxScreen(fileBoxManager: FileBoxManager) {
               textStyle = TextStyle(
                 fontFamily = FontFamily.Monospace,
                 fontSize = 12.sp,
-                color = Color(0xFFF8F8F2),
+                color = Color.White,
               ),
               cursorBrush = SolidColor(neonGreen),
               visualTransformation = syntaxTransformation,
@@ -272,7 +272,7 @@ fun FileBoxScreen(fileBoxManager: FileBoxManager) {
         } else {
           Text(
             "← Select a file to view/edit",
-            color = neonGreen.copy(alpha = 0.4f),
+            color = neonGreen.copy(alpha = 0.6f),
             fontFamily = FontFamily.Monospace,
             fontSize = 12.sp,
             modifier = Modifier.align(Alignment.Center),
@@ -296,7 +296,7 @@ fun FileBoxScreen(fileBoxManager: FileBoxManager) {
             "Enter path relative to workspace root.\nNested folders are auto-created.",
             fontFamily = FontFamily.Monospace,
             fontSize = 12.sp,
-            color = neonGreen.copy(alpha = 0.4f),
+            color = neonGreen.copy(alpha = 0.6f),
           )
           Spacer(Modifier.height(8.dp))
           OutlinedTextField(
@@ -389,7 +389,7 @@ private fun FileTreeNode(
       Icon(
         if (expanded) Icons.Default.FolderOpen else Icons.Default.Folder,
         contentDescription = null,
-        tint = neonGreen.copy(alpha = 0.7f),
+        tint = neonGreen.copy(alpha = 0.85f),
         modifier = Modifier.size(14.dp),
       )
       Spacer(Modifier.width(4.dp))
@@ -397,7 +397,7 @@ private fun FileTreeNode(
         node.name,
         fontFamily = FontFamily.Monospace,
         fontSize = 11.sp,
-        color = neonGreen.copy(alpha = 0.8f),
+        color = neonGreen.copy(alpha = 0.9f),
       )
     }
     if (expanded) {
@@ -419,7 +419,7 @@ private fun FileTreeNode(
       Icon(
         Icons.AutoMirrored.Filled.InsertDriveFile,
         contentDescription = null,
-        tint = if (isSelected) neonGreen else neonGreen.copy(alpha = 0.4f),
+        tint = if (isSelected) neonGreen else neonGreen.copy(alpha = 0.6f),
         modifier = Modifier.size(14.dp),
       )
       Spacer(Modifier.width(4.dp))
@@ -427,7 +427,7 @@ private fun FileTreeNode(
         node.name,
         fontFamily = FontFamily.Monospace,
         fontSize = 11.sp,
-        color = if (isSelected) neonGreen else neonGreen.copy(alpha = 0.5f),
+        color = if (isSelected) neonGreen else neonGreen.copy(alpha = 0.7f),
       )
     }
   }
