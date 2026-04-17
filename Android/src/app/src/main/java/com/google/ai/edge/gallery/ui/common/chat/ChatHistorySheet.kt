@@ -75,7 +75,11 @@ fun ChatHistorySheet(
   var sessions by remember { mutableStateOf<List<ChatSessionSummary>>(emptyList()) }
 
   LaunchedEffect(Unit) {
-    sessions = chatHistoryDao.getSessions()
+    try {
+      sessions = chatHistoryDao.getSessions()
+    } catch (e: Exception) {
+      android.util.Log.e("ChatHistorySheet", "Failed to load sessions", e)
+    }
   }
 
   ModalBottomSheet(

@@ -118,8 +118,12 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao) {
 
   // Load all neurons on entry.
   LaunchedEffect(Unit) {
-    neurons.clear()
-    neurons.addAll(dao.getAllNeurons())
+    try {
+      neurons.clear()
+      neurons.addAll(dao.getAllNeurons())
+    } catch (e: Exception) {
+      android.util.Log.e("BrainBoxModule", "Failed to load neurons", e)
+    }
   }
 
   // ---- Dialogs ----
@@ -174,17 +178,21 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao) {
       confirmButton = {
         TextButton(onClick = {
           scope.launch {
-            val neuron = NeuronEntity(
-              id = existing?.id ?: UUID.randomUUID().toString(),
-              label = label.trim(),
-              type = type.trim(),
-              content = content.trim(),
-              synapses = synapses.trim(),
-              isCore = isCore,
-            )
-            dao.insertNeuron(neuron)
-            neurons.clear()
-            neurons.addAll(dao.getAllNeurons())
+            try {
+              val neuron = NeuronEntity(
+                id = existing?.id ?: UUID.randomUUID().toString(),
+                label = label.trim(),
+                type = type.trim(),
+                content = content.trim(),
+                synapses = synapses.trim(),
+                isCore = isCore,
+              )
+              dao.insertNeuron(neuron)
+              neurons.clear()
+              neurons.addAll(dao.getAllNeurons())
+            } catch (e: Exception) {
+              android.util.Log.e("BrainBoxModule", "Failed to save neuron", e)
+            }
           }
           showAddDialog = false; editTarget = null
         }) { Text("SAVE", color = neonGreen, fontFamily = FontFamily.Monospace) }
@@ -205,8 +213,12 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao) {
       confirmButton = {
         TextButton(onClick = {
           scope.launch {
-            dao.deleteNeuron(target)
-            neurons.remove(target)
+            try {
+              dao.deleteNeuron(target)
+              neurons.remove(target)
+            } catch (e: Exception) {
+              android.util.Log.e("BrainBoxModule", "Failed to delete neuron", e)
+            }
           }
           showDeleteDialog = null
         }) { Text("DELETE", color = MaterialTheme.colorScheme.error, fontFamily = FontFamily.Monospace) }
@@ -369,10 +381,14 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao) {
               onDelete = { showDeleteDialog = neuron },
               onToggleCore = {
                 scope.launch {
-                  val updated = neuron.copy(isCore = !neuron.isCore)
-                  dao.updateNeuron(updated)
-                  val idx = neurons.indexOfFirst { it.id == neuron.id }
-                  if (idx >= 0) neurons[idx] = updated
+                  try {
+                    val updated = neuron.copy(isCore = !neuron.isCore)
+                    dao.updateNeuron(updated)
+                    val idx = neurons.indexOfFirst { it.id == neuron.id }
+                    if (idx >= 0) neurons[idx] = updated
+                  } catch (e: Exception) {
+                    android.util.Log.e("BrainBoxModule", "Failed to toggle core", e)
+                  }
                 }
               },
             )

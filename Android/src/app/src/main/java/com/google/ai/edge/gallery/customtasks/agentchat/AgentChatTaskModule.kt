@@ -101,21 +101,26 @@ class AgentChatTask @Inject constructor() : CustomTask {
     onDone: (String) -> Unit,
   ) {
     agentTools.skillManagerViewModel.loadSkills {
-      LlmChatModelHelper.initialize(
-        context = context,
-        model = model,
-        supportImage = true,
-        supportAudio = true,
-        onDone = onDone,
-        systemInstruction =
-          if (agentTools.skillManagerViewModel.getSelectedSkills().isEmpty()) {
-            null
-          } else {
-            agentTools.skillManagerViewModel.getSystemPrompt(task.defaultSystemPrompt)
-          },
-        tools = listOf(tool(agentTools)),
-        enableConversationConstrainedDecoding = true,
-      )
+      try {
+        LlmChatModelHelper.initialize(
+          context = context,
+          model = model,
+          supportImage = true,
+          supportAudio = true,
+          onDone = onDone,
+          systemInstruction =
+            if (agentTools.skillManagerViewModel.getSelectedSkills().isEmpty()) {
+              null
+            } else {
+              agentTools.skillManagerViewModel.getSystemPrompt(task.defaultSystemPrompt)
+            },
+          tools = listOf(tool(agentTools)),
+          enableConversationConstrainedDecoding = true,
+        )
+      } catch (e: Exception) {
+        android.util.Log.e("AgentChatTask", "Model initialization failed", e)
+        onDone("Model initialization failed: ${e.message ?: "unknown error"}")
+      }
     }
   }
 

@@ -160,17 +160,21 @@ open class LlmChatViewModelBase(
     val dao = chatHistoryDao ?: return
 
     viewModelScope.launch(Dispatchers.IO) {
-      val rows = dao.getMessages(taskId = taskId, modelName = model.name)
-      for (row in rows) {
-        val side = when (row.side) {
-          "USER" -> ChatSide.USER
-          "AGENT" -> ChatSide.AGENT
-          else -> {
-            Log.w(TAG, "Unknown chat side '${row.side}' in history — skipping row id=${row.id}")
-            continue
+      try {
+        val rows = dao.getMessages(taskId = taskId, modelName = model.name)
+        for (row in rows) {
+          val side = when (row.side) {
+            "USER" -> ChatSide.USER
+            "AGENT" -> ChatSide.AGENT
+            else -> {
+              Log.w(TAG, "Unknown chat side '${row.side}' in history — skipping row id=${row.id}")
+              continue
+            }
           }
+          addMessage(model = model, message = ChatMessageText(content = row.content, side = side))
         }
-        addMessage(model = model, message = ChatMessageText(content = row.content, side = side))
+      } catch (e: Exception) {
+        Log.e(TAG, "loadChatHistory: failed to load messages for $key", e)
       }
     }
   }
@@ -185,7 +189,11 @@ open class LlmChatViewModelBase(
     // Allow history to be freshly loaded (will be empty) on next model selection.
     loadedHistoryKeys.remove("$taskId::${model.name}")
     viewModelScope.launch(Dispatchers.IO) {
-      dao.deleteMessages(taskId = taskId, modelName = model.name)
+      try {
+        dao.deleteMessages(taskId = taskId, modelName = model.name)
+      } catch (e: Exception) {
+        Log.e(TAG, "wipeGrid: failed to delete messages", e)
+      }
     }
   }
 
@@ -398,14 +406,18 @@ open class LlmChatViewModelBase(
       java.time.LocalDateTime.now()
         .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
     withContext(Dispatchers.IO) {
-      dao.insertNeuron(
-        NeuronEntity(
-          id = UUID.randomUUID().toString(),
-          label = "Session_Snapshot_$timestamp",
-          type = "Session_Snapshot",
-          content = summary,
+      try {
+        dao.insertNeuron(
+          NeuronEntity(
+            id = UUID.randomUUID().toString(),
+            label = "Session_Snapshot_$timestamp",
+            type = "Session_Snapshot",
+            content = summary,
+          )
         )
-      )
+      } catch (e: Exception) {
+        Log.e(TAG, "compressContext: failed to save Session_Snapshot neuron", e)
+      }
     }
     Log.d(TAG, "compressContext: saved Session_Snapshot neuron (${summary.length} chars)")
 
@@ -432,16 +444,20 @@ open class LlmChatViewModelBase(
     val chatDao = chatHistoryDao
     if (chatDao != null && taskId.isNotEmpty()) {
       withContext(Dispatchers.IO) {
-        chatDao.deleteMessages(taskId = taskId, modelName = model.name)
-        chatDao.insertMessage(
-          ChatMessageEntity(
-            taskId = taskId,
-            modelName = model.name,
-            side = ChatSide.AGENT.name,
-            content = summary,
-            timestampMs = System.currentTimeMillis(),
+        try {
+          chatDao.deleteMessages(taskId = taskId, modelName = model.name)
+          chatDao.insertMessage(
+            ChatMessageEntity(
+              taskId = taskId,
+              modelName = model.name,
+              side = ChatSide.AGENT.name,
+              content = summary,
+              timestampMs = System.currentTimeMillis(),
+            )
           )
-        )
+        } catch (e: Exception) {
+          Log.e(TAG, "compressContext: failed to wipe/re-persist history", e)
+        }
       }
     }
 
@@ -479,31 +495,35 @@ open class LlmChatViewModelBase(
         .joinToString(",") { "[[${it}]]" }
 
     viewModelScope.launch(Dispatchers.IO) {
-      val timestamp =
-        java.time.LocalDateTime.now()
-          .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
-      val neuron =
-        NeuronEntity(
-          id = UUID.randomUUID().toString(),
-          label = "Session_$timestamp",
-          type = "Session_Log",
-          content = transcript,
-          synapses = extractedSynapses,
-        )
-      dao.insertNeuron(neuron)
-      Log.d(TAG, "Forged neuron: ${neuron.label} (${transcript.length} chars)")
+      try {
+        val timestamp =
+          java.time.LocalDateTime.now()
+            .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
+        val neuron =
+          NeuronEntity(
+            id = UUID.randomUUID().toString(),
+            label = "Session_$timestamp",
+            type = "Session_Log",
+            content = transcript,
+            synapses = extractedSynapses,
+          )
+        dao.insertNeuron(neuron)
+        Log.d(TAG, "Forged neuron: ${neuron.label} (${transcript.length} chars)")
 
-      withContext(Dispatchers.Main) {
-        addMessage(
-          model = model,
-          message =
-            ChatMessageText(
-              content =
-                "⚡ **FORGED TO BRAINBOX** — session locked as `${neuron.label}`.\n" +
-                  "CLU will remember this the next time you reference it.",
-              side = ChatSide.AGENT,
-            ),
-        )
+        withContext(Dispatchers.Main) {
+          addMessage(
+            model = model,
+            message =
+              ChatMessageText(
+                content =
+                  "⚡ **FORGED TO BRAINBOX** — session locked as `${neuron.label}`.\n" +
+                    "CLU will remember this the next time you reference it.",
+                side = ChatSide.AGENT,
+              ),
+          )
+        }
+      } catch (e: Exception) {
+        Log.e(TAG, "forgeNeuron: failed to forge neuron", e)
       }
     }
   }
@@ -519,7 +539,13 @@ open class LlmChatViewModelBase(
         content = content,
         timestampMs = System.currentTimeMillis(),
       )
-    viewModelScope.launch(Dispatchers.IO) { dao.insertMessage(entity) }
+    viewModelScope.launch(Dispatchers.IO) {
+      try {
+        dao.insertMessage(entity)
+      } catch (e: Exception) {
+        Log.e(TAG, "persistMessage: failed to insert chat message", e)
+      }
+    }
   }
 
   fun generateResponse(
@@ -536,6 +562,7 @@ open class LlmChatViewModelBase(
     val accelerator = model.getStringConfigValue(key = ConfigKeys.ACCELERATOR, defaultValue = "")
     val monitor = getTokenMonitor(model)
     viewModelScope.launch(Dispatchers.Default) {
+      try {
       setInProgress(true)
       setPreparing(true)
 
@@ -548,12 +575,16 @@ open class LlmChatViewModelBase(
       // the 80% critical threshold (or turn count fallback is exceeded),
       // fire the compression interceptor. This is autonomous and invisible.
       var compressionContext: String? = null
-      if (needsContextCompression(model)) {
-        Log.d(
-          TAG,
-          "Context compression triggered. ${monitor.diagnosticSummary()}"
-        )
-        compressionContext = compressContext(model = model, taskId = taskId)
+      try {
+        if (needsContextCompression(model)) {
+          Log.d(
+            TAG,
+            "Context compression triggered. ${monitor.diagnosticSummary()}"
+          )
+          compressionContext = compressContext(model = model, taskId = taskId)
+        }
+      } catch (e: Exception) {
+        Log.e(TAG, "Context compression failed — continuing without compression", e)
       }
 
       // Loading.
@@ -574,8 +605,7 @@ open class LlmChatViewModelBase(
       var firstRun = true
       val start = System.currentTimeMillis()
 
-      try {
-        val resultListener: (String, Boolean, String?) -> Unit =
+      val resultListener: (String, Boolean, String?) -> Unit =
           { partialResult, done, partialThinkingResult ->
             if (partialResult.startsWith("<ctrl")) {
               // Do nothing. Ignore control tokens.
