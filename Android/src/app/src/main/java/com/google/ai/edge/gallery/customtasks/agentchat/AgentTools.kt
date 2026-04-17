@@ -1059,6 +1059,170 @@ class AgentTools() : ToolSet {
   fun sendAgentAction(action: AgentAction) {
     runBlocking(Dispatchers.Default) { _actionChannel.send(action) }
   }
+
+  // =========================================================================
+  // WORKSPACE_SYNC_SNAPSHOT — Unified editor + terminal state for the AI
+  // =========================================================================
+
+  /**
+   * Returns a JSON snapshot unifying the FILE_BOX editor state and the
+   * MSTR_CTRL terminal state, allowing the AI to correlate terminal errors
+   * with the exact file and line it is looking at.
+   */
+  @Tool(
+    description = "Returns a unified snapshot of the FILE_BOX editor and MSTR_CTRL terminal " +
+      "state. Use this to correlate terminal errors with the file/line currently open in the " +
+      "editor. Returns current_file, cursor_line, terminal_cwd, and terminal_last_output."
+  )
+  fun workspaceSyncSnapshot(): Map<String, String> {
+    return runBlocking(Dispatchers.Default) {
+      Log.d(TAG, "workspaceSyncSnapshot")
+
+      val mgr = fileBoxManager
+      val tsm = terminalSessionManager
+
+      val currentFile = mgr.currentFilePath.value ?: "(none)"
+      val cursorLine = mgr.cursorLine.value.toString()
+      val terminalCwd = tsm?.sandboxRoot?.absolutePath ?: "(unknown)"
+
+      // Grab last non-empty output lines from the terminal buffer.
+      val lastOutput = tsm?.outputLines?.value
+        ?.takeLast(5)
+        ?.joinToString("\n") { it.text }
+        ?.ifEmpty { "(no recent output)" }
+        ?: "(terminal not active)"
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = "Sync Snapshot: $currentFile:$cursorLine",
+          inProgress = false,
+          addItemTitle = "Workspace_Sync_Snapshot",
+          addItemDescription = "File: $currentFile, Line: $cursorLine",
+        )
+      )
+
+      mapOf(
+        "current_file" to currentFile,
+        "cursor_line" to cursorLine,
+        "terminal_cwd" to terminalCwd,
+        "terminal_last_output" to capOutput(lastOutput),
+        "status" to "succeeded",
+      )
+    }
+  }
+
+  // =========================================================================
+  // EDITOR_TERMINAL_PIPE — Run the current editor file in the terminal
+  // =========================================================================
+
+  /**
+   * High-speed execution loop: pipes the file currently open in the FILE_BOX
+   * editor directly into the MSTR_CTRL shell. Captures stdout/stderr and, if
+   * an error occurs, extracts the offending line number so the AI can refocus.
+   */
+  @Tool(
+    description = "Pipes the file currently open in FILE_BOX into the MSTR_CTRL terminal " +
+      "for execution. Automatically detects the runtime (python3, node, sh) from the file " +
+      "extension. Returns stdout/stderr output and, on error, the error_line number so you " +
+      "can refocus the editor."
+  )
+  fun editorTerminalPipe(
+    @ToolParam(description = "Optional override file path. If empty, uses the file currently open in the editor.")
+    file_path: String,
+  ): Map<String, String> {
+    return runBlocking(Dispatchers.Default) {
+      val mgr = fileBoxManager
+      val tsm = terminalSessionManager
+
+      // Determine file to run.
+      val targetPath = file_path.trim().ifEmpty {
+        mgr.currentFilePath.value
+      }
+
+      if (targetPath.isNullOrBlank()) {
+        return@runBlocking mapOf(
+          "error" to "No file is currently open in the editor and no file_path was provided.",
+          "status" to "failed",
+        )
+      }
+
+      val absolutePath = java.io.File(mgr.root, targetPath).absolutePath
+      val ext = targetPath.substringAfterLast('.', "").lowercase()
+
+      // Auto-detect runtime from extension.
+      val runtime = when (ext) {
+        "py" -> "python3"
+        "js" -> "node"
+        "sh", "bash" -> "sh"
+        "rb" -> "ruby"
+        "lua" -> "lua"
+        else -> null
+      }
+
+      if (runtime == null) {
+        return@runBlocking mapOf(
+          "error" to "No known runtime for '.$ext' files. Supported: .py, .js, .sh, .bash, .rb, .lua",
+          "status" to "failed",
+        )
+      }
+
+      val escapedPath = absolutePath.replace("'", "'\\''")
+      val cmd = "$runtime '$escapedPath' 2>&1"
+
+      Log.d(TAG, "editorTerminalPipe: $cmd")
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = "Pipe: $runtime $targetPath",
+          inProgress = true,
+          addItemTitle = "Editor_Terminal_Pipe",
+          addItemDescription = "$ $cmd",
+        )
+      )
+
+      val output = if (tsm != null) {
+        tsm.sendCommand(cmd, visible = true)
+      } else {
+        com.google.ai.edge.gallery.data.executeCommand(cmd)
+      }
+
+      // Try to extract error line number from common patterns.
+      // Python: "File "...", line 42"   Node: ":42"   Shell: "line 42:"
+      val errorLineRegex = Regex("""(?:line\s+(\d+)|:(\d+)[:\s])""", RegexOption.IGNORE_CASE)
+      val errorLineMatch = errorLineRegex.find(output)
+      val errorLine = errorLineMatch?.let { m ->
+        m.groupValues[1].ifEmpty { m.groupValues[2] }
+      } ?: ""
+
+      val hasError = output.contains("Error", ignoreCase = true) ||
+        output.contains("Traceback", ignoreCase = true) ||
+        output.contains("SyntaxError", ignoreCase = true) ||
+        output == "TIMEOUT ERROR"
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = if (hasError) "Pipe: error in $targetPath${if (errorLine.isNotEmpty()) " line $errorLine" else ""}"
+                  else "Pipe: $targetPath executed OK",
+          inProgress = false,
+          addItemTitle = "Editor_Terminal_Pipe",
+          addItemDescription = "$ $cmd\n${output.take(200)}${if (output.length > 200) "…" else ""}",
+        )
+      )
+
+      val result = mutableMapOf(
+        "file_path" to targetPath,
+        "runtime" to runtime,
+        "output" to capOutput(output),
+        "status" to if (hasError) "error" else "succeeded",
+      )
+      if (errorLine.isNotEmpty()) {
+        result["error_line"] = errorLine
+        result["action_hint"] = "Refocus Editor on Line $errorLine"
+      }
+
+      result
+    }
+  }
 }
 
 fun getSkillSecretKey(skillName: String): String {

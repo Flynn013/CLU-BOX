@@ -64,6 +64,32 @@ class FileBoxManager(context: Context) {
 
   val root: File = File(context.filesDir, ROOT_DIR_NAME).also { it.mkdirs() }
 
+  // ── Editor Context (shared with agent tools) ────────────────
+  // These flows are updated by FileBoxScreen whenever the user selects a file
+  // or moves the cursor. The agent reads them via Workspace_Sync_Snapshot to
+  // correlate terminal errors with the active editor position.
+
+  private val _currentFilePath = MutableStateFlow<String?>(null)
+
+  /** The file currently open in the FILE_BOX editor (relative to [root]), or null. */
+  val currentFilePath: StateFlow<String?> = _currentFilePath.asStateFlow()
+
+  private val _cursorLine = MutableStateFlow(1)
+
+  /** 1-based line number where the cursor is positioned in the editor. */
+  val cursorLine: StateFlow<Int> = _cursorLine.asStateFlow()
+
+  /** Called by the FILE_BOX UI to update the active editor file path. */
+  fun setCurrentFile(relativePath: String?) {
+    _currentFilePath.value = relativePath
+    if (relativePath == null) _cursorLine.value = 1
+  }
+
+  /** Called by the FILE_BOX UI to update the cursor line position. */
+  fun setCursorLine(line: Int) {
+    _cursorLine.value = line.coerceAtLeast(1)
+  }
+
   // ── Inotify Bridge ──────────────────────────────────────────
   // A monotonically-increasing revision counter bumped whenever a file-system
   // event is detected in the sandbox. The FILE_BOX UI collects this flow and

@@ -40,6 +40,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.CompareArrows
+import androidx.compose.material.icons.outlined.DashboardCustomize
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Psychology
@@ -83,6 +84,7 @@ import com.google.ai.edge.gallery.ui.navigation.GALLERY_ROUTE_MODEL
 import com.google.ai.edge.gallery.ui.navigation.GalleryNavHost
 import com.google.ai.edge.gallery.data.TerminalSessionManager
 import com.google.ai.edge.gallery.ui.osmodules.BrainBoxModuleScreen
+import com.google.ai.edge.gallery.ui.osmodules.CommandCenterScreen
 import com.google.ai.edge.gallery.ui.osmodules.DiffBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.FileBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.MstrCtrlScreen
@@ -96,6 +98,7 @@ import kotlinx.coroutines.launch
 /** Identifies each OS module panel. */
 private enum class OsModule(val label: String, val icon: ImageVector) {
   CHAT_BOX("CHAT_BOX", Icons.Outlined.Chat),
+  COMMAND_CENTER("CMD_CENTER", Icons.Outlined.DashboardCustomize),
   BRAIN_BOX("BRAIN_BOX", Icons.Outlined.Hub),
   FILE_BOX("FILE_BOX", Icons.Outlined.Code),
   MSTR_CTRL("MSTR_CTRL", Icons.Outlined.Terminal),
@@ -248,6 +251,10 @@ fun GalleryApp(
               OsModule.FILE_BOX -> FileBoxScreen(fileBoxManager = fileBoxManager)
               OsModule.MSTR_CTRL -> MstrCtrlScreen(sessionManager = terminalSessionManager)
               OsModule.DIFF_BOX -> DiffBoxScreen(sessionManager = terminalSessionManager)
+              OsModule.COMMAND_CENTER -> CommandCenterScreen(
+                fileBoxManager = fileBoxManager,
+                terminalSessionManager = terminalSessionManager,
+              )
               OsModule.THE_GRID -> TheGridScreen(
                 onInitializeMatch = { systemPrompt ->
                   gridPromptOverride = systemPrompt

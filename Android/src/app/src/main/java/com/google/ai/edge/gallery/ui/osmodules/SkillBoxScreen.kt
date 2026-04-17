@@ -116,6 +116,16 @@ fun SkillBoxScreen(
         name = "MSTR_CTRL Terminal",
         description = "Execute shell commands & scripts — always active",
       )
+      Spacer(Modifier.height(8.dp))
+      BuiltInToolCard(
+        name = "Workspace Sync Snapshot",
+        description = "Unified editor + terminal state for AI debugging",
+      )
+      Spacer(Modifier.height(8.dp))
+      BuiltInToolCard(
+        name = "Editor Terminal Pipe",
+        description = "Run current file in terminal & capture errors",
+      )
 
       Spacer(Modifier.height(24.dp))
       Text(
@@ -149,6 +159,16 @@ fun SkillBoxScreen(
       BuiltInToolCard(
         name = "MSTR_CTRL Terminal",
         description = "Execute shell commands & scripts — always active",
+      )
+      Spacer(Modifier.height(8.dp))
+      BuiltInToolCard(
+        name = "Workspace Sync Snapshot",
+        description = "Unified editor + terminal state for AI debugging",
+      )
+      Spacer(Modifier.height(8.dp))
+      BuiltInToolCard(
+        name = "Editor Terminal Pipe",
+        description = "Run current file in terminal & capture errors",
       )
 
       Spacer(Modifier.height(16.dp))

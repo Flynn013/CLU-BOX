@@ -107,6 +107,7 @@ fun FileBoxScreen(fileBoxManager: FileBoxManager) {
   // Load file content when selection changes.
   LaunchedEffect(selectedFilePath) {
     val path = selectedFilePath
+    fileBoxManager.setCurrentFile(path)
     if (path != null) {
       editorContent = fileBoxManager.readCodeFile(path) ?: ""
       editorDirty = false
@@ -251,6 +252,9 @@ fun FileBoxScreen(fileBoxManager: FileBoxManager) {
               onValueChange = {
                 editorContent = it
                 editorDirty = true
+                // Update cursor line estimate: count newlines before the end of text.
+                val lineCount = it.count { ch -> ch == '\n' } + 1
+                fileBoxManager.setCursorLine(lineCount)
               },
               modifier = Modifier
                 .fillMaxSize()
