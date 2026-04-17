@@ -95,10 +95,6 @@ class TermuxSessionBridge(private val context: Context) {
       // Cursor blink state changed — no special handling needed.
     }
 
-    override fun setTerminalShellPid(session: TerminalSession, pid: Int) {
-      Log.d(TAG, "Shell PID: $pid")
-    }
-
     override fun getTerminalCursorStyle(): Int? {
       // Return null to use the default cursor style.
       return null
