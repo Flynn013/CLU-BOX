@@ -111,6 +111,8 @@ fun FileBoxScreen(fileBoxManager: FileBoxManager) {
     if (path != null) {
       editorContent = fileBoxManager.readCodeFile(path) ?: ""
       editorDirty = false
+      // Set cursor to line 1 when opening a file.
+      fileBoxManager.setCursorLine(1)
     }
   }
 
@@ -252,9 +254,6 @@ fun FileBoxScreen(fileBoxManager: FileBoxManager) {
               onValueChange = {
                 editorContent = it
                 editorDirty = true
-                // Update cursor line estimate: count newlines before the end of text.
-                val lineCount = it.count { ch -> ch == '\n' } + 1
-                fileBoxManager.setCursorLine(lineCount)
               },
               modifier = Modifier
                 .fillMaxSize()

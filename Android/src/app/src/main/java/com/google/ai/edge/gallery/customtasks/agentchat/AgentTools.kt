@@ -1166,8 +1166,10 @@ class AgentTools() : ToolSet {
         )
       }
 
-      val escapedPath = absolutePath.replace("'", "'\\''")
-      val cmd = "$runtime '$escapedPath' 2>&1"
+      // Sanitize the path: only allow alphanumeric, ., -, _, and / characters.
+      // This prevents shell injection via special characters in file paths.
+      val sanitizedPath = absolutePath.replace(Regex("[^a-zA-Z0-9._/\\-]"), "_")
+      val cmd = "$runtime '$sanitizedPath' 2>&1"
 
       Log.d(TAG, "editorTerminalPipe: $cmd")
 
@@ -1186,9 +1188,13 @@ class AgentTools() : ToolSet {
         com.google.ai.edge.gallery.data.executeCommand(cmd)
       }
 
-      // Try to extract error line number from common patterns.
-      // Python: "File "...", line 42"   Node: ":42"   Shell: "line 42:"
-      val errorLineRegex = Regex("""(?:line\s+(\d+)|:(\d+)[:\s])""", RegexOption.IGNORE_CASE)
+      // Try to extract error line number from common error output patterns.
+      // Python: "File "...", line 42"   Node: "path:42:"   Shell: "line 42:"
+      // Anchored to 'line' keyword or file-path-like context to reduce false positives.
+      val errorLineRegex = Regex(
+        """(?:line\s+(\d+)|(?:[a-zA-Z0-9_./-]+):(\d+):\d*\s)""",
+        RegexOption.IGNORE_CASE,
+      )
       val errorLineMatch = errorLineRegex.find(output)
       val errorLine = errorLineMatch?.let { m ->
         m.groupValues[1].ifEmpty { m.groupValues[2] }
