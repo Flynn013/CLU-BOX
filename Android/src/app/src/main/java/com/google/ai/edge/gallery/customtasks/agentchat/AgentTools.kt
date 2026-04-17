@@ -61,16 +61,28 @@ private fun capOutput(text: String): String {
 // formatted token telling the LLM the execution loop is officially over.
 // This prevents the model from re-invoking a tool on the next turn.
 
+/** Max chars shown per value when building the resolution summary. */
+private const val MAX_RESOLUTION_VALUE_LENGTH = 120
+
+/** Template for a successful resolution token. */
+private fun buildSuccessResolution(entries: Iterable<Map.Entry<String, *>>): String {
+  val output = entries.joinToString(", ") { "${it.key}=${it.value.toString().take(MAX_RESOLUTION_VALUE_LENGTH)}" }
+  return "[System: Tool executed successfully. Result: $output]"
+}
+
+/** Template for a failed resolution token. */
+private fun buildFailureResolution(error: String): String {
+  return "[System: Tool failed with error: $error. Task aborted. Await further instructions.]"
+}
+
 /** Injects a `resolution` field into a success result map. */
 private fun withSuccessResolution(result: Map<String, String>): Map<String, String> {
-  val output = result.entries.joinToString(", ") { "${it.key}=${it.value.take(120)}" }
-  return result + ("resolution" to "[System: Tool executed successfully. Result: $output]")
+  return result + ("resolution" to buildSuccessResolution(result.entries))
 }
 
 /** Injects a `resolution` field into a failure result map. */
 private fun withFailureResolution(result: Map<String, String>): Map<String, String> {
-  val error = result["error"] ?: "unknown error"
-  return result + ("resolution" to "[System: Tool failed with error: $error. Task aborted. Await further instructions.]")
+  return result + ("resolution" to buildFailureResolution(result["error"] ?: "unknown error"))
 }
 
 /** Auto-selects success or failure resolution based on the `status` field. */
@@ -89,10 +101,9 @@ private fun withResolutionAny(result: Map<String, Any>): Map<String, Any> {
   val status = (result["status"] as? String)?.lowercase() ?: ""
   val error = result["error"] as? String
   val resolution = if (status == "failed" || error != null) {
-    "[System: Tool failed with error: ${error ?: "unknown error"}. Task aborted. Await further instructions.]"
+    buildFailureResolution(error ?: "unknown error")
   } else {
-    val output = result.entries.joinToString(", ") { "${it.key}=${it.value.toString().take(120)}" }
-    "[System: Tool executed successfully. Result: $output]"
+    buildSuccessResolution(result.entries)
   }
   return result + ("resolution" to resolution)
 }
