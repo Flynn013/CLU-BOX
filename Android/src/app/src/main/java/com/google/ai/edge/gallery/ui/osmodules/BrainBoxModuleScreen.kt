@@ -190,11 +190,11 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao) {
               dao.insertNeuron(neuron)
               neurons.clear()
               neurons.addAll(dao.getAllNeurons())
+              showAddDialog = false; editTarget = null
             } catch (e: Exception) {
               android.util.Log.e("BrainBoxModule", "Failed to save neuron", e)
             }
           }
-          showAddDialog = false; editTarget = null
         }) { Text("SAVE", color = neonGreen, fontFamily = FontFamily.Monospace) }
       },
       dismissButton = {
@@ -216,11 +216,12 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao) {
             try {
               dao.deleteNeuron(target)
               neurons.remove(target)
+              showDeleteDialog = null
             } catch (e: Exception) {
               android.util.Log.e("BrainBoxModule", "Failed to delete neuron", e)
+              showDeleteDialog = null
             }
           }
-          showDeleteDialog = null
         }) { Text("DELETE", color = MaterialTheme.colorScheme.error, fontFamily = FontFamily.Monospace) }
       },
       dismissButton = {
