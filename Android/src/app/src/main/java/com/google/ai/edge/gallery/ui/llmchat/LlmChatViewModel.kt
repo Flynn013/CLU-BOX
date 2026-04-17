@@ -106,6 +106,65 @@ private const val MAX_USER_MESSAGE_PREVIEW_LENGTH = 200
 /** Max chars to include when previewing the last agent response during compression. */
 private const val MAX_AGENT_RESPONSE_PREVIEW_LENGTH = 500
 
+// ── Tool-call stream buffering tokens ──────────────────────────────
+/** Opening delimiter emitted by the LLM when it wants to invoke a tool. */
+private const val TOOL_CALL_OPEN_TAG = "<|tool_call>"
+
+/** Closing delimiters that signal the tool call payload is complete. */
+private val TOOL_CALL_CLOSE_TAGS = listOf("</tool_call>", "<end_of_turn>")
+
+/** Replacement text injected when a broken tool call is scrubbed from history. */
+private const val TOOL_CALL_SCRUB_NOTICE =
+  "[System: Tool execution interrupted or malformed. Proceed with standard text.]"
+
+/**
+ * Scrubs incomplete or malformed tool-call blocks from [text] before it is
+ * persisted to chat history, BrainBox, or Session_Resume.
+ *
+ * A tool-call block is considered **valid** when it contains both [TOOL_CALL_OPEN_TAG]
+ * and one of the [TOOL_CALL_CLOSE_TAGS]. If an opening tag is found without a
+ * matching close, the broken fragment is replaced with [TOOL_CALL_SCRUB_NOTICE].
+ */
+internal fun sanitizeToolCallArtifacts(text: String): String {
+  if (!text.contains(TOOL_CALL_OPEN_TAG)) return text
+
+  val result = StringBuilder()
+  var searchFrom = 0
+
+  while (searchFrom < text.length) {
+    val openIdx = text.indexOf(TOOL_CALL_OPEN_TAG, searchFrom)
+    if (openIdx == -1) {
+      // No more open tags — append the rest verbatim.
+      result.append(text, searchFrom, text.length)
+      break
+    }
+
+    // Append everything before this open tag.
+    result.append(text, searchFrom, openIdx)
+
+    // Look for the matching close tag.
+    val afterOpen = openIdx + TOOL_CALL_OPEN_TAG.length
+    val closeMatch = TOOL_CALL_CLOSE_TAGS
+      .map { tag -> tag to text.indexOf(tag, afterOpen) }
+      .filter { it.second != -1 }
+      .minByOrNull { it.second }
+
+    if (closeMatch != null) {
+      // Valid block — the tool framework already executed it; drop the raw
+      // tags from the persisted history so they don't confuse future context.
+      val closeEnd = closeMatch.second + closeMatch.first.length
+      searchFrom = closeEnd
+    } else {
+      // Broken / incomplete block — scrub it entirely.
+      Log.w(TAG, "sanitizeToolCallArtifacts: scrubbed incomplete tool-call block")
+      result.append(TOOL_CALL_SCRUB_NOTICE)
+      // Nothing left to salvage after the open tag — skip to end.
+      searchFrom = text.length
+    }
+  }
+  return result.toString().trim()
+}
+
 @OptIn(ExperimentalApi::class)
 open class LlmChatViewModelBase(
   private val chatHistoryDao: ChatHistoryDao? = null,
@@ -287,6 +346,7 @@ open class LlmChatViewModelBase(
   /**
    * Builds a plain-text transcript of the current chat for [model],
    * suitable for asking the LLM to produce a compressed summary.
+   * Agent messages are sanitized to remove any residual tool-call syntax.
    */
   private fun buildTranscriptForCompression(model: Model): String {
     val messages = uiState.value.messagesByModel[model.name] ?: return ""
@@ -295,7 +355,8 @@ open class LlmChatViewModelBase(
       .filter { it.side == ChatSide.USER || it.side == ChatSide.AGENT }
       .joinToString("\n") { msg ->
         val speaker = if (msg.side == ChatSide.USER) "USER" else "CLU"
-        "$speaker: ${msg.content}"
+        val content = if (msg.side == ChatSide.AGENT) sanitizeToolCallArtifacts(msg.content) else msg.content
+        "$speaker: $content"
       }
   }
 
@@ -528,15 +589,18 @@ open class LlmChatViewModelBase(
     }
   }
 
-  /** Persists a completed user or agent TEXT message to the database. */
+  /** Persists a completed user or agent TEXT message to the database.
+   *  Agent content is sanitized to remove broken tool-call fragments. */
   private fun persistMessage(taskId: String, model: Model, side: ChatSide, content: String) {
     val dao = chatHistoryDao ?: return
+    // Sanitize agent responses so broken tool-call syntax never poisons context.
+    val safeContent = if (side == ChatSide.AGENT) sanitizeToolCallArtifacts(content) else content
     val entity =
       ChatMessageEntity(
         taskId = taskId,
         modelName = model.name,
         side = side.name,
-        content = content,
+        content = safeContent,
         timestampMs = System.currentTimeMillis(),
       )
     viewModelScope.launch(Dispatchers.IO) {
@@ -605,9 +669,46 @@ open class LlmChatViewModelBase(
       var firstRun = true
       val start = System.currentTimeMillis()
 
+      // ── Tool-call stream buffering state ───────────────────────────
+      // When the LLM starts emitting a tool-call block we buffer tokens
+      // instead of rendering them to the Chat UI. This prevents partial
+      // tool-call syntax from being shown and protects context integrity.
+      var isBufferingToolCall = false
+      val toolCallBuffer = StringBuilder()
+
       val resultListener: (String, Boolean, String?) -> Unit =
           { partialResult, done, partialThinkingResult ->
-            if (partialResult.startsWith("<ctrl")) {
+            // ── Tool-call buffering interceptor ─────────────────────
+            // Accumulate the token first; detect open/close boundaries
+            // on the *running accumulation* (toolCallBuffer) so that
+            // tags split across multiple token emissions are handled.
+            var tokenForUI = partialResult
+
+            if (isBufferingToolCall) {
+              toolCallBuffer.append(partialResult)
+              val bufStr = toolCallBuffer.toString()
+              val closed = TOOL_CALL_CLOSE_TAGS.any { bufStr.contains(it) }
+              if (closed || done) {
+                // Buffer complete — the litertlm ToolSet framework has
+                // already invoked the @Tool method. Discard the raw tags.
+                Log.d(TAG, "Tool-call buffer closed (${toolCallBuffer.length} chars)")
+                isBufferingToolCall = false
+                toolCallBuffer.clear()
+              }
+              // While buffering, suppress rendering to the Chat UI.
+              tokenForUI = ""
+            } else if (partialResult.contains(TOOL_CALL_OPEN_TAG)) {
+              // Entering a tool-call block. Split: keep text before the
+              // tag for normal rendering, start buffering from the tag.
+              val idx = partialResult.indexOf(TOOL_CALL_OPEN_TAG)
+              tokenForUI = partialResult.substring(0, idx)
+              toolCallBuffer.clear()
+              toolCallBuffer.append(partialResult.substring(idx))
+              isBufferingToolCall = true
+              Log.d(TAG, "Tool-call buffer started")
+            }
+
+            if (tokenForUI.startsWith("<ctrl")) {
               // Do nothing. Ignore control tokens.
             } else {
               // Remove the last message if it is a "loading" message.
@@ -682,10 +783,10 @@ open class LlmChatViewModelBase(
 
                 // Incrementally update the streamed partial results.
                 val latencyMs: Long = if (done) System.currentTimeMillis() - start else -1
-                if (partialResult.isNotEmpty() || wasLoading || done) {
+                if (tokenForUI.isNotEmpty() || wasLoading || done) {
                   updateLastTextMessageContentIncrementally(
                     model = model,
-                    partialContent = partialResult,
+                    partialContent = tokenForUI,
                     latencyMs = latencyMs.toFloat(),
                   )
                 }
