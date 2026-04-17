@@ -103,7 +103,7 @@ fun DiffBoxScreen(sessionManager: TerminalSessionManager) {
         "git diff",
         color = neonGreen,
         fontFamily = FontFamily.Monospace,
-        fontSize = 14.sp,
+        fontSize = 16.sp,
         modifier = Modifier.weight(1f),
       )
 
@@ -134,7 +134,7 @@ fun DiffBoxScreen(sessionManager: TerminalSessionManager) {
           "Loading diff…",
           color = neonGreen.copy(alpha = 0.6f),
           fontFamily = FontFamily.Monospace,
-          fontSize = 13.sp,
+          fontSize = 14.sp,
         )
       }
     } else if (diffOutput.isEmpty()) {
@@ -146,7 +146,7 @@ fun DiffBoxScreen(sessionManager: TerminalSessionManager) {
           "No changes detected.\nRun 'git init' in FILE_BOX to enable diff tracking.",
           color = neonGreen.copy(alpha = 0.5f),
           fontFamily = FontFamily.Monospace,
-          fontSize = 13.sp,
+          fontSize = 14.sp,
         )
       }
     } else {
@@ -202,7 +202,7 @@ private fun DiffLineRow(line: DiffLine) {
       text = prefix,
       color = color.copy(alpha = 0.5f),
       fontFamily = FontFamily.Monospace,
-      fontSize = 11.sp,
+      fontSize = 14.sp,
       modifier = Modifier.width(16.dp),
     )
 
@@ -212,7 +212,7 @@ private fun DiffLineRow(line: DiffLine) {
       text = line.text,
       color = color,
       fontFamily = FontFamily.Monospace,
-      fontSize = 12.sp,
+      fontSize = 16.sp,
     )
   }
 }

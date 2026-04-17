@@ -149,7 +149,7 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
             setTerminalViewClient(CluTerminalViewClient(this))
 
             // Style: monospace font, neon-green on black.
-            setTextSize(13)
+            setTextSize(16)
             setTypeface(Typeface.MONOSPACE)
 
             // Black background to match CLU/BOX aesthetic.
@@ -195,7 +195,7 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
         "$",
         color = neonGreen,
         fontFamily = FontFamily.Monospace,
-        fontSize = 14.sp,
+        fontSize = 16.sp,
         modifier = Modifier.padding(end = 6.dp),
       )
 
@@ -207,7 +207,7 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
           .padding(vertical = 4.dp),
         textStyle = TextStyle(
           fontFamily = FontFamily.Monospace,
-          fontSize = 13.sp,
+          fontSize = 16.sp,
           color = neonGreen,
         ),
         cursorBrush = SolidColor(neonGreen),

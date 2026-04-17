@@ -138,7 +138,7 @@ fun FileBoxScreen(fileBoxManager: FileBoxManager) {
       ) {
         Icon(Icons.Default.CreateNewFolder, contentDescription = null, modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(4.dp))
-        Text("New File", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+        Text("New File", fontFamily = FontFamily.Monospace, fontSize = 14.sp)
       }
 
       // Save (only when editing)
@@ -156,7 +156,7 @@ fun FileBoxScreen(fileBoxManager: FileBoxManager) {
         ) {
           Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
           Spacer(Modifier.width(4.dp))
-          Text("Save", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+          Text("Save", fontFamily = FontFamily.Monospace, fontSize = 14.sp)
         }
       }
 
@@ -168,7 +168,7 @@ fun FileBoxScreen(fileBoxManager: FileBoxManager) {
         ) {
           Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
           Spacer(Modifier.width(4.dp))
-          Text("Delete", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+          Text("Delete", fontFamily = FontFamily.Monospace, fontSize = 14.sp)
         }
       }
 
@@ -187,7 +187,7 @@ fun FileBoxScreen(fileBoxManager: FileBoxManager) {
       ) {
         Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(4.dp))
-        Text("Export ZIP", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+        Text("Export ZIP", fontFamily = FontFamily.Monospace, fontSize = 14.sp)
       }
     }
 
@@ -206,9 +206,9 @@ fun FileBoxScreen(fileBoxManager: FileBoxManager) {
         if (fileTree.children.isEmpty()) {
           Text(
             "Empty workspace.\nUse 'New File' or let\nthe AI create files.",
-            color = neonGreen.copy(alpha = 0.7f),
+            color = Color.White.copy(alpha = 0.7f),
             fontFamily = FontFamily.Monospace,
-            fontSize = 11.sp,
+            fontSize = 14.sp,
             modifier = Modifier.padding(8.dp),
           )
         } else {
@@ -237,9 +237,9 @@ fun FileBoxScreen(fileBoxManager: FileBoxManager) {
           Column(modifier = Modifier.fillMaxSize()) {
             Text(
               selectedFilePath ?: "",
-              color = neonGreen,
+              color = Color.White,
               fontFamily = FontFamily.Monospace,
-              fontSize = 10.sp,
+              fontSize = 14.sp,
               modifier = Modifier.padding(bottom = 4.dp),
             )
             // Syntax-highlighting visual transformation for BasicTextField.
@@ -262,7 +262,7 @@ fun FileBoxScreen(fileBoxManager: FileBoxManager) {
                 .padding(4.dp),
               textStyle = TextStyle(
                 fontFamily = FontFamily.Monospace,
-                fontSize = 12.sp,
+                fontSize = 16.sp,
                 color = Color.White,
               ),
               cursorBrush = SolidColor(neonGreen),
@@ -272,9 +272,9 @@ fun FileBoxScreen(fileBoxManager: FileBoxManager) {
         } else {
           Text(
             "← Select a file to view/edit",
-            color = neonGreen.copy(alpha = 0.6f),
+            color = Color.White.copy(alpha = 0.6f),
             fontFamily = FontFamily.Monospace,
-            fontSize = 12.sp,
+            fontSize = 14.sp,
             modifier = Modifier.align(Alignment.Center),
           )
         }
@@ -288,15 +288,15 @@ fun FileBoxScreen(fileBoxManager: FileBoxManager) {
     AlertDialog(
       onDismissRequest = { showNewFileDialog = false },
       title = {
-        Text("NEW FILE", fontFamily = FontFamily.Monospace, color = neonGreen)
+        Text("NEW FILE", fontFamily = FontFamily.Monospace, color = Color.White)
       },
       text = {
         Column {
           Text(
             "Enter path relative to workspace root.\nNested folders are auto-created.",
             fontFamily = FontFamily.Monospace,
-            fontSize = 12.sp,
-            color = neonGreen.copy(alpha = 0.6f),
+            fontSize = 14.sp,
+            color = Color.White.copy(alpha = 0.6f),
           )
           Spacer(Modifier.height(8.dp))
           OutlinedTextField(
@@ -304,7 +304,7 @@ fun FileBoxScreen(fileBoxManager: FileBoxManager) {
             onValueChange = { newPath = it },
             placeholder = { Text("e.g. myProject/src/main.kt") },
             singleLine = true,
-            textStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp),
+            textStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 16.sp),
           )
         }
       },
@@ -322,7 +322,7 @@ fun FileBoxScreen(fileBoxManager: FileBoxManager) {
           }
           showNewFileDialog = false
         }) {
-          Text("CREATE", color = neonGreen, fontFamily = FontFamily.Monospace)
+          Text("CREATE", color = Color.White, fontFamily = FontFamily.Monospace)
         }
       },
       dismissButton = {
@@ -342,7 +342,7 @@ fun FileBoxScreen(fileBoxManager: FileBoxManager) {
         Text(
           "Delete '${selectedFilePath}'? This cannot be undone.",
           fontFamily = FontFamily.Monospace,
-          fontSize = 12.sp,
+          fontSize = 14.sp,
         )
       },
       confirmButton = {
@@ -396,8 +396,8 @@ private fun FileTreeNode(
       Text(
         node.name,
         fontFamily = FontFamily.Monospace,
-        fontSize = 11.sp,
-        color = neonGreen.copy(alpha = 0.9f),
+        fontSize = 14.sp,
+        color = Color.White.copy(alpha = 0.9f),
       )
     }
     if (expanded) {
@@ -426,8 +426,8 @@ private fun FileTreeNode(
       Text(
         node.name,
         fontFamily = FontFamily.Monospace,
-        fontSize = 11.sp,
-        color = if (isSelected) neonGreen else neonGreen.copy(alpha = 0.7f),
+        fontSize = 14.sp,
+        color = if (isSelected) Color.White else Color.White.copy(alpha = 0.7f),
       )
     }
   }
