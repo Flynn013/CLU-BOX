@@ -117,8 +117,8 @@ class AgentChatTask @Inject constructor() : CustomTask {
           tools = listOf(tool(agentTools)),
           enableConversationConstrainedDecoding = true,
         )
-      } catch (e: Exception) {
-        android.util.Log.e("AgentChatTask", "Model initialization failed", e)
+      } catch (e: Throwable) {
+        android.util.Log.e("CLU_CRASH_REPORT", "Model initialization failed: ${e.stackTraceToString()}")
         onDone("Model initialization failed: ${e.message ?: "unknown error"}")
       }
     }

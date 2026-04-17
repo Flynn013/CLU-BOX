@@ -803,8 +803,8 @@ open class LlmChatViewModelBase(
           coroutineScope = viewModelScope,
           extraContext = extraContext,
         )
-      } catch (e: Exception) {
-        Log.e(TAG, "Error occurred while running inference", e)
+      } catch (e: Throwable) {
+        Log.e("CLU_CRASH_REPORT", "Inference pipeline failed: ${e.stackTraceToString()}")
         setInProgress(false)
         setPreparing(false)
         onError(e.message ?: "")

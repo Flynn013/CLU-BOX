@@ -45,6 +45,7 @@ import com.google.ai.edge.litertlm.MessageCallback
 import com.google.ai.edge.litertlm.SamplerConfig
 import com.google.ai.edge.litertlm.ToolProvider
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.util.concurrent.CancellationException
 import kotlinx.coroutines.CoroutineScope
 
@@ -103,6 +104,20 @@ object LlmChatModelHelper : LlmModelHelper {
     Log.d(TAG, "Preferred backend: $preferredBackend")
 
     val modelPath = model.getPath(context = context)
+
+    // Pre-ignition: verify model file exists and is readable before Engine init.
+    val modelFile = File(modelPath)
+    if (!modelFile.exists()) {
+      Log.e("CLU_CRASH_REPORT", "Model file not found at: $modelPath")
+      onDone("Diagnostic: Model file not found at $modelPath")
+      return
+    }
+    if (!modelFile.canRead()) {
+      Log.e("CLU_CRASH_REPORT", "Model file not readable at: $modelPath")
+      onDone("Diagnostic: Model file not readable at $modelPath")
+      return
+    }
+
     val engineConfig =
       EngineConfig(
         modelPath = modelPath,
@@ -142,7 +157,8 @@ object LlmChatModelHelper : LlmModelHelper {
         )
       ExperimentalFlags.enableConversationConstrainedDecoding = false
       model.instance = LlmModelInstance(engine = engine, conversation = conversation)
-    } catch (e: Exception) {
+    } catch (e: Throwable) {
+      Log.e("CLU_CRASH_REPORT", "Engine initialization failed: ${e.stackTraceToString()}")
       onDone(cleanUpMediapipeTaskErrorMessage(e.message ?: "Unknown error"))
       return
     }
@@ -276,29 +292,34 @@ object LlmChatModelHelper : LlmModelHelper {
       contents.add(Content.Text(input))
     }
 
-    conversation.sendMessageAsync(
-      Contents.of(contents),
-      object : MessageCallback {
-        override fun onMessage(message: Message) {
-          resultListener(message.toString(), false, message.channels["thought"])
-        }
-
-        override fun onDone() {
-          resultListener("", true, null)
-        }
-
-        override fun onError(throwable: Throwable) {
-          if (throwable is CancellationException) {
-            Log.i(TAG, "The inference is cancelled.")
-            resultListener("", true, null)
-          } else {
-            Log.e(TAG, "onError", throwable)
-            onError("Error: ${throwable.message}")
+    try {
+      conversation.sendMessageAsync(
+        Contents.of(contents),
+        object : MessageCallback {
+          override fun onMessage(message: Message) {
+            resultListener(message.toString(), false, message.channels["thought"])
           }
-        }
-      },
-      extraContext ?: emptyMap(),
-    )
+
+          override fun onDone() {
+            resultListener("", true, null)
+          }
+
+          override fun onError(throwable: Throwable) {
+            if (throwable is CancellationException) {
+              Log.i(TAG, "The inference is cancelled.")
+              resultListener("", true, null)
+            } else {
+              Log.e("CLU_CRASH_REPORT", "Inference callback error: ${throwable.stackTraceToString()}")
+              onError("Error: ${throwable.message}")
+            }
+          }
+        },
+        extraContext ?: emptyMap(),
+      )
+    } catch (e: Throwable) {
+      Log.e("CLU_CRASH_REPORT", "sendMessageAsync failed: ${e.stackTraceToString()}")
+      onError("Inference failed: ${e.message ?: "unknown error"}")
+    }
   }
 
   private fun Bitmap.toPngByteArray(): ByteArray {
