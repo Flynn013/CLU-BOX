@@ -92,7 +92,6 @@ import com.google.ai.edge.gallery.ui.navigation.GALLERY_ROUTE_MODEL
 import com.google.ai.edge.gallery.ui.navigation.GalleryNavHost
 import com.google.ai.edge.gallery.data.TerminalSessionManager
 import com.google.ai.edge.gallery.ui.osmodules.BrainBoxModuleScreen
-import com.google.ai.edge.gallery.ui.osmodules.CommandCenterScreen
 import com.google.ai.edge.gallery.ui.osmodules.FileBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.MstrCtrlScreen
 import com.google.ai.edge.gallery.ui.osmodules.TheGridScreen
@@ -104,7 +103,6 @@ import kotlinx.coroutines.launch
 /** Identifies each OS module panel. */
 private enum class OsModule(val label: String, val icon: ImageVector) {
   CHAT_BOX("CHAT_BOX", Icons.Outlined.Chat),
-  COMMAND_CENTER("CMD_CENTER", Icons.Outlined.DashboardCustomize),
   BRAIN_BOX("BRAIN_BOX", Icons.Outlined.Hub),
   FILE_BOX("FILE_BOX", Icons.Outlined.Code),
   MSTR_CTRL("MSTR_CTRL", Icons.Outlined.Terminal),
@@ -276,10 +274,6 @@ fun GalleryApp(
                   OsModule.BRAIN_BOX -> BrainBoxModuleScreen(dao = db.brainBoxDao())
                   OsModule.FILE_BOX -> FileBoxScreen(fileBoxManager = fileBoxManager)
                   OsModule.MSTR_CTRL -> MstrCtrlScreen(sessionManager = terminalSessionManager)
-                  OsModule.COMMAND_CENTER -> CommandCenterScreen(
-                    fileBoxManager = fileBoxManager,
-                    terminalSessionManager = terminalSessionManager,
-                  )
                   OsModule.THE_GRID -> TheGridScreen(
                     onInitializeMatch = { systemPrompt ->
                       gridPromptOverride = systemPrompt
