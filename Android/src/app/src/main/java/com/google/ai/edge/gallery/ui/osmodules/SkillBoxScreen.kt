@@ -92,17 +92,38 @@ fun SkillBoxScreen(
     Spacer(Modifier.height(16.dp))
 
     if (uiState.skills.isEmpty()) {
-      Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center,
-      ) {
-        Text(
-          "No skills installed.\nOpen CHAT_BOX → Skills to add skills.",
-          color = neonGreen.copy(alpha = 0.6f),
-          fontFamily = FontFamily.Monospace,
-          style = MaterialTheme.typography.bodyMedium,
-        )
-      }
+      // Built-in tools section — always visible.
+      Spacer(Modifier.height(4.dp))
+      Text(
+        "BUILT-IN TOOLS",
+        style = MaterialTheme.typography.labelMedium,
+        color = neonGreen.copy(alpha = 0.7f),
+        fontFamily = FontFamily.Monospace,
+      )
+      Spacer(Modifier.height(8.dp))
+
+      BuiltInToolCard(
+        name = "BrainBox Memory",
+        description = "Query & save neurons — always active",
+      )
+      Spacer(Modifier.height(8.dp))
+      BuiltInToolCard(
+        name = "FILE_BOX Workspace",
+        description = "Read, write & manage code files — always active",
+      )
+      Spacer(Modifier.height(8.dp))
+      BuiltInToolCard(
+        name = "MSTR_CTRL Terminal",
+        description = "Execute shell commands & scripts — always active",
+      )
+
+      Spacer(Modifier.height(24.dp))
+      Text(
+        "No user skills installed.\nOpen CHAT_BOX → Skills to add skills.",
+        color = neonGreen.copy(alpha = 0.6f),
+        fontFamily = FontFamily.Monospace,
+        style = MaterialTheme.typography.bodyMedium,
+      )
     } else {
       // Built-in tools section
       Spacer(Modifier.height(4.dp))
@@ -113,39 +134,22 @@ fun SkillBoxScreen(
         fontFamily = FontFamily.Monospace,
       )
       Spacer(Modifier.height(8.dp))
-      Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        modifier = Modifier
-          .fillMaxWidth()
-          .border(1.dp, neonGreen.copy(alpha = 0.4f), RoundedCornerShape(4.dp)),
-      ) {
-        Row(
-          modifier = Modifier.padding(12.dp),
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          Icon(
-            Icons.Outlined.CheckCircle,
-            contentDescription = null,
-            tint = neonGreen,
-            modifier = Modifier.size(20.dp),
-          )
-          Spacer(Modifier.width(12.dp))
-          Column(modifier = Modifier.weight(1f)) {
-            Text(
-              "BrainBox Memory",
-              color = neonGreen,
-              fontFamily = FontFamily.Monospace,
-              style = MaterialTheme.typography.titleSmall,
-            )
-            Text(
-              "Query & save neurons — always active",
-              fontFamily = FontFamily.Monospace,
-              style = MaterialTheme.typography.bodySmall,
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-          }
-        }
-      }
+
+      // Built-in tool cards — these are always active and cannot be toggled off.
+      BuiltInToolCard(
+        name = "BrainBox Memory",
+        description = "Query & save neurons — always active",
+      )
+      Spacer(Modifier.height(8.dp))
+      BuiltInToolCard(
+        name = "FILE_BOX Workspace",
+        description = "Read, write & manage code files — always active",
+      )
+      Spacer(Modifier.height(8.dp))
+      BuiltInToolCard(
+        name = "MSTR_CTRL Terminal",
+        description = "Execute shell commands & scripts — always active",
+      )
 
       Spacer(Modifier.height(16.dp))
       Text(
@@ -169,6 +173,46 @@ fun SkillBoxScreen(
             },
           )
         }
+      }
+    }
+  }
+}
+
+@Composable
+private fun BuiltInToolCard(
+  name: String,
+  description: String,
+) {
+  Card(
+    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    modifier = Modifier
+      .fillMaxWidth()
+      .border(1.dp, neonGreen.copy(alpha = 0.4f), RoundedCornerShape(4.dp)),
+  ) {
+    Row(
+      modifier = Modifier.padding(12.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Icon(
+        Icons.Outlined.CheckCircle,
+        contentDescription = null,
+        tint = neonGreen,
+        modifier = Modifier.size(20.dp),
+      )
+      Spacer(Modifier.width(12.dp))
+      Column(modifier = Modifier.weight(1f)) {
+        Text(
+          name,
+          color = neonGreen,
+          fontFamily = FontFamily.Monospace,
+          style = MaterialTheme.typography.titleSmall,
+        )
+        Text(
+          description,
+          fontFamily = FontFamily.Monospace,
+          style = MaterialTheme.typography.bodySmall,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
       }
     }
   }
