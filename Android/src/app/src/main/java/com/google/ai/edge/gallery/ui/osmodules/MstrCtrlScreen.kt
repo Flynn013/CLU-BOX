@@ -114,6 +114,7 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
       override fun onTextChanged() {
         // onScreenUpdated() handles scroll tracking and triggers invalidate().
         // Post to the UI thread since this callback fires from the PTY reader.
+        // Capture in a local to avoid a race between the null-check and post.
         val view = terminalViewRef ?: return
         view.post { view.onScreenUpdated() }
       }
