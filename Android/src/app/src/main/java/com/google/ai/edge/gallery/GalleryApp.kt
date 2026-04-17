@@ -56,6 +56,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -73,10 +74,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.navigation.compose.rememberNavController
+import androidx.compose.runtime.collectAsState
 import com.google.ai.edge.gallery.customtasks.agentchat.SkillManagerViewModel
 import com.google.ai.edge.gallery.data.BuiltInTaskId
+import com.google.ai.edge.gallery.data.ConfigKeys
+import com.google.ai.edge.gallery.data.EMPTY_MODEL
 import com.google.ai.edge.gallery.data.FileBoxManager
+import com.google.ai.edge.gallery.data.convertValueToTargetType
 import com.google.ai.edge.gallery.data.brainbox.GraphDatabase
+import com.google.ai.edge.gallery.ui.common.ConfigDialog
 import com.google.ai.edge.gallery.ui.modelmanager.GlobalModelManager
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import com.google.ai.edge.gallery.ui.navigation.GALLERY_ROUTE_BENCHMARK
@@ -115,8 +121,7 @@ private enum class OsModule(val label: String, val icon: ImageVector) {
  */
 private val OsModule.isFullScreenModule: Boolean
   get() = this == OsModule.CHAT_BOX ||
-    this == OsModule.VENDING_MACHINE ||
-    this == OsModule.SYS_SETTINGS
+    this == OsModule.VENDING_MACHINE
 
 /** Top level composable representing the main CLU/BOX operating system interface. */
 @Composable
@@ -127,6 +132,8 @@ fun GalleryApp(
   val drawerState = rememberDrawerState(DrawerValue.Closed)
   val scope = rememberCoroutineScope()
   var activeModule by remember { mutableStateOf(OsModule.CHAT_BOX) }
+  // True when the SYS_SETTINGS drawer item is tapped — shows the ConfigDialog overlay.
+  var showSysSettingsDialog by remember { mutableStateOf(false) }
   // Grid prompt override: when a Grid game is initialized, this holds the injected system prompt.
   var gridPromptOverride by remember { mutableStateOf<String?>(null) }
   val db = remember { GraphDatabase.getInstance(context) }
@@ -181,7 +188,12 @@ fun GalleryApp(
               module = module,
               selected = activeModule == module,
               onClick = {
-                activeModule = module
+                if (module == OsModule.SYS_SETTINGS) {
+                  // Show the Configurations dialog over the current module.
+                  showSysSettingsDialog = true
+                } else {
+                  activeModule = module
+                }
                 scope.launch { drawerState.close() }
               },
             )
@@ -206,8 +218,8 @@ fun GalleryApp(
             initialTaskId = BuiltInTaskId.LLM_AGENT_CHAT,
           )
 
-          // VENDING_MACHINE (MODELS) / SYS_SETTINGS (SETTINGS): both render GlobalModelManager.
-          OsModule.VENDING_MACHINE, OsModule.SYS_SETTINGS -> GlobalModelManager(
+          // VENDING_MACHINE (MODELS): renders GlobalModelManager.
+          OsModule.VENDING_MACHINE -> GlobalModelManager(
             viewModel = modelManagerViewModel,
             navigateUp = { activeModule = OsModule.CHAT_BOX },
             onModelSelected = { task, model ->
@@ -295,6 +307,58 @@ fun GalleryApp(
           lineHeight = 14.sp,
           textAlign = TextAlign.Center,
         )
+      }
+
+      // ── SYS_SETTINGS configuration dialog ──────────────────────
+      // Shown as an overlay when the user taps the SETTINGS drawer item.
+      if (showSysSettingsDialog) {
+        val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
+        val selectedModel = modelManagerUiState.selectedModel
+        if (selectedModel != EMPTY_MODEL && selectedModel.configs.isNotEmpty()) {
+          val task = modelManagerViewModel.getTaskById(BuiltInTaskId.LLM_AGENT_CHAT)
+          val modelConfigs = selectedModel.configs.toMutableList()
+          // Remove task-specific configs that don't apply in the global settings context.
+          modelConfigs.removeIf { it.key == ConfigKeys.RESET_CONVERSATION_TURN_COUNT }
+          if (task?.allowThinking() != true) {
+            modelConfigs.removeIf { it.key == ConfigKeys.ENABLE_THINKING }
+          }
+          ConfigDialog(
+            title = "Configurations",
+            configs = modelConfigs,
+            initialValues = selectedModel.configValues,
+            showSystemPromptEditorTab = true,
+            onDismissed = { showSysSettingsDialog = false },
+            onOk = { curConfigValues, _, _ ->
+              showSysSettingsDialog = false
+              // Persist updated config values to the model.
+              val oldConfigValues = selectedModel.configValues
+              var changed = false
+              for (config in modelConfigs) {
+                val key = config.key.label
+                val oldValue = convertValueToTargetType(
+                  value = oldConfigValues.getValue(key),
+                  valueType = config.valueType,
+                )
+                val newValue = convertValueToTargetType(
+                  value = curConfigValues.getValue(key),
+                  valueType = config.valueType,
+                )
+                if (oldValue != newValue) {
+                  changed = true
+                  break
+                }
+              }
+              if (changed) {
+                selectedModel.prevConfigValues = oldConfigValues
+                selectedModel.configValues = curConfigValues
+                modelManagerViewModel.updateConfigValuesUpdateTrigger()
+              }
+            },
+          )
+        } else {
+          // No model selected or no configs — dismiss immediately.
+          LaunchedEffect(Unit) { showSysSettingsDialog = false }
+        }
       }
     }
   }
