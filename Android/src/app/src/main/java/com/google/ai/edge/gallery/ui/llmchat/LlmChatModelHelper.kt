@@ -158,8 +158,17 @@ object LlmChatModelHelper : LlmModelHelper {
       ExperimentalFlags.enableConversationConstrainedDecoding = false
       model.instance = LlmModelInstance(engine = engine, conversation = conversation)
     } catch (e: Throwable) {
-      Log.e("CLU_CRASH_REPORT", "Engine initialization failed: ${e.stackTraceToString()}")
-      onDone(cleanUpMediapipeTaskErrorMessage(e.message ?: "Unknown error"))
+      val errorMsg = e.stackTraceToString()
+      Log.e("CLU_CRASH_REPORT", "Engine initialization failed: $errorMsg")
+      // Explicit OOM recovery: release resources before reporting.
+      if (e is OutOfMemoryError) {
+        Log.e("CLU_CRASH_REPORT", "OOM during engine init — forcing GC and releasing model")
+        try { model.instance = null } catch (_: Throwable) {}
+        System.gc()
+        onDone("OutOfMemoryError: Device does not have enough RAM for this model. Try a smaller model.")
+      } else {
+        onDone(cleanUpMediapipeTaskErrorMessage(e.message ?: "Unknown error"))
+      }
       return
     }
     onDone("")
@@ -318,7 +327,13 @@ object LlmChatModelHelper : LlmModelHelper {
       )
     } catch (e: Throwable) {
       Log.e("CLU_CRASH_REPORT", "sendMessageAsync failed: ${e.stackTraceToString()}")
-      onError("Inference failed: ${e.message ?: "unknown error"}")
+      if (e is OutOfMemoryError) {
+        Log.e("CLU_CRASH_REPORT", "OOM during inference — requesting GC")
+        System.gc()
+        onError("OutOfMemoryError during inference. Try a shorter prompt or restart the session.")
+      } else {
+        onError("Inference failed: ${e.message ?: "unknown error"}")
+      }
     }
   }
 

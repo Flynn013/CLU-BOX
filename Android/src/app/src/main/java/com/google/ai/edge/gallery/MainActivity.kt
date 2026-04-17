@@ -170,6 +170,11 @@ class MainActivity : ComponentActivity() {
     }
 
     enableEdgeToEdge()
+
+    // Start the CLU/BOX foreground engine service to lower oom_adj score
+    // and keep inference processes alive when the screen is off.
+    CluEngineService.start(this)
+
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
       // Fix for three-button nav not properly going edge-to-edge.
       // See: https://issuetracker.google.com/issues/298296168

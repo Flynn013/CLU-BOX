@@ -805,6 +805,10 @@ open class LlmChatViewModelBase(
         )
       } catch (e: Throwable) {
         Log.e("CLU_CRASH_REPORT", "Inference pipeline failed: ${e.stackTraceToString()}")
+        if (e is OutOfMemoryError) {
+          Log.e("CLU_CRASH_REPORT", "OOM in inference pipeline — requesting GC")
+          System.gc()
+        }
         setInProgress(false)
         setPreparing(false)
         onError(e.message ?: "")
