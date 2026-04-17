@@ -64,6 +64,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -115,14 +116,6 @@ private enum class OsModule(val label: String, val icon: ImageVector) {
   VENDING_MACHINE("MODELS", Icons.Outlined.ShoppingCart),
   SYS_SETTINGS("SETTINGS", Icons.Outlined.Settings),
 }
-
-/**
- * Returns true for modules that render their own full-screen Scaffold (top bar + insets).
- * These must be displayed without an outer CLU/BOX Scaffold shell to avoid a double top-bar gap.
- */
-private val OsModule.isFullScreenModule: Boolean
-  get() = this == OsModule.CHAT_BOX ||
-    this == OsModule.VENDING_MACHINE
 
 /** Top level composable representing the main CLU/BOX operating system interface. */
 @Composable
@@ -222,18 +215,29 @@ fun GalleryApp(
     // right-edge tab button that opens the navigation drawer.
     // ============================================================
     Box(modifier = Modifier.fillMaxSize()) {
-      // Full-screen modules manage their own Scaffold / window insets.
-      // Shell modules (BRAIN_BOX, THE_GRID, etc.) use the CLU/BOX Scaffold.
-      if (activeModule.isFullScreenModule) {
-        when (activeModule) {
-          // CHAT_BOX: the CLU/BOX Chat — primary AI interaction window.
-          OsModule.CHAT_BOX -> GalleryNavHost(
-            navController = chatNavController,
-            modelManagerViewModel = modelManagerViewModel,
-            initialTaskId = BuiltInTaskId.LLM_AGENT_CHAT,
-          )
+      // ── CHAT_BOX: ALWAYS in composition ────────────────────────
+      // The chat NavHost stays mounted so that LLM inference,
+      // conversation state, scroll position, and streaming continue
+      // uninterrupted even when the user visits another module.
+      // When another module is active we hide it visually (alpha 0)
+      // but it remains composed and its ViewModel keeps running.
+      val chatBoxVisible = activeModule == OsModule.CHAT_BOX
+      Box(
+        modifier = Modifier
+          .fillMaxSize()
+          .alpha(if (chatBoxVisible) 1f else 0f),
+      ) {
+        GalleryNavHost(
+          navController = chatNavController,
+          modelManagerViewModel = modelManagerViewModel,
+          initialTaskId = BuiltInTaskId.LLM_AGENT_CHAT,
+        )
+      }
 
-          // VENDING_MACHINE (MODELS): renders GlobalModelManager.
+      // ── Other modules: rendered on top when active ─────────────
+      if (!chatBoxVisible) {
+        when (activeModule) {
+          // VENDING_MACHINE (MODELS): full-screen, manages own Scaffold.
           OsModule.VENDING_MACHINE -> GlobalModelManager(
             viewModel = modelManagerViewModel,
             navigateUp = { activeModule = OsModule.CHAT_BOX },
@@ -247,48 +251,48 @@ fun GalleryApp(
             },
           )
 
-          else -> {} // unreachable
-        }
-      } else {
-        // Shell modules: the CLU/BOX Scaffold supplies the top bar and status-bar insets.
-        Scaffold(
-          containerColor = absoluteBlack,
-          topBar = {
-            Row(
-              modifier = Modifier
-                .fillMaxWidth()
-                .background(absoluteBlack)
-                .windowInsetsPadding(WindowInsets.statusBars)
-                .padding(horizontal = 4.dp, vertical = 4.dp),
-              verticalAlignment = Alignment.CenterVertically,
-            ) {
-              Text(
-                activeModule.label,
-                style = MaterialTheme.typography.titleMedium,
-                color = neonGreen,
-                fontFamily = FontFamily.Monospace,
-                modifier = Modifier.padding(start = 12.dp),
-              )
-            }
-          },
-        ) { innerPadding ->
-          Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
-            when (activeModule) {
-              OsModule.BRAIN_BOX -> BrainBoxModuleScreen(dao = db.brainBoxDao())
-              OsModule.FILE_BOX -> FileBoxScreen(fileBoxManager = fileBoxManager)
-              OsModule.MSTR_CTRL -> MstrCtrlScreen(sessionManager = terminalSessionManager)
-              OsModule.DIFF_BOX -> DiffBoxScreen(sessionManager = terminalSessionManager)
-              OsModule.COMMAND_CENTER -> CommandCenterScreen(
-                fileBoxManager = fileBoxManager,
-                terminalSessionManager = terminalSessionManager,
-              )
-              OsModule.THE_GRID -> TheGridScreen(
-                onInitializeMatch = { systemPrompt ->
-                  gridPromptOverride = systemPrompt
-                  activeModule = OsModule.CHAT_BOX
-                },
-              )
-              else -> {} // all shell and full-screen modules covered above
+          // Shell modules: the CLU/BOX Scaffold supplies the top bar and status-bar insets.
+          else -> {
+            Scaffold(
+              containerColor = absoluteBlack,
+              topBar = {
+                Row(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .background(absoluteBlack)
+                    .windowInsetsPadding(WindowInsets.statusBars)
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                ) {
+                  Text(
+                    activeModule.label,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = neonGreen,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(start = 12.dp),
+                  )
+                }
+              },
+            ) { innerPadding ->
+              Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+                when (activeModule) {
+                  OsModule.BRAIN_BOX -> BrainBoxModuleScreen(dao = db.brainBoxDao())
+                  OsModule.FILE_BOX -> FileBoxScreen(fileBoxManager = fileBoxManager)
+                  OsModule.MSTR_CTRL -> MstrCtrlScreen(sessionManager = terminalSessionManager)
+                  OsModule.DIFF_BOX -> DiffBoxScreen(sessionManager = terminalSessionManager)
+                  OsModule.COMMAND_CENTER -> CommandCenterScreen(
+                    fileBoxManager = fileBoxManager,
+                    terminalSessionManager = terminalSessionManager,
+                  )
+                  OsModule.THE_GRID -> TheGridScreen(
+                    onInitializeMatch = { systemPrompt ->
+                      gridPromptOverride = systemPrompt
+                      activeModule = OsModule.CHAT_BOX
+                    },
+                  )
+                  else -> {} // all modules covered above
+                }
+              }
             }
           }
         }
