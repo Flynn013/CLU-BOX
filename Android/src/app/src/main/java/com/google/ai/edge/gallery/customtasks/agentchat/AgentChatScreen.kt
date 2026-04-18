@@ -234,10 +234,8 @@ fun AgentChatScreen(
       // silently re-trigger inference with the next task description.
       val pendingTask = agentTools.pendingTaskDescription
       if (pendingTask != null) {
-        autonomousIterationCount++
-
         // ── Circuit Breaker: hard cap on consecutive autonomous iterations ──
-        if (autonomousIterationCount > MAX_AUTONOMOUS_ITERATIONS) {
+        if (autonomousIterationCount >= MAX_AUTONOMOUS_ITERATIONS) {
           Log.w(
             TAG,
             "Autonomous loop HALTED: reached $MAX_AUTONOMOUS_ITERATIONS iterations. " +
@@ -253,6 +251,7 @@ fun AgentChatScreen(
             ),
           )
         } else {
+          autonomousIterationCount++
           agentTools.pendingTaskDescription = null
           Log.d(TAG, "Autonomous loop: iteration $autonomousIterationCount — re-triggering inference with task='$pendingTask'")
           // Cooldown: brief delay between iterations to give the system breathing room.

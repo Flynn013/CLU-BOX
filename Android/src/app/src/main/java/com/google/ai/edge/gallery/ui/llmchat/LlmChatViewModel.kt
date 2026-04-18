@@ -967,7 +967,7 @@ open class LlmChatViewModelBase(
         // This prevents oversized context-injection payloads (RAG + compression
         // + long user input) from crashing the native C++ layer when the
         // combined token count exceeds the model's physical context window.
-        val maxPayloadChars = ((monitor.criticalLimit) * APPROX_CHARS_PER_TOKEN).toInt()  // ~80% of window in chars
+        val maxPayloadChars = ((monitor.criticalLimit) * APPROX_CHARS_PER_TOKEN).toInt()  // criticalLimit is already 80% of context window (in tokens); convert to chars
         val clampedInput = if (augmentedInput.length > maxPayloadChars) {
           Log.w(
             TAG,
