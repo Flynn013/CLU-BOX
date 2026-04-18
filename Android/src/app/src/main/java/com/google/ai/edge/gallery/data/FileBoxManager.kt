@@ -136,6 +136,15 @@ class FileBoxManager(context: Context) {
     return ext in ALLOWED_EXTENSIONS
   }
 
+  /**
+   * Returns `true` if the resolved [target] file is safely within the sandbox [root].
+   * Uses [File.canonicalFile] comparison to block directory-traversal attacks
+   * (e.g., `../../etc/passwd`).
+   */
+  private fun isPathWithinSandbox(target: File): Boolean {
+    return target.canonicalFile.startsWith(root.canonicalFile)
+  }
+
   // ── Write ────────────────────────────────────────────────────
 
   /**
@@ -152,9 +161,7 @@ class FileBoxManager(context: Context) {
     }
     return try {
       val target = File(root, relativePath)
-      // Canonical-path validation: prevent directory traversal (../../etc/passwd).
-      // Uses File comparison (not String) to avoid partial-path-match vulnerability.
-      if (!target.canonicalFile.startsWith(root.canonicalFile)) {
+      if (!isPathWithinSandbox(target)) {
         Log.w(TAG, "writeCodeFile: path traversal blocked for '$relativePath'")
         return false
       }
@@ -177,9 +184,7 @@ class FileBoxManager(context: Context) {
   fun readCodeFile(relativePath: String): String? {
     return try {
       val target = File(root, relativePath)
-      // Canonical-path validation: prevent directory traversal.
-      // Uses File comparison (not String) to avoid partial-path-match vulnerability.
-      if (!target.canonicalFile.startsWith(root.canonicalFile)) {
+      if (!isPathWithinSandbox(target)) {
         Log.w(TAG, "readCodeFile: path traversal blocked for '$relativePath'")
         return null
       }
@@ -195,9 +200,7 @@ class FileBoxManager(context: Context) {
   /** Deletes a single file. Returns `true` if the file existed and was deleted. */
   fun deleteFile(relativePath: String): Boolean {
     val target = File(root, relativePath)
-    // Canonical-path validation: prevent directory traversal.
-    // Uses File comparison (not String) to avoid partial-path-match vulnerability.
-    if (!target.canonicalFile.startsWith(root.canonicalFile)) {
+    if (!isPathWithinSandbox(target)) {
       Log.w(TAG, "deleteFile: path traversal blocked for '$relativePath'")
       return false
     }

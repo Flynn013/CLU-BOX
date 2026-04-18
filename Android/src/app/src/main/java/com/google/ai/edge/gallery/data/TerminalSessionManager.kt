@@ -267,11 +267,11 @@ class TerminalSessionManager(private val context: Context) {
         return "TIMEOUT ERROR"
       }
 
-      // Block until reader threads complete — process already exited so
-      // streams will close and readText() will return promptly.
       // Bounded join to prevent indefinite hangs if a reader thread is stuck.
       stdoutThread.join(READER_THREAD_JOIN_TIMEOUT_MS)
       stderrThread.join(READER_THREAD_JOIN_TIMEOUT_MS)
+      if (stdoutThread.isAlive) Log.w(TAG, "executeCommandInSandbox: stdout reader thread still alive after join timeout")
+      if (stderrThread.isAlive) Log.w(TAG, "executeCommandInSandbox: stderr reader thread still alive after join timeout")
 
       val stdout = stdoutRef.get()
       val stderr = stderrRef.get()
@@ -335,6 +335,8 @@ class TerminalSessionManager(private val context: Context) {
       // Bounded join to prevent indefinite hangs if a reader thread is stuck.
       stdoutThread.join(READER_THREAD_JOIN_TIMEOUT_MS)
       stderrThread.join(READER_THREAD_JOIN_TIMEOUT_MS)
+      if (stdoutThread.isAlive) Log.w(TAG, "executeCommandWithExitCode: stdout reader thread still alive after join timeout")
+      if (stderrThread.isAlive) Log.w(TAG, "executeCommandWithExitCode: stderr reader thread still alive after join timeout")
 
       val stdout = stdoutRef.get()
       val stderr = stderrRef.get()

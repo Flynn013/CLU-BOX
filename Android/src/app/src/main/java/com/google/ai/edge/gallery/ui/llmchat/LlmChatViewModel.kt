@@ -110,6 +110,13 @@ private const val MAX_AGENT_RESPONSE_PREVIEW_LENGTH = 500
 /** Opening delimiter emitted by the LLM when it wants to invoke a tool. */
 private const val TOOL_CALL_OPEN_TAG = "<|tool_call>"
 
+/**
+ * Approximate characters per SentencePiece token for Gemma models.
+ * Used for the pre-flight token clamp to convert token counts to char limits.
+ * Gemma SentencePiece averages ~3.2 chars/token for mixed English/code text.
+ */
+private const val APPROX_CHARS_PER_TOKEN = 3.2
+
 /** Closing delimiters that signal the tool call payload is complete. */
 private val TOOL_CALL_CLOSE_TAGS = listOf("</tool_call>", "<end_of_turn>")
 
@@ -950,7 +957,7 @@ open class LlmChatViewModelBase(
         // This prevents oversized context-injection payloads (RAG + compression
         // + long user input) from crashing the native C++ layer when the
         // combined token count exceeds the model's physical context window.
-        val maxPayloadChars = ((monitor.criticalLimit) * 3.2).toInt()  // ~80% of window in chars
+        val maxPayloadChars = ((monitor.criticalLimit) * APPROX_CHARS_PER_TOKEN).toInt()  // ~80% of window in chars
         val clampedInput = if (augmentedInput.length > maxPayloadChars) {
           Log.w(
             TAG,
