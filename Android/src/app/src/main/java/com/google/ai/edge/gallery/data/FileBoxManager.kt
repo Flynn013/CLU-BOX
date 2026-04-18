@@ -224,12 +224,22 @@ class FileBoxManager(context: Context) {
   /**
    * Returns a recursive tree representation of [dir] suitable for display.
    * Each entry is a [FileNode].
+   *
+   * @param maxDepth Maximum recursion depth to prevent stack overflow on deeply nested directories.
    */
-  fun getFileTree(dir: File = root): FileNode {
+  fun getFileTree(dir: File = root, maxDepth: Int = 50): FileNode {
+    if (maxDepth <= 0) {
+      return FileNode(
+        name = dir.name,
+        relativePath = if (dir == root) "" else dir.relativeTo(root).path,
+        isDirectory = true,
+        children = listOf(FileNode(name = "[depth limit reached]", relativePath = "", isDirectory = false)),
+      )
+    }
     val children = (dir.listFiles() ?: emptyArray())
       .sortedWith(compareBy<File> { !it.isDirectory }.thenBy { it.name })
       .map { child ->
-        if (child.isDirectory) getFileTree(child)
+        if (child.isDirectory) getFileTree(child, maxDepth - 1)
         else FileNode(name = child.name, relativePath = child.relativeTo(root).path, isDirectory = false)
       }
     return FileNode(

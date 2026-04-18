@@ -713,9 +713,19 @@ open class LlmChatViewModelBase(
       // Loading.
       addMessage(model = model, message = ChatMessageLoading(accelerator = accelerator))
 
-      // Wait for instance to be initialized.
+      // Wait for instance to be initialized (timeout after 30 seconds).
+      var instanceWaitMs = 0L
+      val maxInstanceWaitMs = 30_000L
       while (model.instance == null) {
         delay(100)
+        instanceWaitMs += 100
+        if (instanceWaitMs >= maxInstanceWaitMs) {
+          Log.e(TAG, "generateResponse: model instance not initialized after ${maxInstanceWaitMs}ms")
+          setInProgress(false)
+          setPreparing(false)
+          onError("Model failed to initialize within ${maxInstanceWaitMs / 1000}s. Try resetting the session.")
+          return@launch
+        }
       }
       delay(500)
 
@@ -1018,7 +1028,9 @@ open class LlmChatViewModelBase(
       clearAllMessages(model = model)
       stopResponse(model = model)
 
-      while (true) {
+      var resetAttempts = 0
+      val maxResetAttempts = 10
+      while (resetAttempts < maxResetAttempts) {
         try {
           model.runtimeHelper.resetConversation(
             model = model,
@@ -1030,7 +1042,11 @@ open class LlmChatViewModelBase(
           )
           break
         } catch (e: Exception) {
-          Log.d(TAG, "Failed to reset session. Trying again")
+          resetAttempts++
+          Log.d(TAG, "Failed to reset session (attempt $resetAttempts/$maxResetAttempts). Trying again")
+          if (resetAttempts >= maxResetAttempts) {
+            Log.e(TAG, "Reset session failed after $maxResetAttempts attempts — giving up", e)
+          }
         }
         delay(200)
       }
@@ -1047,9 +1063,17 @@ open class LlmChatViewModelBase(
     allowThinking: Boolean = false,
   ) {
     viewModelScope.launch(Dispatchers.Default) {
-      // Wait for model to be initialized.
+      // Wait for model to be initialized (timeout after 30 seconds).
+      var waitMs = 0L
+      val maxWaitMs = 30_000L
       while (model.instance == null) {
         delay(100)
+        waitMs += 100
+        if (waitMs >= maxWaitMs) {
+          Log.e(TAG, "runAgain: model instance not initialized after ${maxWaitMs}ms — aborting")
+          onError("Model failed to initialize. Please try resetting the session.")
+          return@launch
+        }
       }
 
       // Clone the clicked message and add it.

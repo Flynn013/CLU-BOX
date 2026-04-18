@@ -356,6 +356,7 @@ class TerminalSessionManager(private val context: Context) {
 
   /** Destroys the persistent session. */
   fun destroySession() = sessionLock.withLock {
+    try { stdinWriter?.close() } catch (_: Exception) {}
     process?.destroyForcibly()
     process = null
     stdinWriter = null

@@ -1080,7 +1080,11 @@ constructor(
     $instructions
     """
         .trimIndent()
-    skillMdFile.writeText(mdContent, Charsets.UTF_8)
+    try {
+      skillMdFile.writeText(mdContent, Charsets.UTF_8)
+    } catch (e: Exception) {
+      Log.e(TAG, "Failed to write skill.md: ${skillMdFile.path}", e)
+    }
   }
 
   private fun saveScripts(scriptDestDir: File, scriptsContent: Map<String, String>) {

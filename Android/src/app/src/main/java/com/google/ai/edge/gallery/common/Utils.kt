@@ -331,13 +331,13 @@ private fun calculateInSampleSize(
 
 fun readFileToByteBuffer(file: File): ByteBuffer? {
   return try {
-    val fileInputStream = FileInputStream(file)
-    val fileChannel: FileChannel = fileInputStream.channel
-    val byteBuffer = ByteBuffer.allocateDirect(fileChannel.size().toInt())
-    fileChannel.read(byteBuffer)
-    byteBuffer.rewind()
-    fileInputStream.close()
-    byteBuffer
+    FileInputStream(file).use { fileInputStream ->
+      val fileChannel: FileChannel = fileInputStream.channel
+      val byteBuffer = ByteBuffer.allocateDirect(fileChannel.size().toInt())
+      fileChannel.read(byteBuffer)
+      byteBuffer.rewind()
+      byteBuffer
+    }
   } catch (e: Exception) {
     e.printStackTrace()
     null

@@ -936,11 +936,13 @@ private fun handleImagesSelected(
           }
         if (inputStream != null) {
           // Read the EXIF metadata from the picture and rotate it correctly.
-          val exif = ExifInterface(inputStream)
-          val orientation =
+          val orientation = try {
+            val exif = ExifInterface(inputStream)
             exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
-          // You MUST close the first input stream before opening another one on the same URI.
-          inputStream.close()
+          } finally {
+            // You MUST close the first input stream before opening another one on the same URI.
+            inputStream.close()
+          }
 
           // The let block will now return the rotated bitmap
           decodeSampledBitmapFromUri(context, uri, 1024, 1024)?.let { originalBitmap ->
