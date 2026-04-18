@@ -49,12 +49,15 @@ suspend fun exportBrain(dao: BrainBoxDao): String {
 
 /**
  * Parses [json] and **overwrites** the BrainBox database with the deserialized neurons.
+ *
+ * The delete-all + insert-all is executed inside a single Room transaction.
+ * If the process crashes mid-import the transaction is rolled back — preventing
+ * data loss from a partial write.
  */
 suspend fun importBrain(dao: BrainBoxDao, json: String) {
   val type = object : TypeToken<List<NeuronEntity>>() {}.type
   val neurons: List<NeuronEntity> = Gson().fromJson(json, type)
-  dao.deleteAllNeurons()
-  neurons.forEach { dao.insertNeuron(it) }
+  dao.replaceAllNeurons(neurons)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

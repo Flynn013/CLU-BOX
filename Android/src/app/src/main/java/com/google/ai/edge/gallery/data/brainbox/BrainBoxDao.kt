@@ -21,6 +21,7 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 
 /** Data Access Object for the CLU/BOX BrainBox knowledge graph. */
@@ -63,4 +64,15 @@ interface BrainBoxDao {
   /** Updates an existing neuron (replaces all fields). */
   @Update
   suspend fun updateNeuron(neuron: NeuronEntity)
+
+  /**
+   * Atomically replaces the entire brain: deletes all neurons then inserts the
+   * given list inside a single database transaction.  If the process crashes
+   * mid-import the transaction is rolled back automatically — no data loss.
+   */
+  @Transaction
+  suspend fun replaceAllNeurons(neurons: List<NeuronEntity>) {
+    deleteAllNeurons()
+    neurons.forEach { insertNeuron(it) }
+  }
 }

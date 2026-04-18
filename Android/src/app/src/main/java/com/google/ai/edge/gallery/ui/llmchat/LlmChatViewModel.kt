@@ -451,7 +451,7 @@ open class LlmChatViewModelBase(
 
     val summary = resumeLines.joinToString("\n")
 
-    // ── Save resume_current.md to FILE_BOX ──────────────────────────
+    // ── Save resume_current.md to FILE_BOX (atomic write) ─────────────
     val ctx = appContext
     if (ctx != null) {
       withContext(Dispatchers.IO) {
@@ -459,7 +459,11 @@ open class LlmChatViewModelBase(
           val fileBoxRoot = File(ctx.filesDir, "clu_file_box")
           val resumeFile = File(fileBoxRoot, RESUME_FILE_PATH)
           resumeFile.parentFile?.mkdirs()
-          resumeFile.writeText(summary, Charsets.UTF_8)
+          // Atomic write: write to a temp file, then rename. This prevents
+          // a half-written file if the OS kills the process mid-write.
+          val tmpFile = File(resumeFile.parentFile, "${resumeFile.name}.tmp")
+          tmpFile.writeText(summary, Charsets.UTF_8)
+          tmpFile.renameTo(resumeFile)
           Log.d(TAG, "compressContext: saved resume_current.md (${summary.length} chars)")
         } catch (e: Exception) {
           Log.e(TAG, "compressContext: failed to write resume_current.md", e)
