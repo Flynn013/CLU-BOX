@@ -667,7 +667,10 @@ private fun resetSessionWithCurrentSkills(
     model = model,
     systemInstruction =
       if (newSelectedSkills.isEmpty()) null
-      else skillManagerViewModel.getSystemPrompt(curSystemPrompt),
+      else skillManagerViewModel.getSystemPrompt(
+        curSystemPrompt,
+        toolsSummary = agentTools.getToolsSummary(),
+      ),
     tools = listOf(tool(agentTools)),
     supportImage = true,
     supportAudio = true,

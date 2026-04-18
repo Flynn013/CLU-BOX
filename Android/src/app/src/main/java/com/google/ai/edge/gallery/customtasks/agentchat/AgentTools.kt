@@ -132,6 +132,46 @@ class AgentTools() : ToolSet {
   var resultImageToShow: CallJsSkillResultImage? = null
   var resultWebviewToShow: CallJsSkillResultWebview? = null
 
+  // ── Dynamic tool catalog for system prompt injection ──────────────────
+
+  /**
+   * Canonical catalog of every @Tool method in this class.
+   * Kept here — next to the implementations — so additions/renames are
+   * caught at review time. The list is intentionally defined once;
+   * [getToolsSummary] simply formats it for the system prompt.
+   */
+  private data class ToolEntry(val name: String, val description: String)
+
+  private val toolCatalog: List<ToolEntry> = listOf(
+    ToolEntry("loadSkill", "Load a skill's instructions by name."),
+    ToolEntry("runJs", "Execute a JavaScript skill script."),
+    ToolEntry("runIntent", "Run an Android intent to perform actions on the device."),
+    ToolEntry("queryBrain", "Search the BrainBox knowledge graph for stored memories/neurons."),
+    ToolEntry("saveBrainNeuron", "Save a new memory/fact/context to the BrainBox knowledge graph."),
+    ToolEntry("workspaceMap", "Scan the clu_file_box workspace and return a JSON tree of all files and folders. Always call this first to orient yourself."),
+    ToolEntry("fileBoxWrite", "Write a text/code file to the FILE_BOX workspace. Nested folders are created automatically. Python and JavaScript files are auto-validated — syntax errors cause the file to be DELETED."),
+    ToolEntry("fileBoxRead", "Read a file from the FILE_BOX workspace."),
+    ToolEntry("taskQueueUpdate", "Set status='pending' + next_task_description to continue working autonomously, or status='complete' when finished."),
+    ToolEntry("architectInit", "(Planner-Worker) Call ONCE to commit a project blueprint with goal and file list. Starts the worker phase automatically."),
+    ToolEntry("workerExecute", "(Planner-Worker) Write one file, mark it DONE in blueprint.md, auto-continue until is_project_finished=true."),
+    ToolEntry("shellExecute", "Run a terminal command invisibly (10 s timeout). Use to test code or debug."),
+    ToolEntry("commandOverride", "Run a terminal command visibly on the MSTR_CTRL screen so the user can watch."),
+    ToolEntry("operatorHalt", "Stop the autonomous loop and present a reason to the user."),
+    ToolEntry("oracleSearch", "Search offline .zim documentation (StackOverflow, API docs) for technical answers."),
+    ToolEntry("gitDiffRead", "Get git diff (--unified=0) for a file or the whole workspace."),
+    ToolEntry("workspaceSyncSnapshot", "Get a unified snapshot of FILE_BOX editor + MSTR_CTRL terminal state for debugging."),
+    ToolEntry("editorTerminalPipe", "Pipe the file open in FILE_BOX into MSTR_CTRL for execution. Auto-detects runtime (.py → python3, .js → node, .sh → sh)."),
+  )
+
+  /**
+   * Returns a formatted multi-line string listing every native tool with its
+   * description. Intended for injection into the system prompt via the
+   * `___TOOLS___` placeholder.
+   */
+  fun getToolsSummary(): String {
+    return toolCatalog.joinToString("\n") { "• ${it.name} — ${it.description}" }
+  }
+
   /** Loads skill. */
   @Tool(description = "Loads a skill.")
   fun loadSkill(
