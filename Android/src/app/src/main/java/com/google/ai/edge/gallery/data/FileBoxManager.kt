@@ -153,7 +153,8 @@ class FileBoxManager(context: Context) {
     return try {
       val target = File(root, relativePath)
       // Canonical-path validation: prevent directory traversal (../../etc/passwd).
-      if (!target.canonicalPath.startsWith(root.canonicalPath)) {
+      // Uses File comparison (not String) to avoid partial-path-match vulnerability.
+      if (!target.canonicalFile.startsWith(root.canonicalFile)) {
         Log.w(TAG, "writeCodeFile: path traversal blocked for '$relativePath'")
         return false
       }
@@ -177,7 +178,8 @@ class FileBoxManager(context: Context) {
     return try {
       val target = File(root, relativePath)
       // Canonical-path validation: prevent directory traversal.
-      if (!target.canonicalPath.startsWith(root.canonicalPath)) {
+      // Uses File comparison (not String) to avoid partial-path-match vulnerability.
+      if (!target.canonicalFile.startsWith(root.canonicalFile)) {
         Log.w(TAG, "readCodeFile: path traversal blocked for '$relativePath'")
         return null
       }
@@ -194,7 +196,8 @@ class FileBoxManager(context: Context) {
   fun deleteFile(relativePath: String): Boolean {
     val target = File(root, relativePath)
     // Canonical-path validation: prevent directory traversal.
-    if (!target.canonicalPath.startsWith(root.canonicalPath)) {
+    // Uses File comparison (not String) to avoid partial-path-match vulnerability.
+    if (!target.canonicalFile.startsWith(root.canonicalFile)) {
       Log.w(TAG, "deleteFile: path traversal blocked for '$relativePath'")
       return false
     }

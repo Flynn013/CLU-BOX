@@ -43,6 +43,18 @@ private const val KEY_FIRST_BOOT_DONE = "first_boot_done"
 /** Timeout for individual commands piped through the session (seconds). */
 private const val CMD_TIMEOUT_SECONDS = 10L
 
+/** Maximum time (ms) to wait for reader threads to finish after the process exits. */
+private const val READER_THREAD_JOIN_TIMEOUT_MS = 5_000L
+
+/** Termux filesystem prefix — the root of the Termux sysroot. */
+private const val TERMUX_PREFIX = "/data/data/com.termux/files/usr"
+
+/** Termux bin directory containing python, node, pkg, git, etc. */
+private const val TERMUX_BIN = "$TERMUX_PREFIX/bin"
+
+/** Termux shared library directory. */
+private const val TERMUX_LIB = "$TERMUX_PREFIX/lib"
+
 /** Maximum number of lines retained in the visible output buffer to limit GC pressure. */
 private const val MAX_OUTPUT_LINES = 2000
 
@@ -115,11 +127,8 @@ class TerminalSessionManager(private val context: Context) {
     Log.d(TAG, "Starting persistent shell session (HOME=${sandboxRoot.absolutePath})")
 
     // Build PATH: include Termux bin dir only if it actually exists on this device.
-    val termuxBin = "/data/data/com.termux/files/usr/bin"
-    val termuxPrefix = "/data/data/com.termux/files/usr"
-    val termuxLib = "$termuxPrefix/lib"
     val basePath = "/system/bin:/system/xbin:" + (System.getenv("PATH") ?: "")
-    val effectivePath = if (java.io.File(termuxBin).isDirectory) "$termuxBin:$basePath" else basePath
+    val effectivePath = if (java.io.File(TERMUX_BIN).isDirectory) "$TERMUX_BIN:$basePath" else basePath
 
     val env = mutableMapOf(
       "HOME" to sandboxRoot.absolutePath,
@@ -128,9 +137,9 @@ class TerminalSessionManager(private val context: Context) {
     )
     // Inject Termux-specific environment variables when the Termux prefix exists.
     // This gives Shell_Execute access to python, node, pkg, git, and native libs.
-    if (java.io.File(termuxPrefix).isDirectory) {
-      env["PREFIX"] = termuxPrefix
-      env["LD_LIBRARY_PATH"] = termuxLib
+    if (java.io.File(TERMUX_PREFIX).isDirectory) {
+      env["PREFIX"] = TERMUX_PREFIX
+      env["LD_LIBRARY_PATH"] = TERMUX_LIB
     }
 
     val pb = ProcessBuilder("sh")
@@ -228,13 +237,11 @@ class TerminalSessionManager(private val context: Context) {
 
       pb.environment()["HOME"] = sandboxRoot.absolutePath
       // Inject Termux environment so python/node/pkg are visible.
-      val termuxPrefix = "/data/data/com.termux/files/usr"
-      val termuxBin = "$termuxPrefix/bin"
-      if (java.io.File(termuxBin).isDirectory) {
+      if (java.io.File(TERMUX_BIN).isDirectory) {
         val basePath = pb.environment()["PATH"] ?: "/system/bin:/system/xbin"
-        pb.environment()["PATH"] = "$termuxBin:$basePath"
-        pb.environment()["PREFIX"] = termuxPrefix
-        pb.environment()["LD_LIBRARY_PATH"] = "$termuxPrefix/lib"
+        pb.environment()["PATH"] = "$TERMUX_BIN:$basePath"
+        pb.environment()["PREFIX"] = TERMUX_PREFIX
+        pb.environment()["LD_LIBRARY_PATH"] = TERMUX_LIB
       }
 
       val proc = pb.start()
@@ -263,8 +270,8 @@ class TerminalSessionManager(private val context: Context) {
       // Block until reader threads complete — process already exited so
       // streams will close and readText() will return promptly.
       // Bounded join to prevent indefinite hangs if a reader thread is stuck.
-      stdoutThread.join(5_000)
-      stderrThread.join(5_000)
+      stdoutThread.join(READER_THREAD_JOIN_TIMEOUT_MS)
+      stderrThread.join(READER_THREAD_JOIN_TIMEOUT_MS)
 
       val stdout = stdoutRef.get()
       val stderr = stderrRef.get()
@@ -296,13 +303,11 @@ class TerminalSessionManager(private val context: Context) {
 
       pb.environment()["HOME"] = sandboxRoot.absolutePath
       // Inject Termux environment so python/node/pkg are visible.
-      val termuxPrefix = "/data/data/com.termux/files/usr"
-      val termuxBin = "$termuxPrefix/bin"
-      if (java.io.File(termuxBin).isDirectory) {
+      if (java.io.File(TERMUX_BIN).isDirectory) {
         val basePath = pb.environment()["PATH"] ?: "/system/bin:/system/xbin"
-        pb.environment()["PATH"] = "$termuxBin:$basePath"
-        pb.environment()["PREFIX"] = termuxPrefix
-        pb.environment()["LD_LIBRARY_PATH"] = "$termuxPrefix/lib"
+        pb.environment()["PATH"] = "$TERMUX_BIN:$basePath"
+        pb.environment()["PREFIX"] = TERMUX_PREFIX
+        pb.environment()["LD_LIBRARY_PATH"] = TERMUX_LIB
       }
 
       val proc = pb.start()
@@ -328,8 +333,8 @@ class TerminalSessionManager(private val context: Context) {
       }
 
       // Bounded join to prevent indefinite hangs if a reader thread is stuck.
-      stdoutThread.join(5_000)
-      stderrThread.join(5_000)
+      stdoutThread.join(READER_THREAD_JOIN_TIMEOUT_MS)
+      stderrThread.join(READER_THREAD_JOIN_TIMEOUT_MS)
 
       val stdout = stdoutRef.get()
       val stderr = stderrRef.get()
@@ -395,7 +400,7 @@ class TerminalSessionManager(private val context: Context) {
       // so zero chance of a "pkg: not found" error leaking to the terminal.
       // Note: this is a best-effort probe for UI messaging only. The actual
       // execution safety is handled by the shell command itself (|| fallback).
-      val pkgBinary = File("/data/data/com.termux/files/usr/bin/pkg")
+      val pkgBinary = File("$TERMUX_BIN/pkg")
       val hasPkg = pkgBinary.exists() && pkgBinary.canExecute()
 
       if (hasPkg) {

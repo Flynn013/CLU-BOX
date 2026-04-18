@@ -98,8 +98,9 @@ class TokenMonitor(
    */
   fun trackMessage(text: String) {
     val tokens = estimateTokens(text)
-    val newTotal = currentTokens.addAndGet(tokens).coerceAtMost(contextWindowSize)
-    currentTokens.set(newTotal)
+    val newTotal = currentTokens.updateAndGet { current ->
+      (current + tokens).coerceAtMost(contextWindowSize)
+    }
     val msgs = messageCount.incrementAndGet()
     Log.d(
       TAG,

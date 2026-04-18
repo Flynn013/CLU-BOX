@@ -27,6 +27,12 @@ import java.io.File
 
 private const val TAG = "TermuxSessionBridge"
 
+/** Termux filesystem prefix — the root of the Termux sysroot. */
+private const val TERMUX_PREFIX = "/data/data/com.termux/files/usr"
+
+/** Termux bin directory containing python, node, pkg, git, etc. */
+private const val TERMUX_BIN = "$TERMUX_PREFIX/bin"
+
 /**
  * Wraps the Termux [TerminalSession] to provide a PTY-backed shell inside
  * the CLU-BOX sandbox.
@@ -166,9 +172,8 @@ class TermuxSessionBridge(private val context: Context) {
     val home = sandboxRoot.absolutePath
 
     // Build the environment for the shell.
-    val termuxBin = "/data/data/com.termux/files/usr/bin"
     val basePath = "/system/bin:/system/xbin"
-    val effectivePath = if (File(termuxBin).isDirectory) "$termuxBin:$basePath" else basePath
+    val effectivePath = if (File(TERMUX_BIN).isDirectory) "$TERMUX_BIN:$basePath" else basePath
 
     val env = mutableListOf(
       "HOME=$home",
@@ -181,9 +186,9 @@ class TermuxSessionBridge(private val context: Context) {
     )
     // Inject Termux-specific variables when the prefix exists, giving the
     // PTY shell access to python, node, pkg, git, and native shared libs.
-    if (File(termuxBin).isDirectory) {
-      env.add("PREFIX=/data/data/com.termux/files/usr")
-      env.add("LD_LIBRARY_PATH=/data/data/com.termux/files/usr/lib")
+    if (File(TERMUX_BIN).isDirectory) {
+      env.add("PREFIX=$TERMUX_PREFIX")
+      env.add("LD_LIBRARY_PATH=$TERMUX_PREFIX/lib")
     }
 
     val args = arrayOf(shell)

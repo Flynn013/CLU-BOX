@@ -25,6 +25,9 @@ private const val TAG = "ShellManager"
 /** Timeout in seconds before a shell process is forcibly killed. */
 private const val TIMEOUT_SECONDS = 10L
 
+/** Maximum time (ms) to wait for reader threads to finish after the process exits. */
+private const val READER_THREAD_JOIN_TIMEOUT_MS = 5_000L
+
 /**
  * Executes a shell command via `sh -c` and returns the combined stdout + stderr output.
  *
@@ -69,8 +72,8 @@ fun executeCommand(command: String): String {
     // Block until reader threads complete (no timeout — process already exited so
     // streams will close and readText() will return).
     // Bounded join prevents indefinite hangs if a reader thread gets stuck.
-    stdoutThread.join(5_000)
-    stderrThread.join(5_000)
+    stdoutThread.join(READER_THREAD_JOIN_TIMEOUT_MS)
+    stderrThread.join(READER_THREAD_JOIN_TIMEOUT_MS)
 
     val stdout = stdoutRef.get()
     val stderr = stderrRef.get()
