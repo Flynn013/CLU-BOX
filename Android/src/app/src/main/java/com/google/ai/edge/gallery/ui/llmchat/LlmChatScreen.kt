@@ -74,6 +74,7 @@ fun LlmChatScreen(
   taskId: String = BuiltInTaskId.LLM_CHAT,
   onFirstToken: (Model) -> Unit = {},
   onGenerateResponseDone: (Model) -> Unit = {},
+  onInferenceError: (Model) -> Unit = {},
   onSkillClicked: () -> Unit = {},
   onResetSessionClickedOverride: ((Task, Model) -> Unit)? = null,
   composableBelowMessageList: @Composable (Model) -> Unit = {},
@@ -96,6 +97,7 @@ fun LlmChatScreen(
     onSkillClicked = onSkillClicked,
     onFirstToken = onFirstToken,
     onGenerateResponseDone = onGenerateResponseDone,
+    onInferenceError = onInferenceError,
     onResetSessionClickedOverride = onResetSessionClickedOverride,
     composableBelowMessageList = composableBelowMessageList,
     allowEditingSystemPrompt = allowEditingSystemPrompt,
@@ -195,6 +197,7 @@ fun ChatViewWrapper(
   onSkillClicked: () -> Unit = {},
   onFirstToken: (Model) -> Unit = {},
   onGenerateResponseDone: (Model) -> Unit = {},
+  onInferenceError: (Model) -> Unit = {},
   onResetSessionClickedOverride: ((Task, Model) -> Unit)? = null,
   composableBelowMessageList: @Composable (Model) -> Unit = {},
   emptyStateComposable: @Composable (Model) -> Unit = {},
@@ -313,6 +316,7 @@ fun ChatViewWrapper(
               errorMessage = errorMessage,
               modelManagerViewModel = modelManagerViewModel,
             )
+            onInferenceError(model)
           },
           allowThinking = allowThinking,
         )

@@ -110,6 +110,22 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import org.json.JSONObject
 
 private const val TAG = "AGAgentChatScreen"
+
+/**
+ * Maximum number of consecutive autonomous loop iterations allowed before the
+ * loop is forcibly halted.  This prevents a runaway agentic loop from
+ * crashing the app through memory exhaustion, context overflow, or native
+ * layer errors.  The counter resets whenever the **user** sends a new message.
+ */
+private const val MAX_AUTONOMOUS_ITERATIONS = 25
+
+/**
+ * Cooldown delay (ms) inserted between consecutive autonomous loop iterations.
+ * Gives the system breathing room (GC, UI, OS memory management) and prevents
+ * CPU starvation / ANR on the main thread.
+ */
+private const val AUTONOMOUS_LOOP_COOLDOWN_MS = 1500L
+
 private val chatViewJavascriptInterface = ChatWebViewJavascriptInterface()
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -144,12 +160,15 @@ fun AgentChatScreen(
   var curSystemPrompt by remember { mutableStateOf(task.defaultSystemPrompt) }
   val systemPromptUpdatedMessage = stringResource(R.string.system_prompt_updated)
   var sendMessageTrigger by remember { mutableStateOf<SendMessageTrigger?>(null) }
+  /** Tracks how many consecutive autonomous re-triggers have fired without user input. */
+  var autonomousIterationCount by remember { mutableStateOf(0) }
   var showAlertForDisabledSkill by remember { mutableStateOf(false) }
   var disabledSkillName by remember { mutableStateOf("") }
   var showChatHistorySheet by remember { mutableStateOf(false) }
   var chatHistoryRefreshKey by remember { mutableStateOf(0) }
   val chatHistoryDao = remember(context) { GraphDatabase.getInstance(context).chatHistoryDao() }
   val chatHistoryScope = rememberCoroutineScope()
+  val autonomousLoopScope = rememberCoroutineScope()
 
   LlmChatScreen(
     modelManagerViewModel = modelManagerViewModel,
@@ -157,6 +176,15 @@ fun AgentChatScreen(
     navigateUp = navigateUp,
     onFirstToken = { model ->
       updateProgressPanel(viewModel = viewModel, model = model, agentTools = agentTools)
+    },
+    onInferenceError = { _ ->
+      // ── Error cleanup: break the autonomous loop on crash ──────────
+      // When inference fails (OOM, native crash, context overflow), clear
+      // any pending autonomous task so the loop doesn't try to fire again
+      // after the model is re-initialized.
+      Log.w(TAG, "Inference error — clearing pending autonomous task and resetting loop counter")
+      agentTools.pendingTaskDescription = null
+      autonomousIterationCount = 0
     },
     onGenerateResponseDone = { model ->
       // Show any image produced by tools.
@@ -206,17 +234,44 @@ fun AgentChatScreen(
       // silently re-trigger inference with the next task description.
       val pendingTask = agentTools.pendingTaskDescription
       if (pendingTask != null) {
-        agentTools.pendingTaskDescription = null
-        Log.d(TAG, "Autonomous loop: re-triggering inference with task='$pendingTask'")
-        sendMessageTrigger = SendMessageTrigger(
-          model = model,
-          messages = listOf(
-            ChatMessageText(
-              content = "[AUTO-TASK] $pendingTask",
-              side = ChatSide.USER,
+        autonomousIterationCount++
+
+        // ── Circuit Breaker: hard cap on consecutive autonomous iterations ──
+        if (autonomousIterationCount > MAX_AUTONOMOUS_ITERATIONS) {
+          Log.w(
+            TAG,
+            "Autonomous loop HALTED: reached $MAX_AUTONOMOUS_ITERATIONS iterations. " +
+              "Clearing pending task to prevent crash."
+          )
+          agentTools.pendingTaskDescription = null
+          viewModel.addMessage(
+            model = model,
+            message = ChatMessageText(
+              content = "[System: Autonomous loop halted after $MAX_AUTONOMOUS_ITERATIONS " +
+                "iterations to protect device stability. Send a new message to continue.]",
+              side = ChatSide.AGENT,
             ),
-          ),
-        )
+          )
+        } else {
+          agentTools.pendingTaskDescription = null
+          Log.d(TAG, "Autonomous loop: iteration $autonomousIterationCount — re-triggering inference with task='$pendingTask'")
+          // Cooldown: brief delay between iterations to give the system breathing room.
+          autonomousLoopScope.launch {
+            delay(AUTONOMOUS_LOOP_COOLDOWN_MS)
+            sendMessageTrigger = SendMessageTrigger(
+              model = model,
+              messages = listOf(
+                ChatMessageText(
+                  content = "[AUTO-TASK] $pendingTask",
+                  side = ChatSide.USER,
+                ),
+              ),
+            )
+          }
+        }
+      } else {
+        // No pending task — the loop concluded naturally. Reset the counter.
+        autonomousIterationCount = 0
       }
     },
     onResetSessionClickedOverride = { task, model ->

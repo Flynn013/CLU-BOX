@@ -632,6 +632,15 @@ open class LlmChatViewModelBase(
     onError: (String) -> Unit,
     allowThinking: Boolean = false,
   ) {
+    // ── Re-entrancy guard ────────────────────────────────────────────
+    // If inference is already in progress, refuse the new request.  The
+    // native C++ LLM backend does not support concurrent sendMessageAsync
+    // calls on the same Conversation, and re-entering causes a crash.
+    if (uiState.value.inProgress) {
+      Log.w(TAG, "generateResponse: BLOCKED — inference already in progress. Dropping request.")
+      return
+    }
+
     val accelerator = model.getStringConfigValue(key = ConfigKeys.ACCELERATOR, defaultValue = "")
     val monitor = getTokenMonitor(model)
     viewModelScope.launch(Dispatchers.Default) {
@@ -936,9 +945,26 @@ open class LlmChatViewModelBase(
           monitor.trackMessage(augmentedInput)
         }
 
+        // ── Pre-flight token clamp ──────────────────────────────────────
+        // Truncate the payload string BEFORE it reaches sendMessageAsync.
+        // This prevents oversized context-injection payloads (RAG + compression
+        // + long user input) from crashing the native C++ layer when the
+        // combined token count exceeds the model's physical context window.
+        val maxPayloadChars = ((monitor.criticalLimit) * 3.2).toInt()  // ~80% of window in chars
+        val clampedInput = if (augmentedInput.length > maxPayloadChars) {
+          Log.w(
+            TAG,
+            "Pre-flight clamp: truncating input from ${augmentedInput.length} to $maxPayloadChars chars"
+          )
+          augmentedInput.take(maxPayloadChars) +
+            "\n\n[System: Input was truncated to fit within the context window.]"
+        } else {
+          augmentedInput
+        }
+
         model.runtimeHelper.runInference(
           model = model,
-          input = augmentedInput,
+          input = clampedInput,
           images = images,
           audioClips = audioClips,
           resultListener = resultListener,
