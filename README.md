@@ -1,22 +1,23 @@
-# Google AI Edge Gallery ✨
+# CLU/BOX ✨
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![GitHub release (latest by date)](https://img.shields.io/github/v/release/google-ai-edge/gallery)](https://github.com/google-ai-edge/gallery/releases)
 
-**Explore, Experience, and Evaluate the Future of On-Device Generative AI with Google AI Edge.**
+**Your on-device AI assistant with skills, BrainBox memory, and offline reasoning.**
 
-AI Edge Gallery is the premier destination for running the world's most powerful open-source Large Language Models (LLMs) on your mobile device. Experience high-performance Generative AI directly on your hardware—fully offline, private, and lightning-fast.
+CLU/BOX is a customized build of the AI Edge Gallery—an on-device AI platform for running powerful open-source Large Language Models (LLMs) on your mobile device. Experience high-performance Generative AI directly on your hardware—fully offline, private, and lightning-fast.
 
 **Now Featuring: Gemma 4**
 
 The latest version brings official support for the newly released Gemma 4 family. As the centerpiece of this release, Gemma 4 allows you to test the cutting edge of on-device AI. Experience advanced reasoning, logic, and creative capabilities without ever sending your data to a server.
 
+CLU/BOX adds a suite of OS-level modules on top of the base gallery:
 
-| **Install the app today from Google Play** | **Install the app today from App Store** |
-| :--- | :--- |
-| <a href='https://play.google.com/store/apps/details?id=com.google.ai.edge.gallery'><img alt='Get it on Google Play' height="120" src='https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png'/></a> | <a href="https://apps.apple.com/us/app/google-ai-edge-gallery/id6749645337?itscg=30200&itsct=apps_box_badge&mttnsubad=6749645337" style="display: inline-block;"> <img src="https://toolbox.marketingtools.apple.com/api/v2/badges/download-on-the-app-store/black/en-us?releaseDate=1771977600" alt="Download on the App Store" style="width: 246px; height: 90px; vertical-align: middle; object-fit: contain;" /></a> |
-
-For users without Google Play access, install the apk from the [**latest release**](https://github.com/google-ai-edge/gallery/releases/latest/)
+- **CHAT_BOX** — agentic chat with BrainBox RAG and skill execution
+- **BRAIN_BOX** — persistent knowledge graph (neurons + synapses)
+- **SKILL_BOX** — skill configuration and management
+- **THE_GRID** — AI simulation game arena
+- **MODELS** — model download and configuration
+- **SETTINGS** — system settings and model management
 
 
 ## App Preview
@@ -52,17 +53,17 @@ For users without Google Play access, install the apk from the [**latest release
 
 ## 🏁 Get Started in Minutes!
 
-1. **Check OS Requirement**: Android 12 and up, and iOS 17 and up.
-2.  **Download the App:**
-    - Install the app from [Google Play](https://play.google.com/store/apps/details?id=com.google.ai.edge.gallery) or [App Store](https://apps.apple.com/us/app/google-ai-edge-gallery/id6749645337).
-    - For users without Google Play access: install the apk from the [**latest release**](https://github.com/google-ai-edge/gallery/releases/latest/)
-3.  **Install & Explore:** For detailed installation instructions (including for corporate devices) and a full user guide, head over to our [**Project Wiki**](https://github.com/google-ai-edge/gallery/wiki)!
+1. **Check OS Requirement**: Android 12 and up.
+2.  **Build the App:** Check out the [development notes](DEVELOPMENT.md) for instructions about how to build CLU/BOX locally.
+3.  **Install & Explore:** Download a model, then interact via the CLU/BOX drawer modules.
 
 ## 🛠️ Technology Highlights
 
-*   **Google AI Edge:** Core APIs and tools for on-device ML.
+*   **AI Edge:** Core APIs and tools for on-device ML.
 *   **LiteRT:** Lightweight runtime for optimized model execution.
 *   **Hugging Face Integration:** For model discovery and download.
+*   **BrainBox:** Persistent knowledge graph with neuron synapses for RAG.
+*   **Skill System:** Extensible agent skills with JS execution.
 
 ## ⌨️ Development
 
@@ -81,7 +82,6 @@ Licensed under the Apache License, Version 2.0. See the [LICENSE](LICENSE) file 
 
 ## 🔗 Useful Links
 
-*   [**Project Wiki (Detailed Guides)**](https://github.com/google-ai-edge/gallery/wiki)
 *   [Hugging Face LiteRT Community](https://huggingface.co/litert-community)
 *   [LiteRT-LM](https://github.com/google-ai-edge/LiteRT-LM)
-*   [Google AI Edge Documentation](https://ai.google.dev/edge)
+*   [AI Edge Documentation](https://ai.google.dev/edge)

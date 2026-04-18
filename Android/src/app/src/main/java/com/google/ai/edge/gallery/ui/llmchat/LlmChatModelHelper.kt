@@ -45,6 +45,7 @@ import com.google.ai.edge.litertlm.MessageCallback
 import com.google.ai.edge.litertlm.SamplerConfig
 import com.google.ai.edge.litertlm.ToolProvider
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.util.concurrent.CancellationException
 import kotlinx.coroutines.CoroutineScope
 
@@ -103,6 +104,20 @@ object LlmChatModelHelper : LlmModelHelper {
     Log.d(TAG, "Preferred backend: $preferredBackend")
 
     val modelPath = model.getPath(context = context)
+
+    // Pre-ignition: verify model file exists and is readable before Engine init.
+    val modelFile = File(modelPath)
+    if (!modelFile.exists()) {
+      Log.e("CLU_CRASH_REPORT", "Model file not found at: $modelPath")
+      onDone("Diagnostic: Model file not found at $modelPath")
+      return
+    }
+    if (!modelFile.canRead()) {
+      Log.e("CLU_CRASH_REPORT", "Model file not readable at: $modelPath")
+      onDone("Diagnostic: Model file not readable at $modelPath")
+      return
+    }
+
     val engineConfig =
       EngineConfig(
         modelPath = modelPath,
@@ -142,8 +157,20 @@ object LlmChatModelHelper : LlmModelHelper {
         )
       ExperimentalFlags.enableConversationConstrainedDecoding = false
       model.instance = LlmModelInstance(engine = engine, conversation = conversation)
-    } catch (e: Exception) {
-      onDone(cleanUpMediapipeTaskErrorMessage(e.message ?: "Unknown error"))
+    } catch (e: Throwable) {
+      val errorMsg = e.stackTraceToString()
+      Log.e("CLU_CRASH_REPORT", "Engine initialization failed: $errorMsg")
+      // Explicit OOM recovery: release resources before reporting.
+      if (e is OutOfMemoryError) {
+        Log.e("CLU_CRASH_REPORT", "OOM during engine init — forcing GC and releasing model")
+        try { model.instance = null } catch (cleanup: Throwable) {
+          Log.e("CLU_CRASH_REPORT", "Cleanup after OOM failed: ${cleanup.message}")
+        }
+        System.gc()
+        onDone("OutOfMemoryError: Device does not have enough RAM for this model. Try selecting a smaller model from the model list.")
+      } else {
+        onDone(cleanUpMediapipeTaskErrorMessage(e.message ?: "Unknown error"))
+      }
       return
     }
     onDone("")
@@ -276,29 +303,40 @@ object LlmChatModelHelper : LlmModelHelper {
       contents.add(Content.Text(input))
     }
 
-    conversation.sendMessageAsync(
-      Contents.of(contents),
-      object : MessageCallback {
-        override fun onMessage(message: Message) {
-          resultListener(message.toString(), false, message.channels["thought"])
-        }
-
-        override fun onDone() {
-          resultListener("", true, null)
-        }
-
-        override fun onError(throwable: Throwable) {
-          if (throwable is CancellationException) {
-            Log.i(TAG, "The inference is cancelled.")
-            resultListener("", true, null)
-          } else {
-            Log.e(TAG, "onError", throwable)
-            onError("Error: ${throwable.message}")
+    try {
+      conversation.sendMessageAsync(
+        Contents.of(contents),
+        object : MessageCallback {
+          override fun onMessage(message: Message) {
+            resultListener(message.toString(), false, message.channels["thought"])
           }
-        }
-      },
-      extraContext ?: emptyMap(),
-    )
+
+          override fun onDone() {
+            resultListener("", true, null)
+          }
+
+          override fun onError(throwable: Throwable) {
+            if (throwable is CancellationException) {
+              Log.i(TAG, "The inference is cancelled.")
+              resultListener("", true, null)
+            } else {
+              Log.e("CLU_CRASH_REPORT", "Inference callback error: ${throwable.stackTraceToString()}")
+              onError("Error: ${throwable.message}")
+            }
+          }
+        },
+        extraContext ?: emptyMap(),
+      )
+    } catch (e: Throwable) {
+      Log.e("CLU_CRASH_REPORT", "sendMessageAsync failed: ${e.stackTraceToString()}")
+      if (e is OutOfMemoryError) {
+        Log.e("CLU_CRASH_REPORT", "OOM during inference — requesting GC")
+        System.gc()
+        onError("OutOfMemoryError during inference. Try a shorter prompt or restart the session.")
+      } else {
+        onError("Inference failed: ${e.message ?: "unknown error"}")
+      }
+    }
   }
 
   private fun Bitmap.toPngByteArray(): ByteArray {

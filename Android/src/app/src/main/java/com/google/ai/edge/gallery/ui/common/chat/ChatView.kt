@@ -109,6 +109,8 @@ fun ChatView(
   curSystemPrompt: String = "",
   onSystemPromptChanged: (String) -> Unit = {},
   sendMessageTrigger: SendMessageTrigger? = null,
+  onForgeNeuronClicked: (() -> Unit)? = null,
+  onChatHistoryClicked: (() -> Unit)? = null,
 ) {
   val uiState by viewModel.uiState.collectAsState()
   val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
@@ -199,6 +201,8 @@ fun ChatView(
         allowEditingSystemPrompt = allowEditingSystemPrompt,
         curSystemPrompt = curSystemPrompt,
         onSystemPromptChanged = onSystemPromptChanged,
+        onForgeNeuronClicked = onForgeNeuronClicked,
+        onChatHistoryClicked = onChatHistoryClicked,
       )
     },
   ) { innerPadding ->
@@ -241,6 +245,7 @@ fun ChatView(
                   showImageViewer = true
                 },
                 onSkillClicked = onSkillClicked,
+                onForgeNeuronClicked = onForgeNeuronClicked,
                 modifier = Modifier.weight(1f),
                 showStopButtonInInputWhenInProgress = showStopButtonInInputWhenInProgress,
                 showImagePicker = showImagePicker,

@@ -31,6 +31,14 @@ import com.google.ai.edge.gallery.proto.UserData
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 
+/** Holds custom UI color settings read from DataStore. Colors are ARGB int32. */
+data class CustomColorSettings(
+  val useCustomColors: Boolean,
+  val backgroundColorArgb: Int,
+  val textColorArgb: Int,
+  val accentColorArgb: Int,
+)
+
 // TODO(b/423700720): Change to async (suspend) functions
 interface DataStoreRepository {
   fun saveTextInputHistory(history: List<String>)
@@ -109,6 +117,12 @@ interface DataStoreRepository {
 
   /** Returns whether a promo with the specified ID has been viewed. */
   fun hasViewedPromo(promoId: String): Boolean
+
+  /** Saves custom UI colors. Colors are stored as ARGB int32. */
+  fun saveCustomColors(useCustom: Boolean, background: Int, text: Int, accent: Int)
+
+  /** Reads saved custom UI colors. Returns defaults when none have been saved. */
+  fun readCustomColors(): CustomColorSettings
 }
 
 /** Repository for managing data using Proto DataStore. */
@@ -431,6 +445,32 @@ class DefaultDataStoreRepository(
     return runBlocking {
       val settings = dataStore.data.first()
       settings.viewedPromoIdList.contains(promoId)
+    }
+  }
+
+  override fun saveCustomColors(useCustom: Boolean, background: Int, text: Int, accent: Int) {
+    runBlocking {
+      dataStore.updateData { settings ->
+        settings
+          .toBuilder()
+          .setUseCustomColors(useCustom)
+          .setCustomBackgroundColor(background)
+          .setCustomTextColor(text)
+          .setCustomAccentColor(accent)
+          .build()
+      }
+    }
+  }
+
+  override fun readCustomColors(): CustomColorSettings {
+    return runBlocking {
+      val settings = dataStore.data.first()
+      CustomColorSettings(
+        useCustomColors = settings.useCustomColors,
+        backgroundColorArgb = settings.customBackgroundColor,
+        textColorArgb = settings.customTextColor,
+        accentColorArgb = settings.customAccentColor,
+      )
     }
   }
 }

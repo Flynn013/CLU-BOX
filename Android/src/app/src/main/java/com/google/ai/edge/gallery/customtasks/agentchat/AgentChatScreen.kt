@@ -51,12 +51,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -87,6 +88,7 @@ import com.google.ai.edge.gallery.ui.common.chat.ChatMessageCollapsableProgressP
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageImage
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageInfo
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageText
+import com.google.ai.edge.gallery.ui.common.chat.ChatHistorySheet
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageType
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageWebView
 import com.google.ai.edge.gallery.ui.common.chat.ChatSide
@@ -97,6 +99,8 @@ import com.google.ai.edge.gallery.ui.llmchat.LlmChatScreen
 import com.google.ai.edge.gallery.ui.llmchat.LlmChatViewModel
 import com.google.ai.edge.gallery.ui.modelmanager.ModelInitializationStatusType
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
+import com.google.ai.edge.gallery.data.brainbox.GraphDatabase
+import com.google.ai.edge.gallery.ui.theme.neonGreen
 import com.google.ai.edge.litertlm.tool
 import java.lang.Exception
 import kotlin.coroutines.resume
@@ -121,6 +125,13 @@ fun AgentChatScreen(
   val context = LocalContext.current
   agentTools.context = context
   agentTools.skillManagerViewModel = skillManagerViewModel
+  agentTools.brainBoxDao = remember(context) { GraphDatabase.getInstance(context).brainBoxDao() }
+  agentTools.terminalSessionManager = remember(context) {
+    com.google.ai.edge.gallery.data.TerminalSessionManager(context)
+  }
+
+  // Initialise the app context once for the TokenMonitor file-writing path.
+  LaunchedEffect(Unit) { viewModel.initAppContext(context) }
   val density = LocalDensity.current
   val windowInfo = LocalWindowInfo.current
   val screenWidthDp = remember { with(density) { windowInfo.containerSize.width.toDp() } }
@@ -135,6 +146,10 @@ fun AgentChatScreen(
   var sendMessageTrigger by remember { mutableStateOf<SendMessageTrigger?>(null) }
   var showAlertForDisabledSkill by remember { mutableStateOf(false) }
   var disabledSkillName by remember { mutableStateOf("") }
+  var showChatHistorySheet by remember { mutableStateOf(false) }
+  var chatHistoryRefreshKey by remember { mutableStateOf(0) }
+  val chatHistoryDao = remember(context) { GraphDatabase.getInstance(context).chatHistoryDao() }
+  val chatHistoryScope = rememberCoroutineScope()
 
   LlmChatScreen(
     modelManagerViewModel = modelManagerViewModel,
@@ -186,6 +201,23 @@ fun AgentChatScreen(
       }
 
       updateProgressPanel(viewModel = viewModel, model = model, agentTools = agentTools)
+
+      // Phase 5: Autonomous Supervisor — if a pending task was queued via taskQueueUpdate,
+      // silently re-trigger inference with the next task description.
+      val pendingTask = agentTools.pendingTaskDescription
+      if (pendingTask != null) {
+        agentTools.pendingTaskDescription = null
+        Log.d(TAG, "Autonomous loop: re-triggering inference with task='$pendingTask'")
+        sendMessageTrigger = SendMessageTrigger(
+          model = model,
+          messages = listOf(
+            ChatMessageText(
+              content = "[AUTO-TASK] $pendingTask",
+              side = ChatSide.USER,
+            ),
+          ),
+        )
+      }
     },
     onResetSessionClickedOverride = { task, model ->
       resetSessionWithCurrentSkills(
@@ -369,21 +401,14 @@ fun AgentChatScreen(
                 style =
                   MaterialTheme.typography.headlineLarge.copy(
                     fontWeight = FontWeight.Medium,
-                    brush =
-                      Brush.linearGradient(colors = listOf(Color(0xFF85B1F8), Color(0xFF3174F1))),
+                    color = neonGreen,
                   ),
                 modifier = Modifier.padding(top = 12.dp, bottom = 16.dp),
               )
               Text(
                 buildAnnotatedString {
-                  append("Use specialized, high-order reasoning by loading different skills or ")
-                  append(
-                    buildTrackableUrlAnnotatedString(
-                      url = "https://github.com/google-ai-edge/gallery/tree/main/skills",
-                      linkText = "creating\u00A0your\u00A0own",
-                    )
-                  )
-                  append(".\n\nTry tapping a sample prompt below to see Agent Skills in action!")
+                  append("Your on-device AI assistant with skills, BrainBox memory, and offline reasoning.")
+                  append("\n\nTap a sample prompt below or start chatting!")
                 },
                 style =
                   MaterialTheme.typography.headlineSmall.copy(fontSize = 16.sp, lineHeight = 22.sp),
@@ -441,6 +466,7 @@ fun AgentChatScreen(
       }
     },
     sendMessageTrigger = sendMessageTrigger,
+    onChatHistoryClicked = { showChatHistorySheet = true },
   )
 
   if (showAskInfoDialog && currentAskInfoAction != null) {
@@ -498,6 +524,40 @@ fun AgentChatScreen(
         }
       },
     )
+  }
+
+  if (showChatHistorySheet) {
+    // Use key() to force recomposition when sessions are deleted
+    key(chatHistoryRefreshKey) {
+      ChatHistorySheet(
+        chatHistoryDao = chatHistoryDao,
+        onDismiss = { showChatHistorySheet = false },
+        onSessionSelected = { _, modelName ->
+          // Select the model and close sheet — the existing LaunchedEffect in ChatViewWrapper
+          // will automatically load the history for the newly selected model.
+          val matchingModel = task.models.find { it.name == modelName }
+          if (matchingModel != null) {
+            modelManagerViewModel.selectModel(model = matchingModel)
+          }
+          showChatHistorySheet = false
+        },
+        onSessionDeleted = { sessionTaskId, modelName ->
+          // Delete from database directly. If the model matches the current session,
+          // also clear in-memory state.
+          val matchingModel = task.models.find { it.name == modelName }
+          if (matchingModel != null) {
+            viewModel.wipeGrid(sessionTaskId, matchingModel)
+          } else {
+            // Model may have been removed from the task — delete DB rows directly.
+            chatHistoryScope.launch {
+              chatHistoryDao.deleteMessages(taskId = sessionTaskId, modelName = modelName)
+            }
+          }
+          // Bump refresh key to force LaunchedEffect in ChatHistorySheet to re-query
+          chatHistoryRefreshKey++
+        },
+      )
+    }
   }
 }
 

@@ -25,11 +25,14 @@ import com.google.ai.edge.gallery.common.CallJsSkillResultImage
 import com.google.ai.edge.gallery.common.CallJsSkillResultWebview
 import com.google.ai.edge.gallery.common.LOCAL_URL_BASE
 import com.google.ai.edge.gallery.common.SkillProgressAgentAction
+import com.google.ai.edge.gallery.data.brainbox.BrainBoxDao
+import com.google.ai.edge.gallery.data.brainbox.NeuronEntity
 import com.google.ai.edge.litertlm.Tool
 import com.google.ai.edge.litertlm.ToolParam
 import com.google.ai.edge.litertlm.ToolSet
 import com.squareup.moshi.JsonAdapter
 import com.squareup.moshi.Moshi
+import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
@@ -37,9 +40,91 @@ import kotlinx.coroutines.runBlocking
 
 private const val TAG = "AGAgentTools"
 
+/**
+ * Maximum character length for any single tool output field delivered to the LLM.
+ * Prevents runaway outputs (e.g. large file reads, verbose shell dumps) from
+ * consuming the context window. ~4096 chars ≈ 1000–1200 tokens for Gemma.
+ */
+private const val MAX_OUTPUT_CHARS = 4096
+
+/** Truncates [text] to [MAX_OUTPUT_CHARS] with a suffix marker when trimmed. */
+private fun capOutput(text: String): String {
+  return if (text.length > MAX_OUTPUT_CHARS) {
+    text.take(MAX_OUTPUT_CHARS) + "\n\n_[Output truncated to ${MAX_OUTPUT_CHARS} chars]_"
+  } else {
+    text
+  }
+}
+
+// ── Resolution Token Formatters ────────────────────────────────────
+// Every tool result map gets a "resolution" key that contains a strict,
+// formatted token telling the LLM the execution loop is officially over.
+// This prevents the model from re-invoking a tool on the next turn.
+
+/** Max chars shown per value when building the resolution summary. */
+private const val MAX_RESOLUTION_VALUE_LENGTH = 120
+
+/** Template for a successful resolution token. */
+private fun buildSuccessResolution(entries: Iterable<Map.Entry<String, *>>): String {
+  val output = entries.joinToString(", ") { "${it.key}=${it.value.toString().take(MAX_RESOLUTION_VALUE_LENGTH)}" }
+  return "[System: Tool executed successfully. Result: $output]"
+}
+
+/** Template for a failed resolution token. */
+private fun buildFailureResolution(error: String): String {
+  return "[System: Tool failed with error: $error. Task aborted. Await further instructions.]"
+}
+
+/** Injects a `resolution` field into a success result map. */
+private fun withSuccessResolution(result: Map<String, String>): Map<String, String> {
+  return result + ("resolution" to buildSuccessResolution(result.entries))
+}
+
+/** Injects a `resolution` field into a failure result map. */
+private fun withFailureResolution(result: Map<String, String>): Map<String, String> {
+  return result + ("resolution" to buildFailureResolution(result["error"] ?: "unknown error"))
+}
+
+/** Auto-selects success or failure resolution based on the `status` field. */
+private fun withResolution(result: Map<String, String>): Map<String, String> {
+  val status = result["status"]?.lowercase() ?: ""
+  return if (status == "failed" || result.containsKey("error")) {
+    withFailureResolution(result)
+  } else {
+    withSuccessResolution(result)
+  }
+}
+
+/** Overload for Map<String, Any> (used by runJs). */
+@Suppress("UNCHECKED_CAST")
+private fun withResolutionAny(result: Map<String, Any>): Map<String, Any> {
+  val status = (result["status"] as? String)?.lowercase() ?: ""
+  val error = result["error"] as? String
+  val resolution = if (status == "failed" || error != null) {
+    buildFailureResolution(error ?: "unknown error")
+  } else {
+    buildSuccessResolution(result.entries)
+  }
+  return result + ("resolution" to resolution)
+}
+
 class AgentTools() : ToolSet {
   lateinit var context: Context
   lateinit var skillManagerViewModel: SkillManagerViewModel
+  var brainBoxDao: BrainBoxDao? = null
+
+  /** Optional reference to the MSTR_CTRL terminal session for shell tools. */
+  var terminalSessionManager: com.google.ai.edge.gallery.data.TerminalSessionManager? = null
+
+  /** Lazily initialized FileBoxManager for file workspace operations. */
+  val fileBoxManager: com.google.ai.edge.gallery.data.FileBoxManager by lazy {
+    com.google.ai.edge.gallery.data.FileBoxManager(context)
+  }
+
+  /** Lazily initialized OracleManager for offline .zim search. */
+  val oracleManager: com.google.ai.edge.gallery.data.OracleManager by lazy {
+    com.google.ai.edge.gallery.data.OracleManager(context)
+  }
 
   private val _actionChannel = Channel<AgentAction>(Channel.UNLIMITED)
   val actionChannel: ReceiveChannel<AgentAction> = _actionChannel
@@ -51,7 +136,8 @@ class AgentTools() : ToolSet {
   fun loadSkill(
     @ToolParam(description = "The name of the skill to load.") skillName: String
   ): Map<String, String> {
-    return runBlocking(Dispatchers.Default) {
+    return withResolution(runBlocking(Dispatchers.IO) {
+      try {
       val skills = skillManagerViewModel.getSelectedSkills()
       val skill = skills.find { it.name == skillName.trim() }
       val skillContent =
@@ -81,7 +167,11 @@ class AgentTools() : ToolSet {
       }
 
       mapOf("skill_name" to skillName, "skill_instructions" to skillContent)
-    }
+      } catch (e: Exception) {
+        Log.e(TAG, "loadSkill: unexpected error", e)
+        mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
+      }
+    })
   }
 
   /** Call JS skill */
@@ -95,7 +185,8 @@ class AgentTools() : ToolSet {
     )
     data: String,
   ): Map<String, Any> {
-    return runBlocking(Dispatchers.Default) {
+    return withResolutionAny(runBlocking(Dispatchers.IO) {
+      try {
       Log.d(
         TAG,
         "runJS tool called with:" +
@@ -215,7 +306,11 @@ class AgentTools() : ToolSet {
         Log.d(TAG, "Result: ${resultJson.result}")
         mapOf("result" to (resultJson.result ?: ""), "status" to "succeeded")
       }
-    }
+      } catch (e: Exception) {
+        Log.e(TAG, "runJs: unexpected error", e)
+        mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed" as Any)
+      }
+    })
   }
 
   @Tool(
@@ -229,7 +324,8 @@ class AgentTools() : ToolSet {
     )
     parameters: String,
   ): Map<String, String> {
-    return runBlocking(Dispatchers.Default) {
+    return withResolution(runBlocking(Dispatchers.IO) {
+      try {
       Log.d(TAG, "Run intent. Intent: '$intent', parameters: '$parameters'")
       _actionChannel.send(
         SkillProgressAgentAction(
@@ -252,11 +348,1030 @@ class AgentTools() : ToolSet {
           "result" to "failed",
         )
       }
-    }
+      } catch (e: Exception) {
+        Log.e(TAG, "runIntent: unexpected error", e)
+        mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
+      }
+    })
+  }
+
+  /**
+   * Query the BRAIN_BOX knowledge graph.
+   *
+   * Returns all neurons whose label or content contains [query] (case-insensitive). If [query] is
+   * empty, all neurons are returned.
+   */
+  @Tool(description = "Searches the CLU/BOX BrainBox knowledge graph for neurons matching a query. Returns label, type, and content for each matching neuron.")
+  fun queryBrain(
+    @ToolParam(description = "The search term. Pass an empty string to retrieve all neurons.") query: String,
+  ): Map<String, String> {
+    return withResolution(runBlocking(Dispatchers.IO) {
+      try {
+      val dao = brainBoxDao
+      if (dao == null) {
+        Log.w(TAG, "queryBrain: BrainBoxDao not wired")
+        return@runBlocking mapOf("error" to "BrainBox not available", "status" to "failed")
+      }
+      val all = dao.getAllNeurons()
+      val matched = if (query.isBlank()) all else {
+        val q = query.lowercase()
+        all.filter { it.label.lowercase().contains(q) || it.content.lowercase().contains(q) }
+      }
+      val summary = matched.joinToString(separator = "\n") { n ->
+        "[${n.type}] ${n.label}: ${n.content}"
+      }.ifEmpty { "(no neurons found)" }
+      Log.d(TAG, "queryBrain query='$query' returned ${matched.size} neurons")
+      mapOf("result" to summary, "count" to matched.size.toString(), "status" to "succeeded")
+      } catch (e: Exception) {
+        Log.e(TAG, "queryBrain: unexpected error", e)
+        mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
+      }
+    })
+  }
+
+  /**
+   * Save a new neuron (memory) to the BRAIN_BOX knowledge graph.
+   *
+   * If a neuron with the same [label] already exists it is overwritten.
+   */
+  @Tool(description = "Saves a neuron to the CLU/BOX BrainBox knowledge graph. Use this to remember facts, preferences, context, or any information the user wants stored persistently.")
+  fun saveBrainNeuron(
+    @ToolParam(description = "A short, unique label identifying this memory (e.g. 'User preference: dark mode').") label: String,
+    @ToolParam(description = "The category or type of memory (e.g. 'preference', 'fact', 'context', 'task').") type: String,
+    @ToolParam(description = "The full content to store.") content: String,
+  ): Map<String, String> {
+    return withResolution(runBlocking(Dispatchers.IO) {
+      try {
+      val dao = brainBoxDao
+      if (dao == null) {
+        Log.w(TAG, "saveBrainNeuron: BrainBoxDao not wired")
+        return@runBlocking mapOf("error" to "BrainBox not available", "status" to "failed")
+      }
+      // Reuse the existing ID if a neuron with this label already exists, so it is overwritten.
+      val existing = dao.getAllNeurons().find { it.label.equals(label.trim(), ignoreCase = true) }
+      val neuron = NeuronEntity(
+        id = existing?.id ?: UUID.randomUUID().toString(),
+        label = label.trim(),
+        type = type.trim(),
+        content = content.trim(),
+      )
+      dao.insertNeuron(neuron)
+      Log.d(TAG, "saveBrainNeuron saved neuron label='$label' (${if (existing != null) "updated" else "created"})")
+      mapOf("label" to label, "type" to type, "status" to "succeeded")
+      } catch (e: Exception) {
+        Log.e(TAG, "saveBrainNeuron: unexpected error", e)
+        mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
+      }
+    })
+  }
+
+  // =========================================================================
+  // WORKSPACE_MAP — JSON file/folder tree for AI orientation
+  // =========================================================================
+
+  /**
+   * Scans the `clu_file_box` sandbox and returns a clean JSON representation
+   * of the current file/folder tree. Used by the AI to orient itself before
+   * reading, writing, or navigating the workspace.
+   */
+  @Tool(
+    description = "Scans the clu_file_box workspace and returns a JSON tree of all files " +
+      "and folders. Use this to orient yourself before reading or writing files."
+  )
+  fun workspaceMap(): Map<String, String> {
+    return withResolution(runBlocking(Dispatchers.IO) {
+      try {
+      Log.d(TAG, "workspaceMap: scanning workspace")
+      val json = fileBoxManager.workspaceMapJson()
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = "Workspace_Map: scanned file tree",
+          inProgress = false,
+          addItemTitle = "Workspace_Map",
+          addItemDescription = "Returned workspace JSON tree",
+        )
+      )
+
+      mapOf(
+        "workspace_tree" to json,
+        "status" to "succeeded",
+      )
+      } catch (e: Exception) {
+        Log.e(TAG, "workspaceMap: unexpected error", e)
+        mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
+      }
+    })
+  }
+
+  // =========================================================================
+  // FILE_BOX — Sandboxed code workspace
+  // =========================================================================
+
+  /**
+   * Write a text/code file to the CLU/BOX FILE_BOX workspace.
+   *
+   * Nested folders are created automatically — include them in the file_path
+   * (e.g. "new_project/backend/src/api.js").
+   */
+  @Tool(
+    description = "Writes a text or code file to the CLU/BOX FILE_BOX workspace. " +
+      "You can create nested folders automatically by including them in the file_path " +
+      "(e.g. 'new_project/folder/file.txt'). Only text-based extensions are allowed " +
+      "(e.g. .txt, .kt, .js, .json, .md, .html, .py, .ts, .css, .xml, .yaml)."
+  )
+  fun fileBoxWrite(
+    @ToolParam(description = "Relative path inside FILE_BOX (e.g. 'my_app/src/main.kt'). Nested directories are auto-created.")
+    file_path: String,
+    @ToolParam(description = "The full text/code content to write to the file.")
+    content: String,
+  ): Map<String, String> {
+    return withResolution(runBlocking(Dispatchers.IO) {
+      try {
+      Log.d(TAG, "fileBoxWrite: path='$file_path' content=${content.length} chars")
+      val mgr = fileBoxManager
+
+      if (!mgr.isAllowedExtension(file_path)) {
+        _actionChannel.send(
+          SkillProgressAgentAction(
+            label = "FILE_BOX: rejected '$file_path' (extension not allowed)",
+            inProgress = false,
+          )
+        )
+        return@runBlocking mapOf(
+          "error" to "Extension not allowed. Only text/code files are permitted.",
+          "status" to "failed",
+        )
+      }
+
+      val isNew = !java.io.File(mgr.root, file_path).exists()
+      val ok = mgr.writeCodeFile(file_path, content)
+
+      if (!ok) {
+        return@runBlocking mapOf("error" to "Failed to write file", "status" to "failed")
+      }
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = "FILE_BOX: wrote '$file_path'",
+          inProgress = false,
+          addItemTitle = "FILE_BOX Write",
+          addItemDescription = "Path: $file_path (${content.length} chars)",
+        )
+      )
+
+      // Phase 4: BrainBox telemetry — log new file creations as neurons.
+      if (isNew) {
+        val dao = brainBoxDao
+        if (dao != null) {
+          val neuron = NeuronEntity(
+            id = UUID.randomUUID().toString(),
+            label = file_path,
+            type = "File_Creation_Log",
+            content = content,
+          )
+          dao.insertNeuron(neuron)
+          Log.d(TAG, "fileBoxWrite: logged new file creation to BrainBox: $file_path")
+        }
+      }
+
+      // ── Phase 5: Auto-Validator Interceptor (Syntax Gatekeeper) ──
+      // After saving, inspect the file extension and run a syntax check.
+      // If validation fails, return the error to force the LLM to debug.
+      val ext = file_path.substringAfterLast('.', "").lowercase()
+      val absolutePath = java.io.File(mgr.root, file_path).absolutePath
+      val tsm = terminalSessionManager
+
+      // Escape the file path for safe shell interpolation (replace ' with '\'').
+      val escapedPath = absolutePath.replace("'", "'\\''")
+      val validationCmd: String? = when (ext) {
+        "py" -> "python -m py_compile '$escapedPath'"
+        "js" -> "node --check '$escapedPath'"
+        else -> null
+      }
+
+      if (validationCmd != null && tsm != null) {
+        Log.d(TAG, "fileBoxWrite: running auto-validation: $validationCmd")
+        val (exitCode, validationOutput) = tsm.executeCommandWithExitCode(validationCmd)
+        if (exitCode != 0) {
+          val errMsg = validationOutput.ifEmpty { "Unknown syntax error" }
+          Log.w(TAG, "fileBoxWrite: validation FAILED for '$file_path': $errMsg")
+
+          // Delete the rejected file to keep the sandbox clean.
+          mgr.deleteFile(file_path)
+          Log.d(TAG, "fileBoxWrite: deleted rejected file '$file_path'")
+
+          _actionChannel.send(
+            SkillProgressAgentAction(
+              label = "FILE_BOX: syntax error in '$file_path' — file deleted",
+              inProgress = false,
+              addItemTitle = "Auto-Validator",
+              addItemDescription = "REJECTED & DELETED: $errMsg",
+            )
+          )
+          return@runBlocking mapOf(
+            "file_path" to file_path,
+            "status" to "rejected_and_deleted",
+            "error" to "FILE REJECTED. Syntax Error: $errMsg",
+          )
+        }
+        Log.d(TAG, "fileBoxWrite: validation PASSED for '$file_path'")
+      }
+
+      mapOf(
+        "file_path" to file_path,
+        "status" to "succeeded",
+        "message" to if (validationCmd != null) "File written and validated successfully" else "File written successfully",
+      )
+      } catch (e: Exception) {
+        Log.e(TAG, "fileBoxWrite: unexpected error", e)
+        mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
+      }
+    })
+  }
+
+  /**
+   * Read a file from the CLU/BOX FILE_BOX workspace.
+   */
+  @Tool(
+    description = "Reads a text or code file from the CLU/BOX FILE_BOX workspace. " +
+      "Returns the file content as a string."
+  )
+  fun fileBoxRead(
+    @ToolParam(description = "Relative path of the file to read inside FILE_BOX (e.g. 'my_app/src/main.kt').")
+    file_path: String,
+  ): Map<String, String> {
+    return withResolution(runBlocking(Dispatchers.IO) {
+      try {
+      Log.d(TAG, "fileBoxRead: path='$file_path'")
+      val content = fileBoxManager.readCodeFile(file_path)
+
+      if (content == null) {
+        _actionChannel.send(
+          SkillProgressAgentAction(
+            label = "FILE_BOX: file not found '$file_path'",
+            inProgress = false,
+          )
+        )
+        return@runBlocking mapOf(
+          "error" to "File not found or is not readable: $file_path",
+          "status" to "failed",
+        )
+      }
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = "FILE_BOX: read '$file_path'",
+          inProgress = false,
+          addItemTitle = "FILE_BOX Read",
+          addItemDescription = "Path: $file_path (${content.length} chars)",
+        )
+      )
+
+      mapOf("file_path" to file_path, "content" to capOutput(content), "status" to "succeeded")
+      } catch (e: Exception) {
+        Log.e(TAG, "fileBoxRead: unexpected error", e)
+        mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
+      }
+    })
+  }
+
+  // =========================================================================
+  // Task Queue — Autonomous supervisor loop
+  // =========================================================================
+
+  /** Volatile flag: when a pending task is queued, the ViewModel can read it. */
+  @Volatile var pendingTaskDescription: String? = null
+
+  /**
+   * Updates the autonomous task queue.  When [status] is "pending", the ViewModel's
+   * inference loop will automatically re-invoke inference with [next_task_description]
+   * as a system-level instruction, creating a continuous work loop until the task queue
+   * is empty (status = "complete").
+   */
+  @Tool(
+    description = "Updates the autonomous task queue. Use status='pending' and provide " +
+      "a next_task_description to continue working on a multi-step project without user " +
+      "prompting. Use status='complete' when all tasks are finished."
+  )
+  fun taskQueueUpdate(
+    @ToolParam(description = "Description of the next task to perform. Only used when status is 'pending'.")
+    next_task_description: String,
+    @ToolParam(description = "Either 'pending' (more work to do) or 'complete' (all tasks finished).")
+    status: String,
+  ): Map<String, String> {
+    return withResolution(runBlocking(Dispatchers.IO) {
+      try {
+      val normalizedStatus = status.trim().lowercase()
+      Log.d(TAG, "taskQueueUpdate: status='$normalizedStatus', desc='$next_task_description'")
+
+      when (normalizedStatus) {
+        "pending" -> {
+          pendingTaskDescription = next_task_description.trim()
+          _actionChannel.send(
+            SkillProgressAgentAction(
+              label = "Task queued: ${next_task_description.take(60)}…",
+              inProgress = true,
+              addItemTitle = "Task Queue: Pending",
+              addItemDescription = next_task_description,
+            )
+          )
+          mapOf("status" to "pending", "queued_task" to next_task_description)
+        }
+        "complete" -> {
+          pendingTaskDescription = null
+          _actionChannel.send(
+            SkillProgressAgentAction(
+              label = "Task queue complete ✓",
+              inProgress = false,
+              addItemTitle = "Task Queue: Complete",
+              addItemDescription = "All tasks finished.",
+            )
+          )
+          mapOf("status" to "complete")
+        }
+        else -> {
+          mapOf("error" to "Invalid status '$status'. Use 'pending' or 'complete'.", "status" to "failed")
+        }
+      }
+      } catch (e: Exception) {
+        Log.e(TAG, "taskQueueUpdate: unexpected error", e)
+        mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
+      }
+    })
+  }
+
+  // =========================================================================
+  // Planner-Worker — Dual-agent autonomous project generation
+  // =========================================================================
+
+  /** Blueprint file path inside FILE_BOX. */
+  private val BLUEPRINT_PATH = "blueprint.md"
+
+  /**
+   * Architect_Init: the planning phase of the dual-agent workflow.
+   *
+   * The LLM calls this once to commit a project blueprint. The callback:
+   * 1. Writes [blueprint_markdown] to `clu_file_box/blueprint.md`.
+   * 2. Queues a pending task that instructs the worker to begin executing
+   *    the first pending file from the blueprint.
+   */
+  @Tool(
+    description = "Architect phase: commits a project blueprint. Call this ONCE at the start of " +
+      "a multi-file project. Provide the full project goal and a markdown blueprint that lists " +
+      "every file to create with its path and status (PENDING/DONE). After this call the worker " +
+      "phase begins automatically."
+  )
+  fun architectInit(
+    @ToolParam(description = "High-level description of the project goal.")
+    project_goal: String,
+    @ToolParam(description = "Full markdown blueprint listing every file to generate. " +
+      "Each file entry should be on its own line in the format: '- [ ] path/to/file.ext' " +
+      "(PENDING) or '- [x] path/to/file.ext' (DONE).")
+    blueprint_markdown: String,
+  ): Map<String, String> {
+    return withResolution(runBlocking(Dispatchers.IO) {
+      try {
+      Log.d(TAG, "architectInit: goal='${project_goal.take(80)}', blueprint=${blueprint_markdown.length} chars")
+
+      // Write the blueprint to FILE_BOX.
+      val mgr = fileBoxManager
+      val written = mgr.writeCodeFile(BLUEPRINT_PATH, blueprint_markdown)
+      if (!written) {
+        return@runBlocking mapOf(
+          "error" to "Failed to write blueprint.md",
+          "status" to "failed",
+        )
+      }
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = "Architect: blueprint committed (${blueprint_markdown.lines().size} lines)",
+          inProgress = true,
+          addItemTitle = "Architect_Init",
+          addItemDescription = "Goal: ${project_goal.take(120)}\nBlueprint written to $BLUEPRINT_PATH",
+        )
+      )
+
+      // Log goal to BrainBox.
+      val dao = brainBoxDao
+      if (dao != null) {
+        dao.insertNeuron(
+          NeuronEntity(
+            id = UUID.randomUUID().toString(),
+            label = "Project_Goal",
+            type = "Architect",
+            content = project_goal,
+          )
+        )
+      }
+
+      // Auto-trigger the worker phase.
+      pendingTaskDescription =
+        "WORKER PHASE: Read blueprint.md from FILE_BOX using fileBoxRead(file_path='blueprint.md'). " +
+        "Find the first file marked as '- [ ]' (PENDING). Generate its full content and call " +
+        "workerExecute with the target_file_path, code_content, and is_project_finished=false. " +
+        "Continue until all files are DONE, then call workerExecute with is_project_finished=true."
+
+      mapOf(
+        "blueprint_path" to BLUEPRINT_PATH,
+        "project_goal" to project_goal,
+        "status" to "succeeded",
+      )
+      } catch (e: Exception) {
+        Log.e(TAG, "architectInit: unexpected error", e)
+        pendingTaskDescription = null  // Circuit breaker: clear queue on fatal error.
+        mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
+      }
+    })
+  }
+
+  /**
+   * Worker_Execute: the execution phase of the dual-agent workflow.
+   *
+   * Called once per file. The callback:
+   * 1. Writes [code_content] to [target_file_path] via FileBoxManager.
+   * 2. Reads blueprint.md, marks the target file as DONE.
+   * 3. If [is_project_finished] is false, queues the next pending file.
+   */
+  @Tool(
+    description = "Worker phase: writes a single file and updates the blueprint. Call this for " +
+      "each file in the project. Set is_project_finished to true only when every file in the " +
+      "blueprint is DONE."
+  )
+  fun workerExecute(
+    @ToolParam(description = "Relative file path to write (e.g. 'my_app/src/main.kt').")
+    target_file_path: String,
+    @ToolParam(description = "The full text/code content for the file.")
+    code_content: String,
+    @ToolParam(description = "Set to 'true' when ALL files in the blueprint are complete, 'false' otherwise.")
+    is_project_finished: String,
+  ): Map<String, String> {
+    return withResolution(runBlocking(Dispatchers.IO) {
+      try {
+      val finished = is_project_finished.trim().lowercase() == "true"
+      Log.d(TAG, "workerExecute: path='$target_file_path', finished=$finished, content=${code_content.length} chars")
+
+      // 1. Write the file via FileBoxManager.
+      val mgr = fileBoxManager
+      if (!mgr.isAllowedExtension(target_file_path)) {
+        return@runBlocking mapOf(
+          "error" to "Extension not allowed for '$target_file_path'.",
+          "status" to "failed",
+        )
+      }
+      val isNew = !java.io.File(mgr.root, target_file_path).exists()
+      val ok = mgr.writeCodeFile(target_file_path, code_content)
+      if (!ok) {
+        return@runBlocking mapOf("error" to "Failed to write $target_file_path", "status" to "failed")
+      }
+
+      // BrainBox telemetry for new files.
+      if (isNew) {
+        brainBoxDao?.insertNeuron(
+          NeuronEntity(
+            id = UUID.randomUUID().toString(),
+            label = target_file_path,
+            type = "File_Creation_Log",
+            content = code_content,
+          )
+        )
+      }
+
+      // 2. Read and update blueprint.md — mark target file as DONE.
+      val blueprint = mgr.readCodeFile(BLUEPRINT_PATH)
+      if (blueprint != null) {
+        // Replace the first occurrence of "- [ ] target_file_path" with "- [x] target_file_path"
+        val updatedBlueprint = blueprint.replaceFirst(
+          "- [ ] $target_file_path",
+          "- [x] $target_file_path",
+        )
+        mgr.writeCodeFile(BLUEPRINT_PATH, updatedBlueprint)
+      }
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = if (finished) "Worker: project complete ✓" else "Worker: wrote '$target_file_path'",
+          inProgress = !finished,
+          addItemTitle = "Worker_Execute",
+          addItemDescription = "Path: $target_file_path (${code_content.length} chars)" +
+            if (finished) "\n✓ All files complete." else "",
+        )
+      )
+
+      // 3. Queue next iteration or signal completion.
+      if (!finished) {
+        pendingTaskDescription =
+          "WORKER PHASE: Read the updated blueprint.md using fileBoxRead(file_path='blueprint.md'). " +
+          "Find the next file marked as '- [ ]' (PENDING). Generate its full content and call " +
+          "workerExecute with the target_file_path, code_content, and is_project_finished set " +
+          "appropriately (true only if this is the last file)."
+      } else {
+        pendingTaskDescription = null
+      }
+
+      mapOf(
+        "file_path" to target_file_path,
+        "is_project_finished" to finished.toString(),
+        "status" to "succeeded",
+      )
+      } catch (e: Exception) {
+        Log.e(TAG, "workerExecute: unexpected error", e)
+        pendingTaskDescription = null  // Circuit breaker: clear queue on fatal error.
+        mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
+      }
+    })
+  }
+
+  // =========================================================================
+  // SHELL_EXECUTE — Run terminal commands invisibly and return raw output
+  // =========================================================================
+
+  /**
+   * Executes a shell command and returns the combined stdout + stderr output.
+   * Pipes through [TerminalSessionManager] when available (invisible mode —
+   * output is NOT printed to the MstrCtrlScreen). Falls back to the standalone
+   * [executeCommand] if the terminal session is not wired.
+   *
+   * A strict 10-second timeout is enforced.
+   */
+  @Tool(
+    description = "Use this to execute terminal commands, run test scripts, or check file states. " +
+      "You will receive the raw terminal output. Use this to verify your code works or to debug " +
+      "stack traces before moving to the next task."
+  )
+  fun shellExecute(
+    @ToolParam(description = "The shell command to execute (e.g. 'ls -la', 'cat file.txt', 'python3 test.py').")
+    command: String,
+  ): Map<String, String> {
+    return withResolution(runBlocking(Dispatchers.IO) {
+      try {
+      Log.d(TAG, "shellExecute: command='$command'")
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = "Shell: executing command…",
+          inProgress = true,
+          addItemTitle = "Shell_Execute",
+          addItemDescription = "$ $command",
+        )
+      )
+
+      val tsm = terminalSessionManager
+      val output = if (tsm != null) {
+        tsm.sendCommand(command, visible = false)
+      } else {
+        com.google.ai.edge.gallery.data.executeCommand(command)
+      }
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = "Shell: command finished",
+          inProgress = false,
+          addItemTitle = "Shell_Execute",
+          addItemDescription = "$ $command\n${output.take(200)}${if (output.length > 200) "…" else ""}",
+        )
+      )
+
+      val status = when {
+        output == "TIMEOUT ERROR" -> "timeout"
+        output.startsWith("ERROR:") -> "error"
+        else -> "succeeded"
+      }
+
+      mapOf(
+        "command" to command,
+        "output" to capOutput(output),
+        "status" to status,
+      )
+      } catch (e: Exception) {
+        Log.e(TAG, "shellExecute: unexpected error", e)
+        mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
+      }
+    })
+  }
+
+  // =========================================================================
+  // COMMAND_OVERRIDE — Run terminal commands visibly on MstrCtrlScreen
+  // =========================================================================
+
+  /**
+   * Same as [shellExecute] but explicitly prints the AI's input and output
+   * visibly onto the MstrCtrlScreen so the user can watch the AI work in
+   * real time.
+   */
+  @Tool(
+    description = "Execute a terminal command and display both input and output visibly on the " +
+      "MSTR_CTRL terminal screen so the user can watch in real time. Use this when you want the " +
+      "user to see what you are doing. You will also receive the raw output."
+  )
+  fun commandOverride(
+    @ToolParam(description = "The shell command to execute visibly (e.g. 'git status', 'npm test').")
+    command: String,
+  ): Map<String, String> {
+    return withResolution(runBlocking(Dispatchers.IO) {
+      try {
+      Log.d(TAG, "commandOverride: command='$command'")
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = "MSTR_CTRL: running visible command…",
+          inProgress = true,
+          addItemTitle = "Command_Override",
+          addItemDescription = "$ $command",
+        )
+      )
+
+      val tsm = terminalSessionManager
+      val output = if (tsm != null) {
+        tsm.sendCommand(command, visible = true)
+      } else {
+        // Fallback: run silently if terminal session is not available.
+        com.google.ai.edge.gallery.data.executeCommand(command)
+      }
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = "MSTR_CTRL: command complete",
+          inProgress = false,
+          addItemTitle = "Command_Override",
+          addItemDescription = "$ $command\n${output.take(200)}${if (output.length > 200) "…" else ""}",
+        )
+      )
+
+      val status = when {
+        output == "TIMEOUT ERROR" -> "timeout"
+        output.startsWith("ERROR:") -> "error"
+        else -> "succeeded"
+      }
+
+      mapOf(
+        "command" to command,
+        "output" to capOutput(output),
+        "status" to status,
+      )
+      } catch (e: Exception) {
+        Log.e(TAG, "commandOverride: unexpected error", e)
+        mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
+      }
+    })
+  }
+
+  // =========================================================================
+  // OPERATOR_HALT — Suspend the autonomous loop for human review
+  // =========================================================================
+
+  /**
+   * Immediately suspends the ChatViewModel's autonomous worker loop and
+   * outputs the [reason] to the user UI. Used when the AI completes a
+   * major milestone or hits a wall and requires the Operator (Flynn) to
+   * review the codebase or issue the next directive.
+   */
+  @Tool(
+    description = "Immediately stops the autonomous work loop and presents the reason " +
+      "to the user. Use this when you complete a major milestone, need clarification, " +
+      "or hit a wall that requires human review."
+  )
+  fun operatorHalt(
+    @ToolParam(description = "A clear explanation of why you are stopping (milestone reached, blocker, need user decision, etc.).")
+    reason: String,
+  ): Map<String, String> {
+    return withResolution(runBlocking(Dispatchers.IO) {
+      try {
+      Log.d(TAG, "operatorHalt: reason='$reason'")
+
+      // Clear any pending task to break the autonomous loop.
+      pendingTaskDescription = null
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = "⛔ OPERATOR HALT",
+          inProgress = false,
+          addItemTitle = "Operator_Halt",
+          addItemDescription = reason,
+        )
+      )
+
+      mapOf(
+        "reason" to reason,
+        "status" to "halted",
+      )
+      } catch (e: Exception) {
+        Log.e(TAG, "operatorHalt: unexpected error", e)
+        mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
+      }
+    })
+  }
+
+  // =========================================================================
+  // ORACLE_SEARCH — Offline .zim archive search (token-capped)
+  // =========================================================================
+
+  /**
+   * Searches offline .zim archives (StackOverflow, docs) and returns
+   * token-optimized Markdown results. Capped to ~1500 tokens to keep
+   * the LLM context lean.
+   */
+  @Tool(
+    description = "Search offline documentation archives (.zim) for answers to technical " +
+      "questions. Returns token-optimized Markdown results. Use this to look up APIs, " +
+      "error messages, or programming concepts without internet access."
+  )
+  fun oracleSearch(
+    @ToolParam(description = "The search query (e.g. 'Python list comprehension', 'Kotlin coroutines', 'git rebase').")
+    query: String,
+  ): Map<String, String> {
+    return withResolution(runBlocking(Dispatchers.IO) {
+      try {
+      Log.d(TAG, "oracleSearch: query='$query'")
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = "Oracle: searching '$query'…",
+          inProgress = true,
+          addItemTitle = "Oracle_Search",
+          addItemDescription = "Query: $query",
+        )
+      )
+
+      val result = oracleManager.search(query)
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = "Oracle: search complete",
+          inProgress = false,
+          addItemTitle = "Oracle_Search",
+          addItemDescription = "Query: $query\n${result.take(200)}${if (result.length > 200) "…" else ""}",
+        )
+      )
+
+      mapOf(
+        "query" to query,
+        "result" to capOutput(result),
+        "status" to "succeeded",
+      )
+      } catch (e: Exception) {
+        Log.e(TAG, "oracleSearch: unexpected error", e)
+        mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
+      }
+    })
+  }
+
+  // =========================================================================
+  // GIT_DIFF_READ — Context-saving unified diff output
+  // =========================================================================
+
+  /**
+   * Returns the output of `git diff --unified=0` for a specific file path
+   * (or the entire workspace if path is empty). Uses minimal context to
+   * save token space.
+   */
+  @Tool(
+    description = "Returns the git diff for a file or the entire workspace. Uses " +
+      "--unified=0 to minimize context and save tokens. Use this to review code changes."
+  )
+  fun gitDiffRead(
+    @ToolParam(description = "Relative file path to diff (e.g. 'src/main.py'). Pass empty string for full workspace diff.")
+    path: String,
+  ): Map<String, String> {
+    return withResolution(runBlocking(Dispatchers.IO) {
+      try {
+      Log.d(TAG, "gitDiffRead: path='$path'")
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = "Git Diff: reading changes…",
+          inProgress = true,
+          addItemTitle = "Git_Diff_Read",
+          addItemDescription = "Path: ${path.ifEmpty { "(full workspace)" }}",
+        )
+      )
+
+      val tsm = terminalSessionManager
+      val cmd = if (path.isBlank()) {
+        "git diff --unified=0 2>&1"
+      } else {
+        val escapedPath = path.replace("'", "'\\''")
+        "git diff --unified=0 -- '$escapedPath' 2>&1"
+      }
+
+      val output = if (tsm != null) {
+        tsm.sendCommand(cmd, visible = false)
+      } else {
+        com.google.ai.edge.gallery.data.executeCommand(cmd)
+      }
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = "Git Diff: done",
+          inProgress = false,
+          addItemTitle = "Git_Diff_Read",
+          addItemDescription = "Path: ${path.ifEmpty { "(full workspace)" }}\n${output.take(200)}${if (output.length > 200) "…" else ""}",
+        )
+      )
+
+      val status = when {
+        output.contains("not a git repository") -> "not_git"
+        output == "TIMEOUT ERROR" -> "timeout"
+        output.startsWith("ERROR:") -> "error"
+        output.isBlank() || output == "(no output)" -> "no_changes"
+        else -> "succeeded"
+      }
+
+      mapOf(
+        "path" to path,
+        "diff" to capOutput(output),
+        "status" to status,
+      )
+      } catch (e: Exception) {
+        Log.e(TAG, "gitDiffRead: unexpected error", e)
+        mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
+      }
+    })
   }
 
   fun sendAgentAction(action: AgentAction) {
-    runBlocking(Dispatchers.Default) { _actionChannel.send(action) }
+    runBlocking(Dispatchers.IO) { _actionChannel.send(action) }
+  }
+
+  // =========================================================================
+  // WORKSPACE_SYNC_SNAPSHOT — Unified editor + terminal state for the AI
+  // =========================================================================
+
+  /**
+   * Returns a JSON snapshot unifying the FILE_BOX editor state and the
+   * MSTR_CTRL terminal state, allowing the AI to correlate terminal errors
+   * with the exact file and line it is looking at.
+   */
+  @Tool(
+    description = "Returns a unified snapshot of the FILE_BOX editor and MSTR_CTRL terminal " +
+      "state. Use this to correlate terminal errors with the file/line currently open in the " +
+      "editor. Returns current_file, cursor_line, terminal_cwd, and terminal_last_output."
+  )
+  fun workspaceSyncSnapshot(): Map<String, String> {
+    return withResolution(runBlocking(Dispatchers.IO) {
+      try {
+      Log.d(TAG, "workspaceSyncSnapshot")
+
+      val mgr = fileBoxManager
+      val tsm = terminalSessionManager
+
+      val currentFile = mgr.currentFilePath.value ?: "(none)"
+      val cursorLine = mgr.cursorLine.value.toString()
+      val terminalCwd = tsm?.sandboxRoot?.absolutePath ?: "(unknown)"
+
+      // Grab last non-empty output lines from the terminal buffer.
+      val lastOutput = tsm?.outputLines?.value
+        ?.takeLast(5)
+        ?.joinToString("\n") { it.text }
+        ?.ifEmpty { "(no recent output)" }
+        ?: "(terminal not active)"
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = "Sync Snapshot: $currentFile:$cursorLine",
+          inProgress = false,
+          addItemTitle = "Workspace_Sync_Snapshot",
+          addItemDescription = "File: $currentFile, Line: $cursorLine",
+        )
+      )
+
+      mapOf(
+        "current_file" to currentFile,
+        "cursor_line" to cursorLine,
+        "terminal_cwd" to terminalCwd,
+        "terminal_last_output" to capOutput(lastOutput),
+        "status" to "succeeded",
+      )
+      } catch (e: Exception) {
+        Log.e(TAG, "workspaceSyncSnapshot: unexpected error", e)
+        mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
+      }
+    })
+  }
+
+  // =========================================================================
+  // EDITOR_TERMINAL_PIPE — Run the current editor file in the terminal
+  // =========================================================================
+
+  /**
+   * High-speed execution loop: pipes the file currently open in the FILE_BOX
+   * editor directly into the MSTR_CTRL shell. Captures stdout/stderr and, if
+   * an error occurs, extracts the offending line number so the AI can refocus.
+   */
+  @Tool(
+    description = "Pipes the file currently open in FILE_BOX into the MSTR_CTRL terminal " +
+      "for execution. Automatically detects the runtime (python3, node, sh) from the file " +
+      "extension. Returns stdout/stderr output and, on error, the error_line number so you " +
+      "can refocus the editor."
+  )
+  fun editorTerminalPipe(
+    @ToolParam(description = "Optional override file path. If empty, uses the file currently open in the editor.")
+    file_path: String,
+  ): Map<String, String> {
+    return withResolution(runBlocking(Dispatchers.IO) {
+      try {
+      val mgr = fileBoxManager
+      val tsm = terminalSessionManager
+
+      // Determine file to run.
+      val targetPath = file_path.trim().ifEmpty {
+        mgr.currentFilePath.value
+      }
+
+      if (targetPath.isNullOrBlank()) {
+        return@runBlocking mapOf(
+          "error" to "No file is currently open in the editor and no file_path was provided.",
+          "status" to "failed",
+        )
+      }
+
+      val absolutePath = java.io.File(mgr.root, targetPath).absolutePath
+      val ext = targetPath.substringAfterLast('.', "").lowercase()
+
+      // Auto-detect runtime from extension.
+      val runtime = when (ext) {
+        "py" -> "python3"
+        "js" -> "node"
+        "sh", "bash" -> "sh"
+        "rb" -> "ruby"
+        "lua" -> "lua"
+        else -> null
+      }
+
+      if (runtime == null) {
+        return@runBlocking mapOf(
+          "error" to "No known runtime for '.$ext' files. Supported: .py, .js, .sh, .bash, .rb, .lua",
+          "status" to "failed",
+        )
+      }
+
+      // Sanitize the path: only allow alphanumeric, ., -, _, and / characters.
+      // This prevents shell injection via special characters in file paths.
+      val sanitizedPath = absolutePath.replace(Regex("[^a-zA-Z0-9._/\\-]"), "_")
+      val cmd = "$runtime '$sanitizedPath' 2>&1"
+
+      Log.d(TAG, "editorTerminalPipe: $cmd")
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = "Pipe: $runtime $targetPath",
+          inProgress = true,
+          addItemTitle = "Editor_Terminal_Pipe",
+          addItemDescription = "$ $cmd",
+        )
+      )
+
+      val output = if (tsm != null) {
+        tsm.sendCommand(cmd, visible = true)
+      } else {
+        com.google.ai.edge.gallery.data.executeCommand(cmd)
+      }
+
+      // Try to extract error line number from common error output patterns.
+      // Python: "File "...", line 42"   Node: "path:42:"   Shell: "line 42:"
+      // Anchored to 'line' keyword or file-path-like context to reduce false positives.
+      val errorLineRegex = Regex(
+        """(?:line\s+(\d+)|(?:[a-zA-Z0-9_./-]+):(\d+):\d*\s)""",
+        RegexOption.IGNORE_CASE,
+      )
+      val errorLineMatch = errorLineRegex.find(output)
+      val errorLine = errorLineMatch?.let { m ->
+        m.groupValues[1].ifEmpty { m.groupValues[2] }
+      } ?: ""
+
+      val hasError = output.contains("Error", ignoreCase = true) ||
+        output.contains("Traceback", ignoreCase = true) ||
+        output.contains("SyntaxError", ignoreCase = true) ||
+        output == "TIMEOUT ERROR"
+
+      _actionChannel.send(
+        SkillProgressAgentAction(
+          label = if (hasError) "Pipe: error in $targetPath${if (errorLine.isNotEmpty()) " line $errorLine" else ""}"
+                  else "Pipe: $targetPath executed OK",
+          inProgress = false,
+          addItemTitle = "Editor_Terminal_Pipe",
+          addItemDescription = "$ $cmd\n${output.take(200)}${if (output.length > 200) "…" else ""}",
+        )
+      )
+
+      val result = mutableMapOf(
+        "file_path" to targetPath,
+        "runtime" to runtime,
+        "output" to capOutput(output),
+        "status" to if (hasError) "error" else "succeeded",
+      )
+      if (errorLine.isNotEmpty()) {
+        result["error_line"] = errorLine
+        result["action_hint"] = "Refocus Editor on Line $errorLine"
+      }
+
+      result
+      } catch (e: Exception) {
+        Log.e(TAG, "editorTerminalPipe: unexpected error", e)
+        mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
+      }
+    })
   }
 }
 

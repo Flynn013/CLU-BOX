@@ -67,7 +67,7 @@ val TRYOUT_CHIPS: List<SkillTryOutChip> =
     SkillTryOutChip(
       icon = Icons.Outlined.Map,
       label = "Interactive Map",
-      prompt = "Show me Googleplex on interactive map.",
+      prompt = "Show me San Francisco on interactive map.",
       skillName = "interactive-map",
     ),
     SkillTryOutChip(
@@ -110,7 +110,7 @@ val TRYOUT_CHIPS: List<SkillTryOutChip> =
     SkillTryOutChip(
       icon = Icons.Outlined.QrCode,
       label = "Generate QR code",
-      prompt = "Generate QR code for https://deepmind.google/models/gemma/",
+      prompt = "Generate QR code for https://github.com/Flynn013/CLU-BOX",
       skillName = "qr-code",
     ),
   )
@@ -176,7 +176,7 @@ constructor(
             val skillMdPath = "skills/$dirName/SKILL.md"
             try {
               context.assets.open(skillMdPath).use { inputStream ->
-                val mdContent = inputStream.bufferedReader().use { it.readText() }
+                val mdContent = inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
                 val (skillProto, errors) =
                   convertSkillMdToProto(
                     mdContent,
@@ -292,7 +292,7 @@ constructor(
         val mdContent =
           try {
             val connection = URL(skillMdUrl).openConnection()
-            InputStreamReader(connection.getInputStream()).use { reader -> reader.readText() }
+            InputStreamReader(connection.getInputStream(), Charsets.UTF_8).use { reader -> reader.readText() }
           } catch (e: Exception) {
             Log.e(TAG, "Error fetching SKILL.md from $skillMdUrl", e)
             val error = "Failed to fetch SKILL.md: ${e.message}"
@@ -376,7 +376,7 @@ constructor(
     val mdContent =
       try {
         context.contentResolver.openInputStream(skillMdFile.uri)?.use { inputStream ->
-          inputStream.bufferedReader().use { it.readText() }
+          inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
         }
       } catch (e: Exception) {
         Log.e(TAG, "Error reading SKILL.md for built-in check", e)
@@ -437,7 +437,7 @@ constructor(
         val mdContent =
           try {
             context.contentResolver.openInputStream(skillMdFile.uri)?.use { inputStream ->
-              inputStream.bufferedReader().use { it.readText() }
+              inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
             }
           } catch (e: Exception) {
             Log.e(TAG, "Error reading SKILL.md", e)
@@ -650,6 +650,12 @@ constructor(
     viewModelScope.launch(Dispatchers.IO) {
       dataStoreRepository.setSkillSelected(skill.skill, selected)
     }
+  }
+
+  /** Toggle a skill's selected state by name. Used by SKILL_BOX module. */
+  fun toggleSkillSelected(skillName: String) {
+    val skill = _uiState.value.skills.find { it.skill.name == skillName } ?: return
+    setSkillSelected(skill, !skill.skill.selected)
   }
 
   fun setAllSkillsSelected(selected: Boolean) {
@@ -1011,7 +1017,7 @@ constructor(
       for (file in scriptDir.listFiles() ?: emptyArray()) {
         if (file.isFile && (file.name.endsWith(".html") || file.name.endsWith(".js"))) {
           try {
-            val content = file.readText()
+            val content = file.readText(Charsets.UTF_8)
             scriptsContent[file.name] = content
             Log.d(TAG, "Loaded script ${file.name} for skill ${skill.name}")
           } catch (e: Exception) {
@@ -1074,7 +1080,7 @@ constructor(
     $instructions
     """
         .trimIndent()
-    skillMdFile.writeText(mdContent)
+    skillMdFile.writeText(mdContent, Charsets.UTF_8)
   }
 
   private fun saveScripts(scriptDestDir: File, scriptsContent: Map<String, String>) {
@@ -1087,7 +1093,7 @@ constructor(
       val scriptFile = File(scriptDestDir, scriptName)
       Log.d(TAG, "Saving script: ${scriptFile.path}")
       try {
-        scriptFile.writeText(content)
+        scriptFile.writeText(content, Charsets.UTF_8)
         Log.d(TAG, "Saved script: ${scriptFile.path}")
       } catch (e: Exception) {
         Log.e(TAG, "Error saving script ${scriptName} to ${scriptFile.path}", e)

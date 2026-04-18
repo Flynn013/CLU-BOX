@@ -24,6 +24,7 @@ plugins {
   alias(libs.plugins.protobuf)
   alias(libs.plugins.hilt.application)
   alias(libs.plugins.oss.licenses)
+  alias(libs.plugins.ksp)
   kotlin("kapt")
 }
 
@@ -68,6 +69,10 @@ android {
   }
 }
 
+kapt {
+  correctErrorTypes = true
+}
+
 dependencies {
   implementation(libs.androidx.core.ktx)
   implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -109,7 +114,8 @@ dependencies {
   implementation(libs.androidx.exifinterface)
   implementation(libs.moshi.kotlin)
   kapt(libs.hilt.android.compiler)
-  kapt(libs.moshi.kotlin.codegen)
+  ksp(libs.moshi.kotlin.codegen)
+  ksp(libs.room.compiler)
   testImplementation(libs.junit)
   androidTestImplementation(libs.androidx.junit)
   androidTestImplementation(libs.androidx.espresso.core)
@@ -119,6 +125,14 @@ dependencies {
   debugImplementation(libs.androidx.ui.tooling)
   debugImplementation(libs.androidx.ui.test.manifest)
   implementation(libs.mlkit.genai.prompt)
+  implementation(libs.room.runtime)
+  implementation(libs.room.ktx)
+
+  // ── Termux terminal emulator (PTY-backed shell sessions + TerminalView) ──
+  // From JitPack — https://github.com/termux/termux-app/wiki/Termux-Libraries
+  implementation("com.termux.termux-app:terminal-view:0.118.0")
+  // Avoid Guava ListenableFuture classpath collision with Termux/shared deps.
+  implementation("com.google.guava:listenablefuture:9999.0-empty-to-avoid-conflict-with-guava")
 }
 
 protobuf {

@@ -75,7 +75,7 @@ inline fun <reified T> getJsonResponse(url: String): JsonObjAndTextContent<T>? {
     val responseCode = connection.responseCode
     if (responseCode == HttpURLConnection.HTTP_OK) {
       val inputStream = connection.inputStream
-      val response = inputStream.bufferedReader().use { it.readText() }
+      val response = inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
 
       val jsonObj = parseJson<T>(response)
       return if (jsonObj != null) {

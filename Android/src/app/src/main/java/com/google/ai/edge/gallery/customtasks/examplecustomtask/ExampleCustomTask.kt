@@ -112,7 +112,7 @@ class ExampleCustomTask @Inject constructor() : CustomTask {
             File(model.getPath(context = context))
           // Local model
           else File(model.getPath(context = context, fileName = "model.txt"))
-        var content = file.readText()
+        var content = file.readText(Charsets.UTF_8)
 
         // Use the value from model's configuration to cap the max number of characters for the
         // content.

@@ -1,124 +1,45 @@
-name: CLU-BOX Sovereign Reskin & Build
+name: CLU-BOX CI — Build & Package
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "main", "master", "copilot/**" ]
+  pull_request:
+    branches: [ "main", "master", "copilot/**" ]
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
+    name: Assemble Debug APK
     runs-on: ubuntu-latest
-    
+
     defaults:
       run:
         working-directory: Android/src
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-        cache: gradle
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: gradle
 
-    - name: Apply CLU-BOX Grinder Reskin & UI Gutting
-      run: |
-        echo "INITIATING SYSTEM OVERRIDE..."
-        
-        # --- PHASE 1: THE PAINT JOB ---
-        echo "Injecting CLU-BOX Theme Overrides..."
-        THEME_DIR="app/src/main/java/com/google/ai/edge/gallery/ui/theme"
-        
-        cat << 'EOF' > $THEME_DIR/Color.kt
-        package com.google.ai.edge.gallery.ui.theme
-        import androidx.compose.ui.graphics.Color
-        val CluNeon = Color(0xFF4ADE80)
-        val CluNeonDim = Color(0x334ADE80)
-        val CluBackground = Color(0xFF050505)
-        val CluSurface = Color(0xFF080808)
-        val CluSurfaceVariant = Color(0xFF111111)
-        val CluText = Color(0xFFE5E7EB)
-        val CluTextMuted = Color(0xFF9CA3AF)
-        val CluBorder = Color(0x1AFFFFFF)
-        val CluError = Color(0xFFEF4444)
-        EOF
-        
-        cat << 'EOF' > $THEME_DIR/Theme.kt
-        package com.google.ai.edge.gallery.ui.theme
-        import android.app.Activity
-        import androidx.compose.material3.MaterialTheme
-        import androidx.compose.material3.darkColorScheme
-        import androidx.compose.runtime.Composable
-        import androidx.compose.runtime.SideEffect
-        import androidx.compose.ui.graphics.toArgb
-        import androidx.compose.ui.platform.LocalView
-        import androidx.core.view.WindowCompat
-        private val CluDarkColorScheme = darkColorScheme(
-            primary = CluNeon, onPrimary = CluBackground, primaryContainer = CluNeonDim, onPrimaryContainer = CluNeon,
-            secondary = CluText, onSecondary = CluBackground, background = CluBackground, onBackground = CluText,
-            surface = CluSurface, onSurface = CluText, surfaceVariant = CluSurfaceVariant, onSurfaceVariant = CluTextMuted,
-            error = CluError, onError = CluBackground, outline = CluBorder
-        )
-        @Composable
-        fun GalleryTheme(darkTheme: Boolean = true, dynamicColor: Boolean = false, content: @Composable () -> Unit) {
-            val colorScheme = CluDarkColorScheme
-            val view = LocalView.current
-            if (!view.isInEditMode) {
-                SideEffect {
-                    val window = (view.context as Activity).window
-                    window.statusBarColor = colorScheme.background.toArgb()
-                    window.navigationBarColor = colorScheme.background.toArgb()
-                    WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false
-                }
-            }
-            MaterialTheme(colorScheme = colorScheme, typography = Typography, content = content)
-        }
-        EOF
-        
-        cat << 'EOF' > $THEME_DIR/Type.kt
-        package com.google.ai.edge.gallery.ui.theme
-        import androidx.compose.material3.Typography
-        import androidx.compose.ui.text.TextStyle
-        import androidx.compose.ui.text.font.FontFamily
-        import androidx.compose.ui.text.font.FontWeight
-        import androidx.compose.ui.unit.sp
-        val Typography = Typography(
-            bodyLarge = TextStyle(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Normal, fontSize = 16.sp, lineHeight = 24.sp, letterSpacing = 0.5.sp),
-            bodyMedium = TextStyle(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Normal, fontSize = 14.sp, lineHeight = 20.sp, letterSpacing = 0.25.sp),
-            bodySmall = TextStyle(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Normal, fontSize = 12.sp, lineHeight = 16.sp, letterSpacing = 0.4.sp),
-            titleLarge = TextStyle(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 22.sp, lineHeight = 28.sp, letterSpacing = 1.sp),
-            titleMedium = TextStyle(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 16.sp, lineHeight = 24.sp, letterSpacing = 1.sp),
-            labelLarge = TextStyle(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black, fontSize = 12.sp, lineHeight = 16.sp, letterSpacing = 2.sp),
-            labelSmall = TextStyle(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 10.sp, lineHeight = 14.sp, letterSpacing = 1.5.sp)
-        )
-        EOF
+      - name: Make gradlew executable
+        run: chmod +x gradlew
 
-        # --- PHASE 2: SURGICAL GUTTING & ROUTING ---
-        echo "Executing UI Gutting via Stream Editor (sed)..."
-        
-        # 1. Force the app to boot directly into Agent Chat (The Grinder) instead of HomeScreen
-        NAV_FILE="app/src/main/java/com/google/ai/edge/gallery/ui/navigation/GalleryNavGraph.kt"
-        sed -i 's/startDestination = Destinations.HOME.route/startDestination = Destinations.AGENT_CHAT.route/g' $NAV_FILE
-        
-        # 2. Rename UI Elements system-wide in strings.xml
-        STRINGS_FILE="app/src/main/res/values/strings.xml"
-        sed -i 's/>Model Manager</>Vending Machine</g' $STRINGS_FILE
-        sed -i 's/>Agent Chat</>The Grinder</g' $STRINGS_FILE
-        sed -i 's/>Google AI Edge Gallery</>CLU-BOX Sovereign</g' $STRINGS_FILE
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --stacktrace
 
-        echo "Overrides applied successfully. Proceeding to compiler..."
-
-    - name: Make gradlew executable
-      run: chmod +x gradlew
-
-    - name: Build Debug APK
-      run: ./gradlew assembleDebug
-
-    - name: Upload CLU-BOX APK Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: clu-box-grinder-apk
-        path: Android/src/app/build/outputs/apk/debug/app-debug.apk
+      - name: Upload CLU-BOX Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: clu-box-debug-apk
+          path: Android/src/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14

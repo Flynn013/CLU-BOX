@@ -18,7 +18,6 @@ package com.google.ai.edge.gallery.ui.theme
 
 import android.app.Activity
 import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -28,13 +27,14 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
-import com.google.ai.edge.gallery.proto.Theme
 
 private val lightScheme =
   lightColorScheme(
@@ -146,65 +146,42 @@ val LocalCustomColors = staticCompositionLocalOf { CustomColors() }
 
 val lightCustomColors =
   CustomColors(
-    appTitleGradientColors = listOf(Color(0xFF85B1F8), Color(0xFF3174F1)),
-    tabHeaderBgColor = Color(0xFF3174F1),
-    taskCardBgColor = surfaceContainerLowestLight,
+    appTitleGradientColors = listOf(neonGreen, neonGreen),
+    tabHeaderBgColor = absoluteBlack,
+    taskCardBgColor = terminalMidGrey,
     taskBgColors =
-      listOf(
-        // red
-        Color(0xFFFFF5F5),
-        // green
-        Color(0xFFF4FBF6),
-        // blue
-        Color(0xFFF1F6FE),
-        // yellow
-        Color(0xFFFFFBF0),
-      ),
+      listOf(terminalDarkGrey, terminalDarkGrey, terminalDarkGrey, terminalDarkGrey),
     taskBgGradientColors =
       listOf(
-        // red
-        listOf(Color(0xFFE25F57), Color(0xFFDB372D)),
-        // green
-        listOf(Color(0xFF41A15F), Color(0xFF128937)),
-        // blue
-        listOf(Color(0xFF669DF6), Color(0xFF3174F1)),
-        // yellow
-        listOf(Color(0xFFFDD45D), Color(0xFFCAA12A)),
+        listOf(terminalMidGrey, absoluteBlack),
+        listOf(terminalMidGrey, absoluteBlack),
+        listOf(terminalMidGrey, absoluteBlack),
+        listOf(terminalMidGrey, absoluteBlack),
       ),
     taskIconColors =
-      listOf(
-        // red.
-        Color(0xFFDB372D),
-        // green
-        Color(0xFF128937),
-        // blue
-        Color(0xFF3174F1),
-        // yellow
-        Color(0xFFCAA12A),
-      ),
-    taskIconShapeBgColor = Color.White,
-    homeBottomGradient = listOf(Color(0x00F8F9FF), Color(0xffFFEFC9)),
-    agentBubbleBgColor = Color(0xFFe9eef6),
-    userBubbleBgColor = Color(0xFF32628D),
-    linkColor = Color(0xFF32628D),
-    successColor = Color(0xff3d860b),
-    recordButtonBgColor = Color(0xFFEE675C),
-    waveFormBgColor = Color(0xFFaaaaaa),
-    modelInfoIconColor = Color(0xFFCCCCCC),
-    warningContainerColor = Color(0xfffef7e0),
-    warningTextColor = Color(0xffe37400),
-    errorContainerColor = Color(0xfffce8e6),
-    errorTextColor = Color(0xffd93025),
-    newFeatureContainerColor = Color(0xFFEEDCFE),
-    newFeatureTextColor = Color(0xFF400B84),
-    bgStarColor = Color(0x3A669AF5),
+      listOf(neonGreen, neonGreen, neonGreen, neonGreen),
+    taskIconShapeBgColor = absoluteBlack,
+    homeBottomGradient = listOf(Color(0x00000000), absoluteBlack),
+    agentBubbleBgColor = terminalDarkGrey,
+    userBubbleBgColor = terminalMidGrey,
+    linkColor = neonGreen,
+    successColor = neonGreen,
+    recordButtonBgColor = neonGreen,
+    waveFormBgColor = terminalOutline,
+    modelInfoIconColor = terminalOutline,
+    warningContainerColor = terminalMidGrey,
+    warningTextColor = neonGreen,
+    errorContainerColor = terminalErrorContainer,
+    errorTextColor = terminalError,
+    newFeatureContainerColor = terminalMidGrey,
+    newFeatureTextColor = neonGreen,
+    bgStarColor = Color(0x194ade80),
     promoBannerBgBrush =
       Brush.linearGradient(
         colorStops =
           arrayOf(
-            0.0f to Color(0x42ACB7FF),
-            0.6154f to Color(0x422D96FF),
-            1.0f to Color(0x423C6BFF),
+            0.0f to Color(0xFF0D0D0D),
+            1.0f to absoluteBlack,
           ),
         start = Offset(0f, 0f),
         end = Offset(0f, Float.POSITIVE_INFINITY),
@@ -213,87 +190,15 @@ val lightCustomColors =
       Brush.linearGradient(
         colorStops =
           arrayOf(
-            0.2442f to Color(0x3B446EFF),
-            0.4296f to Color(0x3B2E96FF),
-            0.6651f to Color(0x3BB1C5FF),
+            0.0f to Color(0xFF1A1A1A),
+            1.0f to absoluteBlack,
           ),
         start = Offset(0f, 1f),
         end = Offset(1f, 0f),
       ),
   )
 
-val darkCustomColors =
-  CustomColors(
-    appTitleGradientColors = listOf(Color(0xFF85B1F8), Color(0xFF3174F1)),
-    tabHeaderBgColor = Color(0xFF3174F1),
-    taskCardBgColor = surfaceContainerHighDark,
-    taskBgColors =
-      listOf(
-        // red
-        Color(0xFF181210),
-        // green
-        Color(0xFF131711),
-        // blue
-        Color(0xFF191924),
-        // yellow
-        Color(0xFF1A1813),
-      ),
-    taskBgGradientColors =
-      listOf(
-        // red
-        listOf(Color(0xFFE25F57), Color(0xFFDB372D)),
-        // green
-        listOf(Color(0xFF41A15F), Color(0xFF128937)),
-        // blue
-        listOf(Color(0xFF669DF6), Color(0xFF3174F1)),
-        // yellow
-        listOf(Color(0xFFFDD45D), Color(0xFFCAA12A)),
-      ),
-    taskIconColors =
-      listOf(
-        // red.
-        Color(0xFFE25F57),
-        // green
-        Color(0xFF41A15F),
-        // blue
-        Color(0xFF669DF6),
-        // yellow
-        Color(0xFFCAA12A),
-      ),
-    taskIconShapeBgColor = Color(0xFF202124),
-    homeBottomGradient = listOf(Color(0x00F8F9FF), Color(0x1AF6AD01)),
-    agentBubbleBgColor = Color(0xFF1b1c1d),
-    userBubbleBgColor = Color(0xFF1f3760),
-    linkColor = Color(0xFF9DCAFC),
-    successColor = Color(0xFFA1CE83),
-    recordButtonBgColor = Color(0xFFEE675C),
-    waveFormBgColor = Color(0xFFaaaaaa),
-    modelInfoIconColor = Color(0xFFCCCCCC),
-    warningContainerColor = Color(0xff554c33),
-    warningTextColor = Color(0xfffcc934),
-    errorContainerColor = Color(0xff523a3b),
-    errorTextColor = Color(0xffee675c),
-    newFeatureContainerColor = Color(0xFFEEDCFE),
-    newFeatureTextColor = Color(0xFF400B84),
-    bgStarColor = Color(0x19346BF0),
-    promoBannerBgBrush =
-      Brush.linearGradient(
-        colorStops = arrayOf(0.0f to Color(0x82183570), 0.8077f to Color(0x820A122D)),
-        start = Offset(0f, 0f),
-        end = Offset(0f, Float.POSITIVE_INFINITY),
-      ),
-    promoBannerIconBgBrush =
-      Brush.linearGradient(
-        colorStops =
-          arrayOf(
-            0.2442f to Color(0x6F0F41F8),
-            0.4296f to Color(0x6F1685F8),
-            0.6651f to Color(0x6F809EF3),
-          ),
-        start = Offset(0f, 1f),
-        end = Offset(1f, 0f),
-      ),
-  )
+val darkCustomColors = lightCustomColors
 
 val MaterialTheme.customColors: CustomColors
   @Composable @ReadOnlyComposable get() = LocalCustomColors.current
@@ -318,21 +223,29 @@ fun StatusBarColorController(useDarkTheme: Boolean) {
 
 @Composable
 fun GalleryTheme(content: @Composable () -> Unit) {
-  val themeOverride = ThemeSettings.themeOverride
-  val darkTheme: Boolean =
-    (isSystemInDarkTheme() || themeOverride.value == Theme.THEME_DARK) &&
-      themeOverride.value != Theme.THEME_LIGHT
+  // CLU/BOX: dark mode is always forced — no light mode.
+  val darkTheme = true
   val view = LocalView.current
 
   StatusBarColorController(useDarkTheme = darkTheme)
 
-  val colorScheme =
-    when {
-      darkTheme -> darkScheme
-      else -> lightScheme
-    }
+  // Read custom color overrides from ThemeSettings.
+  val useCustomColors by ThemeSettings.useCustomColors
+  val customBg by ThemeSettings.customBackgroundColor
+  val customText by ThemeSettings.customTextColor
+  val customAccent by ThemeSettings.customAccentColor
 
-  val customColorsPalette = if (darkTheme) darkCustomColors else lightCustomColors
+  val colorScheme = if (useCustomColors) {
+    buildCustomColorScheme(bg = customBg, text = customText, accent = customAccent)
+  } else {
+    darkScheme
+  }
+
+  val customColorsPalette = if (useCustomColors) {
+    buildCustomColorsPalette(bg = customBg, text = customText, accent = customAccent)
+  } else {
+    darkCustomColors
+  }
 
   CompositionLocalProvider(LocalCustomColors provides customColorsPalette) {
     MaterialTheme(colorScheme = colorScheme, typography = AppTypography, content = content)
@@ -346,4 +259,107 @@ fun GalleryTheme(content: @Composable () -> Unit) {
       window.isNavigationBarContrastEnforced = false
     }
   }
+}
+
+/** Builds a Material3 color scheme from three user-specified colors. */
+private fun buildCustomColorScheme(bg: Color, text: Color, accent: Color) = darkColorScheme(
+  primary = accent,
+  onPrimary = if (accent.luminance() > 0.4f) Color.Black else Color.White,
+  primaryContainer = accent.copy(alpha = 0.2f).compositeOver(bg),
+  onPrimaryContainer = accent,
+  secondary = accent,
+  onSecondary = if (accent.luminance() > 0.4f) Color.Black else Color.White,
+  secondaryContainer = accent.copy(alpha = 0.15f).compositeOver(bg),
+  onSecondaryContainer = accent,
+  tertiary = accent,
+  onTertiary = if (accent.luminance() > 0.4f) Color.Black else Color.White,
+  tertiaryContainer = accent.copy(alpha = 0.15f).compositeOver(bg),
+  onTertiaryContainer = accent,
+  error = terminalError,
+  onError = Color.Black,
+  errorContainer = terminalErrorContainer,
+  onErrorContainer = terminalError,
+  background = bg,
+  onBackground = text,
+  surface = bg,
+  onSurface = text,
+  surfaceVariant = blend(bg, Color.White, 0.06f),
+  onSurfaceVariant = text.copy(alpha = 0.75f),
+  outline = text.copy(alpha = 0.30f),
+  outlineVariant = text.copy(alpha = 0.15f),
+  scrim = Color.Black,
+  inverseSurface = text,
+  inverseOnSurface = bg,
+  inversePrimary = bg,
+  surfaceDim = bg,
+  surfaceBright = blend(bg, Color.White, 0.10f),
+  surfaceContainerLowest = bg,
+  surfaceContainerLow = blend(bg, Color.White, 0.04f),
+  surfaceContainer = blend(bg, Color.White, 0.08f),
+  surfaceContainerHigh = blend(bg, Color.White, 0.12f),
+  surfaceContainerHighest = blend(bg, Color.White, 0.16f),
+)
+
+/** Builds a [CustomColors] palette from three user-specified colors. */
+private fun buildCustomColorsPalette(bg: Color, text: Color, accent: Color): CustomColors {
+  val surface = blend(bg, Color.White, 0.08f)
+  val bubbleSurface = blend(bg, Color.White, 0.12f)
+  return CustomColors(
+    appTitleGradientColors = listOf(accent, accent),
+    tabHeaderBgColor = bg,
+    taskCardBgColor = surface,
+    taskBgColors = listOf(bg, bg, bg, bg),
+    taskBgGradientColors = listOf(
+      listOf(surface, bg),
+      listOf(surface, bg),
+      listOf(surface, bg),
+      listOf(surface, bg),
+    ),
+    taskIconColors = listOf(accent, accent, accent, accent),
+    taskIconShapeBgColor = bg,
+    homeBottomGradient = listOf(Color(0x00000000), bg),
+    agentBubbleBgColor = surface,
+    userBubbleBgColor = bubbleSurface,
+    linkColor = accent,
+    successColor = accent,
+    recordButtonBgColor = accent,
+    waveFormBgColor = text.copy(alpha = 0.25f),
+    modelInfoIconColor = text.copy(alpha = 0.40f),
+    warningContainerColor = surface,
+    warningTextColor = accent,
+    errorContainerColor = terminalErrorContainer,
+    errorTextColor = terminalError,
+    newFeatureContainerColor = surface,
+    newFeatureTextColor = accent,
+    bgStarColor = accent.copy(alpha = 0.10f),
+    promoBannerBgBrush = Brush.linearGradient(
+      colorStops = arrayOf(0.0f to blend(bg, Color.White, 0.08f), 1.0f to bg),
+      start = Offset(0f, 0f),
+      end = Offset(0f, Float.POSITIVE_INFINITY),
+    ),
+    promoBannerIconBgBrush = Brush.linearGradient(
+      colorStops = arrayOf(0.0f to blend(bg, Color.White, 0.12f), 1.0f to bg),
+      start = Offset(0f, 1f),
+      end = Offset(1f, 0f),
+    ),
+  )
+}
+
+/** Linearly interpolates [from] toward [to] by [fraction] (0 = from, 1 = to). */
+private fun blend(from: Color, to: Color, fraction: Float) = Color(
+  red = (from.red + (to.red - from.red) * fraction).coerceIn(0f, 1f),
+  green = (from.green + (to.green - from.green) * fraction).coerceIn(0f, 1f),
+  blue = (from.blue + (to.blue - from.blue) * fraction).coerceIn(0f, 1f),
+  alpha = from.alpha,
+)
+
+/** Composites [this] (with alpha) on top of [background]. */
+private fun Color.compositeOver(background: Color): Color {
+  val a = alpha
+  return Color(
+    red = red * a + background.red * (1f - a),
+    green = green * a + background.green * (1f - a),
+    blue = blue * a + background.blue * (1f - a),
+    alpha = 1f,
+  )
 }

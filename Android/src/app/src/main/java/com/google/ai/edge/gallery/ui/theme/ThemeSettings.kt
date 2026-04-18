@@ -21,4 +21,10 @@ import com.google.ai.edge.gallery.proto.Theme
 
 object ThemeSettings {
   val themeOverride = mutableStateOf<Theme>(Theme.THEME_AUTO)
+
+  // Custom UI color overrides.
+  val useCustomColors = mutableStateOf(false)
+  val customBackgroundColor = mutableStateOf(absoluteBlack)
+  val customTextColor = mutableStateOf(terminalOnSurface)
+  val customAccentColor = mutableStateOf(neonGreen)
 }

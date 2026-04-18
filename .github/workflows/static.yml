@@ -38,7 +38,7 @@ jobs:
         run: |
           mkdir -p staging/skills
           # Move all files (except the staging folder itself) into the subdirectory
-          rsync -rr --exclude='staging' ./skills/ staging/skills/
+          rsync -r --exclude='staging' ./skills/ staging/skills/
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact

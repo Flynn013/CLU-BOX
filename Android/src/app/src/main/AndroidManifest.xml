@@ -53,10 +53,11 @@
     <application
         android:name="${applicationName}"
         android:allowBackup="true"
+        android:largeHeap="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
-        android:label="Edge Gallery"
+        android:label="CLU/BOX"
         android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"
         android:theme="@style/Theme.Gallery"
@@ -117,6 +118,11 @@
             android:exported="false"
             tools:node="merge">
         </service>
+
+        <service
+            android:name=".CluEngineService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
 
         <!-- For Firebase Analytics. -->
         <receiver

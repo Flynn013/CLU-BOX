@@ -78,6 +78,12 @@ message Settings {
   // copybara:strip_end
 
   repeated string viewed_promo_id = 10;
+
+  // Custom UI colors (stored as ARGB int32).
+  bool use_custom_colors = 11;
+  int32 custom_background_color = 12;
+  int32 custom_text_color = 13;
+  int32 custom_accent_color = 14;
 }
 
 message UserData {

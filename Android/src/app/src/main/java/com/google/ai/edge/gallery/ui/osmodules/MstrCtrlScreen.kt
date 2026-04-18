@@ -1,0 +1,313 @@
+/*
+ * Copyright 2026 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.ai.edge.gallery.ui.osmodules
+
+import android.content.Context
+import android.graphics.Typeface
+import android.view.KeyEvent
+import android.view.MotionEvent
+import android.view.inputmethod.InputMethodManager
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import com.google.ai.edge.gallery.data.TerminalSessionManager
+import com.google.ai.edge.gallery.data.TermuxSessionBridge
+import com.google.ai.edge.gallery.ui.theme.absoluteBlack
+import com.google.ai.edge.gallery.ui.theme.neonGreen
+import com.termux.terminal.TerminalSession
+import com.termux.view.TerminalView
+import com.termux.view.TerminalViewClient
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+
+/**
+ * MSTR_CTRL — full-screen terminal UI powered by the Termux terminal-emulator
+ * library.
+ *
+ * The screen embeds the native [TerminalView] via [AndroidView], giving the
+ * user a real PTY-backed shell with ANSI colour support, interactive programs,
+ * and job control.
+ *
+ * The [TerminalSessionManager] is still started for:
+ * - The pre-flight firmware check (first-boot detection).
+ * - Agent-initiated `Shell_Execute` / `executeCommandWithExitCode` calls
+ *   (which use isolated one-shot `sh -c` processes for timeout safety).
+ *
+ * UI rules:
+ * • Pure black background, neon green text.
+ * • Full-screen TerminalView for interactive shell.
+ * • Bottom input row for quick command injection.
+ */
+@Composable
+fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
+  val context = LocalContext.current
+  val scope = rememberCoroutineScope()
+  var inputText by remember { mutableStateOf("") }
+
+  // Hold a reference to the TerminalView so we can invalidate it
+  // when new output arrives from the PTY.
+  var terminalViewRef by remember { mutableStateOf<TerminalView?>(null) }
+
+  // Create the Termux PTY bridge and session eagerly so the session
+  // is ready before the AndroidView factory runs.  Previously this was
+  // in a LaunchedEffect which ran *after* the first composition,
+  // causing the TerminalView factory to see a null session.
+  val bridge = remember {
+    TermuxSessionBridge(context).also { b ->
+      b.createSession(sessionManager.sandboxRoot)
+    }
+  }
+
+  // Start the legacy session manager (pre-flight + agent tools).
+  LaunchedEffect(Unit) {
+    sessionManager.startSession()
+  }
+
+  // Wire up the bridge callback to invalidate the TerminalView whenever
+  // new text arrives from the PTY.  Re-wires when the view ref changes.
+  LaunchedEffect(terminalViewRef) {
+    bridge.setCallback(object : TermuxSessionBridge.Callback {
+      override fun onTextChanged() {
+        // onScreenUpdated() handles scroll tracking and triggers invalidate().
+        // Post to the UI thread since this callback fires from the PTY reader.
+        // Capture in a local to avoid a race between the null-check and post.
+        val view = terminalViewRef ?: return
+        view.post { view.onScreenUpdated() }
+      }
+
+      override fun onTitleChanged(title: String) {}
+      override fun onBell() {}
+      override fun onSessionFinished() {}
+    })
+  }
+
+  // Clean up PTY on disposal.
+  DisposableEffect(Unit) {
+    onDispose { bridge.destroySession() }
+  }
+
+  Column(
+    modifier = Modifier
+      .fillMaxSize()
+      .background(absoluteBlack),
+  ) {
+    // ── Termux TerminalView (main content area) ────────────────
+    Box(
+      modifier = Modifier
+        .weight(1f)
+        .fillMaxWidth(),
+    ) {
+      AndroidView(
+        modifier = Modifier.fillMaxSize(),
+        factory = { ctx ->
+          TerminalView(ctx, null).apply {
+            // Wire up the view client that handles keyboard/touch events.
+            setTerminalViewClient(CluTerminalViewClient(this))
+
+            // Style: monospace font, neon-green on black.
+            setTextSize(16)
+            setTypeface(Typeface.MONOSPACE)
+
+            // Black background to match CLU/BOX aesthetic.
+            setBackgroundColor(android.graphics.Color.BLACK)
+
+            // Make the view focusable so it can receive keyboard input.
+            isFocusable = true
+            isFocusableInTouchMode = true
+
+            // Attach the PTY session — the shell starts once the view measures.
+            val session = bridge.terminalSession
+            if (session != null) {
+              attachSession(session)
+            }
+
+            // Store reference so the bridge callback can invalidate this view.
+            terminalViewRef = this
+          }
+        },
+        update = { view ->
+          // Keep the view reference current.
+          terminalViewRef = view
+          // Re-attach if the session was recreated.
+          // Note: `mTermSession` is a public field in Termux's TerminalView Java API.
+          // There is no getter method — direct access is the intended usage pattern.
+          val session = bridge.terminalSession
+          if (session != null && view.mTermSession !== session) {
+            view.attachSession(session)
+          }
+        },
+      )
+    }
+
+    // ── Bottom input row (quick command injection) ─────────────
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .background(absoluteBlack)
+        .padding(horizontal = 8.dp, vertical = 6.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Text(
+        "$",
+        color = neonGreen,
+        fontFamily = FontFamily.Monospace,
+        fontSize = 16.sp,
+        modifier = Modifier.padding(end = 6.dp),
+      )
+
+      BasicTextField(
+        value = inputText,
+        onValueChange = { inputText = it },
+        modifier = Modifier
+          .weight(1f)
+          .padding(vertical = 4.dp),
+        textStyle = TextStyle(
+          fontFamily = FontFamily.Monospace,
+          fontSize = 16.sp,
+          color = neonGreen,
+        ),
+        cursorBrush = SolidColor(neonGreen),
+        singleLine = true,
+      )
+
+      Spacer(Modifier.width(4.dp))
+
+      // Send button — injects command into the PTY.
+      IconButton(
+        onClick = {
+          val cmd = inputText.trim()
+          if (cmd.isNotEmpty()) {
+            inputText = ""
+            bridge.sendCommand(cmd)
+          }
+        },
+      ) {
+        Icon(
+          Icons.AutoMirrored.Filled.Send,
+          contentDescription = "Execute",
+          tint = neonGreen,
+        )
+      }
+
+      // Clear / restart session.
+      IconButton(
+        onClick = {
+          scope.launch(Dispatchers.IO) {
+            bridge.destroySession()
+            bridge.createSession(sessionManager.sandboxRoot)
+          }
+        },
+      ) {
+        Icon(
+          Icons.Default.DeleteSweep,
+          contentDescription = "Restart terminal",
+          tint = neonGreen.copy(alpha = 0.6f),
+        )
+      }
+    }
+  }
+}
+
+// ── TerminalViewClient implementation ────────────────────────────────────
+//
+// Handles keyboard, touch, and IME events for the embedded TerminalView.
+
+private class CluTerminalViewClient(
+  private val terminalView: TerminalView,
+) : TerminalViewClient {
+
+  override fun onScale(scale: Float): Float = 1.0f // Disable pinch-to-zoom.
+
+  override fun onSingleTapUp(e: MotionEvent) {
+    // Request focus and show the soft keyboard so the user can type.
+    terminalView.requestFocus()
+    val imm = terminalView.context.getSystemService(Context.INPUT_METHOD_SERVICE)
+        as InputMethodManager
+    imm.showSoftInput(terminalView, InputMethodManager.SHOW_IMPLICIT)
+  }
+
+  override fun shouldBackButtonBeMappedToEscape(): Boolean = false
+
+  override fun shouldEnforceCharBasedInput(): Boolean = true
+
+  override fun shouldUseCtrlSpaceWorkaround(): Boolean = false
+
+  override fun isTerminalViewSelected(): Boolean = true
+
+  override fun copyModeChanged(copyMode: Boolean) {
+    // No-op — copy mode UI not needed in CLU/BOX.
+  }
+
+  override fun onKeyDown(keyCode: Int, e: KeyEvent, session: TerminalSession): Boolean = false
+
+  override fun onKeyUp(keyCode: Int, e: KeyEvent): Boolean = false
+
+  override fun onLongPress(event: MotionEvent): Boolean = false
+
+  override fun readControlKey(): Boolean = false
+
+  override fun readAltKey(): Boolean = false
+
+  override fun readShiftKey(): Boolean = false
+
+  override fun readFnKey(): Boolean = false
+
+  override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession): Boolean =
+    false
+
+  override fun onEmulatorSet() {
+    // Terminal emulator initialized — the shell is about to start.
+  }
+
+  override fun logError(tag: String?, message: String?) {}
+  override fun logWarn(tag: String?, message: String?) {}
+  override fun logInfo(tag: String?, message: String?) {}
+  override fun logDebug(tag: String?, message: String?) {}
+  override fun logVerbose(tag: String?, message: String?) {}
+  override fun logStackTraceWithMessage(tag: String?, message: String?, e: Exception?) {}
+  override fun logStackTrace(tag: String?, e: Exception?) {}
+}
