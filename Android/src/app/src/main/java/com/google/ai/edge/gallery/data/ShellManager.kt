@@ -68,8 +68,9 @@ fun executeCommand(command: String): String {
 
     // Block until reader threads complete (no timeout — process already exited so
     // streams will close and readText() will return).
-    stdoutThread.join()
-    stderrThread.join()
+    // Bounded join prevents indefinite hangs if a reader thread gets stuck.
+    stdoutThread.join(5_000)
+    stderrThread.join(5_000)
 
     val stdout = stdoutRef.get()
     val stderr = stderrRef.get()

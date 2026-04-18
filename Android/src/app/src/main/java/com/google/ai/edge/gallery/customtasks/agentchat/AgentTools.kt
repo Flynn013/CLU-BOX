@@ -33,6 +33,7 @@ import com.google.ai.edge.litertlm.ToolSet
 import com.squareup.moshi.JsonAdapter
 import com.squareup.moshi.Moshi
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
@@ -640,8 +641,18 @@ class AgentTools() : ToolSet {
   // Task Queue — Autonomous supervisor loop
   // =========================================================================
 
-  /** Volatile flag: when a pending task is queued, the ViewModel can read it. */
-  @Volatile var pendingTaskDescription: String? = null
+  /**
+   * Thread-safe container for the next pending task description.
+   * Uses [AtomicReference] so concurrent reads/writes from the inference
+   * loop and tool callbacks never race.  Read with [getPendingTask] and
+   * write with [setPendingTask] or the [AtomicReference] API directly.
+   */
+  private val _pendingTask = AtomicReference<String?>(null)
+
+  /** Public accessor used by the ViewModel's inference loop. */
+  var pendingTaskDescription: String?
+    get() = _pendingTask.get()
+    set(value) { _pendingTask.set(value) }
 
   /**
    * Updates the autonomous task queue.  When [status] is "pending", the ViewModel's

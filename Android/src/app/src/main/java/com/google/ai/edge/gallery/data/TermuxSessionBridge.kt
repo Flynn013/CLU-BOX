@@ -170,7 +170,7 @@ class TermuxSessionBridge(private val context: Context) {
     val basePath = "/system/bin:/system/xbin"
     val effectivePath = if (File(termuxBin).isDirectory) "$termuxBin:$basePath" else basePath
 
-    val env = arrayOf(
+    val env = mutableListOf(
       "HOME=$home",
       "TERM=xterm-256color",
       "PATH=$effectivePath",
@@ -179,6 +179,12 @@ class TermuxSessionBridge(private val context: Context) {
       // Visible prompt so the user gets immediate boot feedback.
       "PS1=CLU/BOX \$ ",
     )
+    // Inject Termux-specific variables when the prefix exists, giving the
+    // PTY shell access to python, node, pkg, git, and native shared libs.
+    if (File(termuxBin).isDirectory) {
+      env.add("PREFIX=/data/data/com.termux/files/usr")
+      env.add("LD_LIBRARY_PATH=/data/data/com.termux/files/usr/lib")
+    }
 
     val args = arrayOf(shell)
 
@@ -187,7 +193,7 @@ class TermuxSessionBridge(private val context: Context) {
       shell,    // executable
       cwd,      // working directory
       args,     // arguments
-      env,      // environment
+      env.toTypedArray(),  // environment
       // Use the Termux library's default transcript size (typically 2000 rows).
       // This provides a reasonable scrollback buffer for CLU-BOX workflows.
       TerminalEmulator.DEFAULT_TERMINAL_TRANSCRIPT_ROWS,
