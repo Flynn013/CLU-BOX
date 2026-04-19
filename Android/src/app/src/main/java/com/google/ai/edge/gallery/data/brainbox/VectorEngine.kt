@@ -180,8 +180,7 @@ class VectorEngine(private val context: Context) {
     val vec = FloatArray(BOW_DIMENSIONS)
     val tokens = text.lowercase().split(Regex("[^a-z0-9]+")).filter { it.length > 1 }
     for (token in tokens) {
-      // Use Kotlin's hashCode (stable within a JVM session) mod dimensions.
-      // abs() avoids negative indices from Int.MIN_VALUE edge case.
+      // Mask to positive long to avoid negative indices from Int.MIN_VALUE edge case.
       val bucket = (token.hashCode().toLong().and(0x7FFFFFFF) % BOW_DIMENSIONS).toInt()
       vec[bucket] += 1f
     }
