@@ -82,11 +82,17 @@
         "topK": 64,
         "topP": 0.95,
         "temperature": 1.0,
-        "maxTokens": 1024,
+        "maxTokens": 2048,
         "accelerators": "gpu,cpu"
       },
-      "taskTypes": ["llm_chat", "llm_prompt_lab"],
-      "bestForTaskTypes": ["llm_chat", "llm_prompt_lab"]
+      "taskTypes": [
+        "llm_chat",
+        "llm_prompt_lab"
+      ],
+      "bestForTaskTypes": [
+        "llm_chat",
+        "llm_prompt_lab"
+      ]
     },
     {
       "name": "TinyGarden-270M",
@@ -100,11 +106,15 @@
         "topK": 64,
         "topP": 0.95,
         "temperature": 0.0,
-        "maxTokens": 1024,
+        "maxTokens": 2048,
         "accelerators": "cpu"
       },
-      "taskTypes": ["llm_tiny_garden"],
-      "bestForTaskTypes": ["llm_tiny_garden"]
+      "taskTypes": [
+        "llm_tiny_garden"
+      ],
+      "bestForTaskTypes": [
+        "llm_tiny_garden"
+      ]
     },
     {
       "name": "MobileActions-270M",
@@ -118,11 +128,15 @@
         "topK": 64,
         "topP": 0.95,
         "temperature": 0.0,
-        "maxTokens": 1024,
+        "maxTokens": 2048,
         "accelerators": "cpu"
       },
-      "taskTypes": ["llm_mobile_actions"],
-      "bestForTaskTypes": ["llm_mobile_actions"]
+      "taskTypes": [
+        "llm_mobile_actions"
+      ],
+      "bestForTaskTypes": [
+        "llm_mobile_actions"
+      ]
     },
     {
       "name": "Gemini-Cloud-Node",
