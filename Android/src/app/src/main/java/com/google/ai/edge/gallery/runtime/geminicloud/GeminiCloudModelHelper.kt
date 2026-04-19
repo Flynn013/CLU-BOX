@@ -246,37 +246,63 @@ object GeminiCloudModelHelper : LlmModelHelper {
           instance.conversationHistory.add(content)
 
           // Check if any part is a function call.
-          val functionCallPart = parts.firstOrNull {
-            it.asJsonObject.has("functionCall")
+          // ── Auto-Heal: wrap function-call extraction in try-catch ────
+          // If the model returns a malformed functionCall (missing fields,
+          // bad JSON structure, etc.) we inject a system error into the
+          // conversation history and let the inference loop continue so
+          // the model can self-correct on the next round.
+          val functionCallPart = try {
+            parts.firstOrNull { it.asJsonObject.has("functionCall") }
+          } catch (e: Exception) {
+            Log.w(TAG, "Auto-Heal: failed to inspect parts for functionCall", e)
+            null
           }
 
           if (functionCallPart != null) {
-            // Execute the function call.
-            val fc = functionCallPart.asJsonObject.getAsJsonObject("functionCall")
-            val fnName = fc.get("name").asString
-            val fnArgs = fc.getAsJsonObject("args") ?: JsonObject()
+            try {
+              // Execute the function call.
+              val fc = functionCallPart.asJsonObject.getAsJsonObject("functionCall")
+              val fnName = fc.get("name").asString
+              val fnArgs = fc.getAsJsonObject("args") ?: JsonObject()
 
-            Log.d(TAG, "Function call: $fnName($fnArgs)")
+              Log.d(TAG, "Function call: $fnName($fnArgs)")
 
-            val result = executeFunctionCall(instance.toolSet, fnName, fnArgs)
+              val result = executeFunctionCall(instance.toolSet, fnName, fnArgs)
 
-            // Add function response to history.
-            val functionResponse = JsonObject().apply {
-              addProperty("role", "function")
-              add("parts", JsonArray().apply {
-                add(JsonObject().apply {
-                  add("functionResponse", JsonObject().apply {
-                    addProperty("name", fnName)
-                    add("response", JsonParser.parseString(gson.toJson(result)))
+              // Add function response to history.
+              val functionResponse = JsonObject().apply {
+                addProperty("role", "function")
+                add("parts", JsonArray().apply {
+                  add(JsonObject().apply {
+                    add("functionResponse", JsonObject().apply {
+                      addProperty("name", fnName)
+                      add("response", JsonParser.parseString(gson.toJson(result)))
+                    })
                   })
                 })
-              })
-            }
-            instance.conversationHistory.add(functionResponse)
+              }
+              instance.conversationHistory.add(functionResponse)
 
-            // Emit a status update so the user sees progress.
-            resultListener("", false, null)
-            continue
+              // Emit a status update so the user sees progress.
+              resultListener("", false, null)
+              continue
+            } catch (e: Exception) {
+              // ── Auto-Heal: malformed tool call recovery ──────────────
+              // Do NOT crash the loop. Inject a system error message into
+              // the conversation history so the model can self-correct.
+              Log.e(TAG, "Auto-Heal: malformed function call — injecting error and retrying", e)
+              val errorMessage = "[System Error: Malformed tool call. Invalid JSON syntax " +
+                "or missing fields. Exception: ${e.message}. Correct your formatting and try again.]"
+              val errorContent = JsonObject().apply {
+                addProperty("role", "user")
+                add("parts", JsonArray().apply {
+                  add(JsonObject().apply { addProperty("text", errorMessage) })
+                })
+              }
+              instance.conversationHistory.add(errorContent)
+              resultListener("", false, null)
+              continue
+            }
           }
 
           // No function call — extract text and deliver it.

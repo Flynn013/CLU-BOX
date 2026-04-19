@@ -1119,9 +1119,10 @@ open class LlmChatViewModelBase(
                     // Re-invoke inference with a corrective prompt.
                     generateResponse(
                       model = model,
-                      input = "[System: Your previous response contained malformed tool-call " +
-                        "tokens. The broken output has been discarded. To use a tool, you MUST " +
-                        "output the tool call using the native function-calling mechanism. Do " +
+                      input = "[System Error: Malformed tool call. Invalid JSON syntax or " +
+                        "missing XML tags. The broken output has been discarded. " +
+                        "Correct your formatting and try again. To use a tool, you MUST " +
+                        "invoke it through the native function-calling mechanism. Do " +
                         "NOT manually type <|tool_call> tags or JSON. Simply invoke the tool " +
                         "function directly. Now, please retry the user's original request.]",
                       taskId = taskId,

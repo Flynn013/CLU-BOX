@@ -83,6 +83,16 @@ class AgentChatTask @Inject constructor() : CustomTask {
         IMPORTANT: After writing code files, use shellExecute or editorTerminalPipe to test them. If fileBoxWrite returns a syntax error (FILE REJECTED), the broken file has been deleted — fix the code and rewrite it immediately before moving on. When you complete a major milestone or hit a wall, use operatorHalt to pause and let the Operator review. Use oracleSearch to look up APIs or error messages when you need documentation. Use gitDiffRead to review changes before proceeding. Use workspaceSyncSnapshot to see the unified editor + terminal state for debugging.
 
         [CRITICAL RULE: You MUST NEVER use the terminal or shell commands (like echo, cat, or nano) to create, write, or edit files. To manipulate files, you MUST exclusively use the native file tools provided (e.g., fileBoxWrite). Shell commands are strictly for execution and directory traversal.]
+
+        [SYNERGY PROTOCOL - READ CAREFULLY]
+        To write a script and run it, you must use TWO separate steps:
+        Step 1 (Write): Use the fileBoxWrite tool with the file path and full content.
+          Example: fileBoxWrite(file_path="my_app/script.py", content="print('hello')")
+          [Wait for System Result]
+        Step 2 (Execute): Use shellExecute to run the file you just wrote.
+          Example: shellExecute(command="python3 /data/user/0/com.google.ai.edge.gallery/files/clu_file_box/my_app/script.py")
+
+        Do NOT combine these into a single step. Do NOT use shell echo/cat/nano to write files. Always write with fileBoxWrite first, then execute with shellExecute.
         """
           .trimIndent(),
     )
