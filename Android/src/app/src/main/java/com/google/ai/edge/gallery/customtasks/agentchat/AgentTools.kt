@@ -175,47 +175,67 @@ class AgentTools() : ToolSet {
   var resultImageToShow: CallJsSkillResultImage? = null
   var resultWebviewToShow: CallJsSkillResultWebview? = null
 
-  // ── Dynamic tool catalog for system prompt injection ──────────────────
+  // ── Dynamic tool catalog via SkillRegistry ────────────────────────────
 
-  /**
-   * Canonical catalog of every @Tool method in this class.
-   * Kept here — next to the implementations — so additions/renames are
-   * caught at review time. The list is intentionally defined once;
-   * [getToolsSummary] simply formats it for the system prompt.
-   */
-  private data class ToolEntry(val name: String, val description: String)
-
-  private val toolCatalog: List<ToolEntry> = listOf(
-    ToolEntry("loadSkill", "Load a skill's instructions by name."),
-    ToolEntry("runJs", "Execute a JavaScript skill script."),
-    ToolEntry("runIntent", "Run an Android intent to perform actions on the device."),
-    ToolEntry("queryBrain", "Search the BrainBox knowledge graph for stored memories/neurons."),
-    ToolEntry("saveBrainNeuron", "Save a new memory/fact/context to the BrainBox knowledge graph."),
-    ToolEntry("vectorRecall", "Semantic search: embed a query and find the top-3 most relevant neurons via cosine similarity."),
-    ToolEntry("commitMemory", "Autonomously write a memory to BrainBox with title, synapses, ground_truth, and false_paths. Auto-embeds for future vector recall."),
-    ToolEntry("workspaceMap", "Scan the clu_file_box workspace and return a JSON tree of all files and folders. Always call this first to orient yourself."),
-    ToolEntry("fileBoxWrite", "The ONLY permitted tool for creating, writing, or overwriting files on disk. Pass the absolute path and the raw file content. NEVER use shell commands to write files."),
-    ToolEntry("fileBoxRead", "Read a file from the FILE_BOX workspace."),
-    ToolEntry("taskQueueUpdate", "Set status='pending' + next_task_description to continue working autonomously, or status='complete' when finished."),
-    ToolEntry("architectInit", "(Planner-Worker) Call ONCE to commit a project blueprint with goal and file list. Starts the worker phase automatically."),
-    ToolEntry("workerExecute", "(Planner-Worker) Write one file, mark it DONE in blueprint.md, auto-continue until is_project_finished=true."),
-    ToolEntry("shellExecute", "Executes bash commands in the Termux environment. STRICTLY PROHIBITED FOR FILE CREATION OR EDITING. Use only to run/test code or debug."),
-    ToolEntry("commandOverride", "Run a terminal command visibly on the MSTR_CTRL screen so the user can watch. STRICTLY PROHIBITED FOR FILE CREATION OR EDITING."),
-    ToolEntry("operatorHalt", "Stop the autonomous loop and present a reason to the user."),
-    ToolEntry("oracleSearch", "Search offline .zim documentation (StackOverflow, API docs) for technical answers."),
-    ToolEntry("gitDiffRead", "Get git diff (--unified=0) for a file or the whole workspace."),
-    ToolEntry("workspaceSyncSnapshot", "Get a unified snapshot of FILE_BOX editor + MSTR_CTRL terminal state for debugging."),
-    ToolEntry("editorTerminalPipe", "Pipe the file open in FILE_BOX into MSTR_CTRL for execution. Auto-detects runtime (.py → python3, .js → node, .sh → sh)."),
-    ToolEntry("createSkill", "Create a new custom skill for CLU/BOX by writing a SKILL.md (name, description, instructions). The skill is saved permanently."),
-  )
+  /** Lazily initialised [SkillRegistry] that holds all [CluSkill] instances. */
+  val skillRegistry: SkillRegistry by lazy { SkillRegistry(this) }
 
   /**
    * Returns a formatted multi-line string listing every native tool with its
    * description. Intended for injection into the system prompt via the
-   * `___TOOLS___` placeholder.
+   * `___TOOLS___` placeholder. Delegates to [SkillRegistry.getToolsSummary].
    */
-  fun getToolsSummary(): String {
-    return toolCatalog.joinToString("\n") { "• ${it.name} — ${it.description}" }
+  fun getToolsSummary(): String = skillRegistry.getToolsSummary()
+
+  /**
+   * Returns metadata-only [CluSkill] instances for all `@Tool` methods that
+   * do NOT have a dedicated [CluSkill] class (i.e. everything except
+   * [ShellExecuteSkill] and [FileBoxWriteSkill]).
+   *
+   * These provide [name], [description], and empty schema/example fields.
+   * Execution for these tools goes through the litertlm `@Tool` framework.
+   */
+  internal fun getMetadataOnlySkills(): List<CluSkill> {
+    // Tools that already have dedicated CluSkill implementations.
+    val ported = setOf("shellExecute", "fileBoxWrite")
+
+    data class ToolEntry(val name: String, val description: String)
+
+    val catalog = listOf(
+      ToolEntry("loadSkill", "Load a skill's instructions by name."),
+      ToolEntry("runJs", "Execute a JavaScript skill script."),
+      ToolEntry("runIntent", "Run an Android intent to perform actions on the device."),
+      ToolEntry("queryBrain", "Search the BrainBox knowledge graph for stored memories/neurons."),
+      ToolEntry("saveBrainNeuron", "Save a new memory/fact/context to the BrainBox knowledge graph."),
+      ToolEntry("vectorRecall", "Semantic search: embed a query and find the top-3 most relevant neurons via cosine similarity."),
+      ToolEntry("commitMemory", "Autonomously write a memory to BrainBox with title, synapses, ground_truth, and false_paths. Auto-embeds for future vector recall."),
+      ToolEntry("workspaceMap", "Scan the clu_file_box workspace and return a JSON tree of all files and folders. Always call this first to orient yourself."),
+      ToolEntry("fileBoxRead", "Read a file from the FILE_BOX workspace."),
+      ToolEntry("taskQueueUpdate", "Set status='pending' + next_task_description to continue working autonomously, or status='complete' when finished."),
+      ToolEntry("architectInit", "(Planner-Worker) Call ONCE to commit a project blueprint with goal and file list. Starts the worker phase automatically."),
+      ToolEntry("workerExecute", "(Planner-Worker) Write one file, mark it DONE in blueprint.md, auto-continue until is_project_finished=true."),
+      ToolEntry("commandOverride", "Run a terminal command visibly on the MSTR_CTRL screen so the user can watch. STRICTLY PROHIBITED FOR FILE CREATION OR EDITING."),
+      ToolEntry("operatorHalt", "Stop the autonomous loop and present a reason to the user."),
+      ToolEntry("oracleSearch", "Search offline .zim documentation (StackOverflow, API docs) for technical answers."),
+      ToolEntry("gitDiffRead", "Get git diff (--unified=0) for a file or the whole workspace."),
+      ToolEntry("workspaceSyncSnapshot", "Get a unified snapshot of FILE_BOX editor + MSTR_CTRL terminal state for debugging."),
+      ToolEntry("editorTerminalPipe", "Pipe the file open in FILE_BOX into MSTR_CTRL for execution. Auto-detects runtime (.py → python3, .js → node, .sh → sh)."),
+      ToolEntry("createSkill", "Create a new custom skill for CLU/BOX by writing a SKILL.md (name, description, instructions). The skill is saved permanently."),
+    )
+
+    return catalog
+      .filter { it.name !in ported }
+      .map { entry ->
+        object : CluSkill {
+          override val name = entry.name
+          override val description = entry.description
+          override val jsonSchema = ""
+          override val fewShotExample = ""
+          override suspend fun execute(args: org.json.JSONObject): String {
+            return "[Error: '$name' must be invoked through the native @Tool framework, not the CluSkill router.]"
+          }
+        }
+      }
   }
 
   /** Loads skill. */

@@ -119,7 +119,10 @@ class AgentChatTask @Inject constructor() : CustomTask {
           onDone = onDone,
           systemInstruction =
             agentTools.skillManagerViewModel.getSystemPrompt(
-              task.defaultSystemPrompt,
+              // Boot Sequence: prepend the Genesis Identity Block to the
+              // base prompt so the LLM always starts with CLU's core
+              // identity and directives.
+              agentTools.skillRegistry.buildFinalSystemPrompt(task.defaultSystemPrompt),
               toolsSummary = agentTools.getToolsSummary(),
             ),
           tools = listOf(tool(agentTools)),
