@@ -146,6 +146,10 @@ private const val TOOL_CALL_CIRCUIT_BREAKER_NOTICE =
 /** Maximum number of commands that can be buffered while inference is running. */
 private const val MAX_COMMAND_QUEUE_SIZE = 10
 
+/** Max number of recovery re-invocations before giving up. Prevents infinite
+ *  loops when the model persistently produces garbled or trivial output. */
+private const val MAX_RECOVERY_DEPTH = 2
+
 /**
  * A pending user command that was submitted while inference was already in progress.
  * Commands are drained sequentially once the current inference completes.
@@ -756,6 +760,7 @@ open class LlmChatViewModelBase(
     onDone: () -> Unit = {},
     onError: (String) -> Unit,
     allowThinking: Boolean = false,
+    recoveryDepth: Int = 0,
   ) {
     // ── Re-entrancy guard + Command Buffer ─────────────────────────
     // The native C++ LLM backend does not support concurrent
@@ -916,10 +921,14 @@ open class LlmChatViewModelBase(
 
             if (shouldCancelInference) {
               // Already flagged — suppress everything until done.
+              // NOTE: Do NOT reset shouldCancelInference here. It must
+              // remain true so the garbled-recovery block in the `done`
+              // handler (line ~1084) can detect it and fire the corrective
+              // re-prompt. Resetting it prematurely makes the recovery
+              // dead code.
               tokenForUI = ""
               if (done) {
                 Log.w(TAG, "Inference ended after garbled-token cancellation")
-                shouldCancelInference = false
               }
             } else if (isBufferingToolCall) {
               toolCallBuffer.append(partialResult)
@@ -1083,27 +1092,46 @@ open class LlmChatViewModelBase(
                 // the model to retry with clean syntax.
                 if (shouldCancelInference) {
                   shouldCancelInference = false
-                  Log.w(TAG, "Garbled tool-call detected — initiating recursive restart")
-                  // Remove the broken agent message from the chat.
-                  val brokenMsg = getLastMessage(model = model)
-                  if (brokenMsg is ChatMessageText && brokenMsg.side == ChatSide.AGENT) {
-                    removeLastMessage(model = model)
+                  if (recoveryDepth >= MAX_RECOVERY_DEPTH) {
+                    Log.w(TAG, "Garbled tool-call detected but max recovery depth ($MAX_RECOVERY_DEPTH) reached — giving up")
+                    val brokenMsg = getLastMessage(model = model)
+                    if (brokenMsg is ChatMessageText && brokenMsg.side == ChatSide.AGENT) {
+                      removeLastMessage(model = model)
+                    }
+                    addMessage(
+                      model = model,
+                      message = ChatMessageText(
+                        content = "I encountered repeated issues trying to use tools. Please try rephrasing your request.",
+                        side = ChatSide.AGENT,
+                      ),
+                    )
+                    setInProgress(false)
+                    onDone()
+                    drainCommandQueue()
+                  } else {
+                    Log.w(TAG, "Garbled tool-call detected — initiating recursive restart (depth=${recoveryDepth + 1})")
+                    // Remove the broken agent message from the chat.
+                    val brokenMsg = getLastMessage(model = model)
+                    if (brokenMsg is ChatMessageText && brokenMsg.side == ChatSide.AGENT) {
+                      removeLastMessage(model = model)
+                    }
+                    setInProgress(false)
+                    // Re-invoke inference with a corrective prompt.
+                    generateResponse(
+                      model = model,
+                      input = "[System: Your previous response contained malformed tool-call " +
+                        "tokens. The broken output has been discarded. To use a tool, you MUST " +
+                        "output the tool call using the native function-calling mechanism. Do " +
+                        "NOT manually type <|tool_call> tags or JSON. Simply invoke the tool " +
+                        "function directly. Now, please retry the user's original request.]",
+                      taskId = taskId,
+                      onFirstToken = onFirstToken,
+                      onDone = onDone,
+                      onError = onError,
+                      allowThinking = allowThinking,
+                      recoveryDepth = recoveryDepth + 1,
+                    )
                   }
-                  setInProgress(false)
-                  // Re-invoke inference with a corrective prompt.
-                  generateResponse(
-                    model = model,
-                    input = "[System: Your previous response contained malformed tool-call " +
-                      "tokens. The broken output has been discarded. To use a tool, you MUST " +
-                      "output the tool call using the native function-calling mechanism. Do " +
-                      "NOT manually type <|tool_call> tags or JSON. Simply invoke the tool " +
-                      "function directly. Now, please retry the user's original request.]",
-                    taskId = taskId,
-                    onFirstToken = onFirstToken,
-                    onDone = onDone,
-                    onError = onError,
-                    allowThinking = allowThinking,
-                  )
                 } else {
                   // ── Post-tool recovery ────────────────────────────────
                   // If a tool call occurred during this inference pass and
@@ -1115,23 +1143,25 @@ open class LlmChatViewModelBase(
                   val visibleText = (lastMsg as? ChatMessageText)
                     ?.takeIf { it.side == ChatSide.AGENT }
                     ?.content?.trim() ?: ""
-                  if (toolCallOccurred && visibleText.length <= 3) {
-                    Log.w(TAG, "Post-tool recovery: model produced trivial output ('$visibleText') after tool call — nudging")
+                  if (toolCallOccurred && visibleText.length <= 3 && recoveryDepth < MAX_RECOVERY_DEPTH) {
+                    Log.w(TAG, "Post-tool recovery: model produced trivial output ('$visibleText') after tool call — nudging (depth=${recoveryDepth + 1})")
                     if (lastMsg is ChatMessageText && lastMsg.side == ChatSide.AGENT) {
                       removeLastMessage(model = model)
                     }
                     setInProgress(false)
                     generateResponse(
                       model = model,
-                      input = "[System: The tool has returned its result. You MUST now " +
-                        "respond to the user with a clear summary of what happened " +
-                        "and any next steps. Do NOT output only closing braces or " +
-                        "empty text. Continue the conversation normally.]",
+                      input = "[System: The tool returned its result but you produced no " +
+                        "visible output. You MUST continue with the current task. If you " +
+                        "need to call another tool, do so now. Otherwise, respond to the " +
+                        "user with the result. Do NOT output only closing braces or " +
+                        "empty text.]",
                       taskId = taskId,
                       onFirstToken = onFirstToken,
                       onDone = onDone,
                       onError = onError,
                       allowThinking = allowThinking,
+                      recoveryDepth = recoveryDepth + 1,
                     )
                   } else {
                   // Persist the completed agent response and track tokens.
