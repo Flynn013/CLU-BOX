@@ -124,67 +124,86 @@ class TerminalSessionManager(private val context: Context) {
    */
   fun startSession() = sessionLock.withLock {
     if (isSessionAlive) return
-    Log.d(TAG, "Starting persistent shell session (HOME=${sandboxRoot.absolutePath})")
+    Log.d(TAG, "Checkpoint 1: Preparing persistent shell session (HOME=${sandboxRoot.absolutePath})")
 
-    // Build PATH: include Termux bin dir only if it actually exists on this device.
-    val basePath = "/system/bin:/system/xbin:" + (System.getenv("PATH") ?: "")
-    val effectivePath = if (java.io.File(TERMUX_BIN).isDirectory) "$TERMUX_BIN:$basePath" else basePath
+    try {
+      // Build PATH: include Termux bin dir only if it actually exists on this device.
+      Log.d(TAG, "Checkpoint 2: Building environment")
+      val basePath = "/system/bin:/system/xbin:" + (System.getenv("PATH") ?: "")
+      val effectivePath = if (java.io.File(TERMUX_BIN).isDirectory) "$TERMUX_BIN:$basePath" else basePath
 
-    val env = mutableMapOf(
-      "HOME" to sandboxRoot.absolutePath,
-      "TERM" to "dumb",
-      "PATH" to effectivePath,
-    )
-    // Inject Termux-specific environment variables when the Termux prefix exists.
-    // This gives Shell_Execute access to python, node, pkg, git, and native libs.
-    if (java.io.File(TERMUX_PREFIX).isDirectory) {
-      env["PREFIX"] = TERMUX_PREFIX
-      env["LD_LIBRARY_PATH"] = TERMUX_LIB
-    }
+      val env = mutableMapOf(
+        "HOME" to sandboxRoot.absolutePath,
+        "TERM" to "dumb",
+        "PATH" to effectivePath,
+      )
+      // Inject Termux-specific environment variables when the Termux prefix exists.
+      // This gives Shell_Execute access to python, node, pkg, git, and native libs.
+      if (java.io.File(TERMUX_PREFIX).isDirectory) {
+        env["PREFIX"] = TERMUX_PREFIX
+        env["LD_LIBRARY_PATH"] = TERMUX_LIB
+      }
 
-    val pb = ProcessBuilder("sh")
-      .directory(sandboxRoot)
-      .redirectErrorStream(false)
+      Log.d(TAG, "Checkpoint 3: Starting ProcessBuilder")
+      val pb = ProcessBuilder("sh")
+        .directory(sandboxRoot)
+        .redirectErrorStream(false)
 
-    pb.environment().putAll(env)
+      pb.environment().putAll(env)
 
-    val proc = pb.start()
-    process = proc
-    stdinWriter = OutputStreamWriter(proc.outputStream, Charsets.UTF_8)
-    isSessionAlive = true
+      Log.d(TAG, "Checkpoint 4: Spawning shell process")
+      val proc = pb.start()
+      process = proc
+      stdinWriter = OutputStreamWriter(proc.outputStream, Charsets.UTF_8)
+      isSessionAlive = true
 
-    appendSystemLine("[MSTR_CTRL] Session started — HOME=${sandboxRoot.absolutePath}")
+      Log.d(TAG, "Checkpoint 5: Opening stream readers")
+      appendSystemLine("[MSTR_CTRL] Session started — HOME=${sandboxRoot.absolutePath}")
 
-    // Background reader for stdout.
-    scope.launch {
-      try {
-        BufferedReader(InputStreamReader(proc.inputStream, Charsets.UTF_8)).use { reader ->
-          var line = reader.readLine()
-          while (line != null) {
-            appendLine(TerminalLine(line, LineSource.STDOUT))
-            line = reader.readLine()
+      // Background reader for stdout.
+      scope.launch {
+        try {
+          BufferedReader(InputStreamReader(proc.inputStream, Charsets.UTF_8)).use { reader ->
+            var line = reader.readLine()
+            while (line != null) {
+              appendLine(TerminalLine(line, LineSource.STDOUT))
+              line = reader.readLine()
+            }
           }
-        }
-      } catch (_: Exception) { /* stream closed */ }
+        } catch (_: Exception) { /* stream closed */ }
+        isSessionAlive = false
+        appendSystemLine("[MSTR_CTRL] Session ended.")
+      }
+
+      // Background reader for stderr.
+      scope.launch {
+        try {
+          BufferedReader(InputStreamReader(proc.errorStream, Charsets.UTF_8)).use { reader ->
+            var line = reader.readLine()
+            while (line != null) {
+              appendLine(TerminalLine(line, LineSource.STDERR))
+              line = reader.readLine()
+            }
+          }
+        } catch (_: Exception) { /* stream closed */ }
+      }
+
+      Log.d(TAG, "Checkpoint 6: Session fully started — running pre-flight check")
+      // Pre-flight firmware bootstrap.
+      runPreFlightCheck()
+    } catch (e: SecurityException) {
+      Log.e(TAG, "startSession: blocked by Android security (W^X / SELinux)", e)
+      appendSystemLine("[MSTR_CTRL] ERROR: Terminal execution blocked by Android OS Security (W^X). Shell unavailable.")
       isSessionAlive = false
-      appendSystemLine("[MSTR_CTRL] Session ended.")
+    } catch (e: UnsatisfiedLinkError) {
+      Log.e(TAG, "startSession: native library load failed", e)
+      appendSystemLine("[MSTR_CTRL] ERROR: Terminal native library missing. Shell unavailable.")
+      isSessionAlive = false
+    } catch (e: Throwable) {
+      Log.e(TAG, "startSession: unexpected fatal error (${e.javaClass.simpleName})", e)
+      appendSystemLine("[MSTR_CTRL] ERROR: Terminal init failed — ${e.message}")
+      isSessionAlive = false
     }
-
-    // Background reader for stderr.
-    scope.launch {
-      try {
-        BufferedReader(InputStreamReader(proc.errorStream, Charsets.UTF_8)).use { reader ->
-          var line = reader.readLine()
-          while (line != null) {
-            appendLine(TerminalLine(line, LineSource.STDERR))
-            line = reader.readLine()
-          }
-        }
-      } catch (_: Exception) { /* stream closed */ }
-    }
-
-    // Pre-flight firmware bootstrap.
-    runPreFlightCheck()
   }
 
   /**
@@ -285,6 +304,12 @@ class TerminalSessionManager(private val context: Context) {
 
       Log.d(TAG, "executeCommandInSandbox: exit=${proc.exitValue()}, ${combined.length} chars")
       combined.ifEmpty { "(no output)" }
+    } catch (e: SecurityException) {
+      Log.e(TAG, "executeCommandInSandbox: W^X / SELinux block", e)
+      "ERROR: [System: Terminal execution blocked by Android OS Security (W^X). Fallback required.]"
+    } catch (e: UnsatisfiedLinkError) {
+      Log.e(TAG, "executeCommandInSandbox: native lib missing", e)
+      "ERROR: [System: Terminal native library unavailable. Shell execution disabled.]"
     } catch (e: Exception) {
       Log.e(TAG, "executeCommandInSandbox: exception", e)
       "ERROR: ${e.message}"
@@ -349,6 +374,12 @@ class TerminalSessionManager(private val context: Context) {
       }
 
       Pair(proc.exitValue(), combined)
+    } catch (e: SecurityException) {
+      Log.e(TAG, "executeCommandWithExitCode: W^X / SELinux block", e)
+      Pair(-1, "ERROR: [System: Terminal execution blocked by Android OS Security (W^X). Fallback required.]")
+    } catch (e: UnsatisfiedLinkError) {
+      Log.e(TAG, "executeCommandWithExitCode: native lib missing", e)
+      Pair(-1, "ERROR: [System: Terminal native library unavailable. Shell execution disabled.]")
     } catch (e: Exception) {
       Pair(-1, "ERROR: ${e.message}")
     }

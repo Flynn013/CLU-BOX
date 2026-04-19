@@ -18,6 +18,7 @@ package com.google.ai.edge.gallery.ui.osmodules
 
 import android.content.Context
 import android.graphics.Typeface
+import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.inputmethod.InputMethodManager
@@ -96,9 +97,17 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
   // is ready before the AndroidView factory runs.  Previously this was
   // in a LaunchedEffect which ran *after* the first composition,
   // causing the TerminalView factory to see a null session.
+  //
+  // The createSession call is wrapped inside TermuxSessionBridge with a
+  // blast-shield try-catch, so even if PTY init fails due to W^X or
+  // native-lib errors the bridge object is still valid (sessionInitFailed
+  // will be true and terminalSession will be null).
   val bridge = remember {
     TermuxSessionBridge(context).also { b ->
       b.createSession(sessionManager.sandboxRoot)
+      if (b.sessionInitFailed) {
+        Log.e("MstrCtrlScreen", "PTY init failed: ${b.sessionInitError}")
+      }
     }
   }
 

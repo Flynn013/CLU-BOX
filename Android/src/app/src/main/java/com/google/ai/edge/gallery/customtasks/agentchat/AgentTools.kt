@@ -995,6 +995,18 @@ class AgentTools() : ToolSet {
         "output" to capOutput(output),
         "status" to status,
       )
+      } catch (e: SecurityException) {
+        Log.e(TAG, "shellExecute: W^X / SELinux block", e)
+        mapOf(
+          "error" to "[System: Terminal execution blocked by Android OS Security (W^X). Fallback required.]",
+          "status" to "failed",
+        )
+      } catch (e: UnsatisfiedLinkError) {
+        Log.e(TAG, "shellExecute: native library load failed", e)
+        mapOf(
+          "error" to "[System: Terminal native library unavailable. Shell execution disabled.]",
+          "status" to "failed",
+        )
       } catch (e: Exception) {
         Log.e(TAG, "shellExecute: unexpected error", e)
         mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
@@ -1061,6 +1073,18 @@ class AgentTools() : ToolSet {
         "output" to capOutput(output),
         "status" to status,
       )
+      } catch (e: SecurityException) {
+        Log.e(TAG, "commandOverride: W^X / SELinux block", e)
+        mapOf(
+          "error" to "[System: Terminal execution blocked by Android OS Security (W^X). Fallback required.]",
+          "status" to "failed",
+        )
+      } catch (e: UnsatisfiedLinkError) {
+        Log.e(TAG, "commandOverride: native library load failed", e)
+        mapOf(
+          "error" to "[System: Terminal native library unavailable. Shell execution disabled.]",
+          "status" to "failed",
+        )
       } catch (e: Exception) {
         Log.e(TAG, "commandOverride: unexpected error", e)
         mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")

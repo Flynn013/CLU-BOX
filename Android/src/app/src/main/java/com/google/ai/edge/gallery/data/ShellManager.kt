@@ -88,6 +88,12 @@ fun executeCommand(command: String): String {
 
     Log.d(TAG, "executeCommand: exit=${process.exitValue()}, output=${combined.length} chars")
     combined.ifEmpty { "(no output)" }
+  } catch (e: SecurityException) {
+    Log.e(TAG, "executeCommand: blocked by Android security (W^X / SELinux)", e)
+    "ERROR: [System: Terminal execution blocked by Android OS Security (W^X). Fallback required.]"
+  } catch (e: UnsatisfiedLinkError) {
+    Log.e(TAG, "executeCommand: native library load failed", e)
+    "ERROR: [System: Terminal native library unavailable. Shell execution disabled.]"
   } catch (e: Exception) {
     Log.e(TAG, "executeCommand: exception", e)
     "ERROR: ${e.message}"
