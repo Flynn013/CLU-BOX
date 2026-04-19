@@ -121,6 +121,15 @@ private const val APPROX_CHARS_PER_TOKEN = 3.2
 /** Closing delimiters that signal the tool call payload is complete. */
 private val TOOL_CALL_CLOSE_TAGS = listOf("</tool_call>", "<end_of_turn>")
 
+/**
+ * Regex patterns that detect garbled / broken tool-call tokens emitted by the
+ * model when constrained decoding or tokenisation corrupts the output.
+ * Common examples: `<|"|>`, `<|'|>`, `<||>`, `<| |>`, `<|tool_`.
+ * These patterns are checked against the running output accumulator so we
+ * can halt the model early rather than letting it spiral into garbage.
+ */
+private val GARBLED_TOOL_TOKEN_PATTERN = Regex("""<\|["'|  ].*?\|?>""")
+
 /** Replacement text injected when a broken tool call is scrubbed from history. */
 private const val TOOL_CALL_SCRUB_NOTICE =
   "[System: Tool execution interrupted or malformed. Proceed with standard text.]"
@@ -761,15 +770,38 @@ open class LlmChatViewModelBase(
       var isBufferingToolCall = false
       val toolCallBuffer = StringBuilder()
 
+      // Running accumulator of ALL tokens emitted so far (including
+      // tool-call blocks). Used to detect garbled tool-call artifacts
+      // that span multiple token emissions.
+      val fullResponseAccumulator = StringBuilder()
+
+      // Flag set when the interceptor detects a garbled tool call and
+      // needs to abort the current inference run.
+      var shouldCancelInference = false
+
       val resultListener: (String, Boolean, String?) -> Unit =
           { partialResult, done, partialThinkingResult ->
+            // ── Garbled token detection ─────────────────────────────
+            // Append every token to the running accumulator before any
+            // other processing. If we spot a known-broken pattern
+            // (e.g. <|"|>) we immediately flag for cancellation and
+            // suppress the garbage from reaching the UI.
+            fullResponseAccumulator.append(partialResult)
+
             // ── Tool-call buffering interceptor ─────────────────────
             // Accumulate the token first; detect open/close boundaries
             // on the *running accumulation* (toolCallBuffer) so that
             // tags split across multiple token emissions are handled.
             var tokenForUI = partialResult
 
-            if (isBufferingToolCall) {
+            if (shouldCancelInference) {
+              // Already flagged — suppress everything until done.
+              tokenForUI = ""
+              if (done) {
+                Log.w(TAG, "Inference ended after garbled-token cancellation")
+                shouldCancelInference = false
+              }
+            } else if (isBufferingToolCall) {
               toolCallBuffer.append(partialResult)
               val bufStr = toolCallBuffer.toString()
               val closed = TOOL_CALL_CLOSE_TAGS.any { bufStr.contains(it) }
@@ -791,6 +823,24 @@ open class LlmChatViewModelBase(
               toolCallBuffer.append(partialResult.substring(idx))
               isBufferingToolCall = true
               Log.d(TAG, "Tool-call buffer started")
+            } else if (!done) {
+              // ── Check for garbled tool tokens in the recent output ──
+              // Inspect the last ~40 chars of the accumulator (enough
+              // for any mangled <|…|> sequence) to avoid repeated full
+              // scans. If a broken token is found, cancel inference so
+              // the recursive restart can re-prompt the model cleanly.
+              val tail = fullResponseAccumulator.takeLast(40)
+              if (GARBLED_TOOL_TOKEN_PATTERN.containsMatchIn(tail)) {
+                Log.w(TAG, "Garbled tool token detected in output: …${tail}")
+                shouldCancelInference = true
+                tokenForUI = ""
+                // Ask the model helper to stop generating immediately.
+                try {
+                  model.runtimeHelper.stopResponse(model)
+                } catch (e: Exception) {
+                  Log.e(TAG, "Failed to stop inference after garbled token", e)
+                }
+              }
             }
 
             if (tokenForUI.startsWith("<ctrl")) {
@@ -903,22 +953,54 @@ open class LlmChatViewModelBase(
                   }
                 }
 
-                // Persist the completed agent response and track tokens.
-                if (taskId.isNotEmpty()) {
-                  val agentMsg = getLastMessage(model = model)
-                  if (agentMsg is ChatMessageText && agentMsg.side == ChatSide.AGENT) {
-                    monitor.trackMessage(agentMsg.content)
-                    persistMessage(
-                      taskId = taskId,
-                      model = model,
-                      side = ChatSide.AGENT,
-                      content = agentMsg.content,
-                    )
+                // ── Recursive Restart: garbled tool-call recovery ─────
+                // If the interceptor flagged a garbled tool token, the
+                // model's output is garbage. Instead of persisting it and
+                // calling onDone (which would show broken text to the
+                // user), we scrub the broken response and re-invoke
+                // inference with a corrective system message that tells
+                // the model to retry with clean syntax.
+                if (shouldCancelInference) {
+                  shouldCancelInference = false
+                  Log.w(TAG, "Garbled tool-call detected — initiating recursive restart")
+                  // Remove the broken agent message from the chat.
+                  val brokenMsg = getLastMessage(model = model)
+                  if (brokenMsg is ChatMessageText && brokenMsg.side == ChatSide.AGENT) {
+                    removeLastMessage(model = model)
                   }
-                }
+                  setInProgress(false)
+                  // Re-invoke inference with a corrective prompt.
+                  generateResponse(
+                    model = model,
+                    input = "[System: Your previous response contained malformed tool-call " +
+                      "tokens. The broken output has been discarded. To use a tool, you MUST " +
+                      "output the tool call using the native function-calling mechanism. Do " +
+                      "NOT manually type <|tool_call> tags or JSON. Simply invoke the tool " +
+                      "function directly. Now, please retry the user's original request.]",
+                    taskId = taskId,
+                    onFirstToken = onFirstToken,
+                    onDone = onDone,
+                    onError = onError,
+                    allowThinking = allowThinking,
+                  )
+                } else {
+                  // Persist the completed agent response and track tokens.
+                  if (taskId.isNotEmpty()) {
+                    val agentMsg = getLastMessage(model = model)
+                    if (agentMsg is ChatMessageText && agentMsg.side == ChatSide.AGENT) {
+                      monitor.trackMessage(agentMsg.content)
+                      persistMessage(
+                        taskId = taskId,
+                        model = model,
+                        side = ChatSide.AGENT,
+                        content = agentMsg.content,
+                      )
+                    }
+                  }
 
-                setInProgress(false)
-                onDone()
+                  setInProgress(false)
+                  onDone()
+                }
               }
             }
           }
