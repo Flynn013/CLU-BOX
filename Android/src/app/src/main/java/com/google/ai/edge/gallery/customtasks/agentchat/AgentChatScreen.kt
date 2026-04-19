@@ -688,13 +688,11 @@ private fun resetSessionWithCurrentSkills(
   onDone: (Model) -> Unit = {},
 ) {
   val model = modelManagerViewModel.uiState.value.selectedModel
-  val newSelectedSkills = skillManagerViewModel.getSelectedSkills()
   viewModel.resetSession(
     task = task,
     model = model,
     systemInstruction =
-      if (newSelectedSkills.isEmpty()) null
-      else skillManagerViewModel.getSystemPrompt(
+      skillManagerViewModel.getSystemPrompt(
         curSystemPrompt,
         toolsSummary = agentTools.getToolsSummary(),
       ),
@@ -702,7 +700,8 @@ private fun resetSessionWithCurrentSkills(
     supportImage = true,
     supportAudio = true,
     onDone = { onDone(model) },
-    enableConversationConstrainedDecoding = true,
+    // Constrained decoding disabled — see AgentChatTaskModule for rationale.
+    enableConversationConstrainedDecoding = false,
   )
 }
 

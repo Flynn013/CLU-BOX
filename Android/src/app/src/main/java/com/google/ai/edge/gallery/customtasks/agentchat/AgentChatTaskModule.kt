@@ -103,16 +103,19 @@ class AgentChatTask @Inject constructor() : CustomTask {
           supportAudio = true,
           onDone = onDone,
           systemInstruction =
-            if (agentTools.skillManagerViewModel.getSelectedSkills().isEmpty()) {
-              null
-            } else {
-              agentTools.skillManagerViewModel.getSystemPrompt(
-                task.defaultSystemPrompt,
-                toolsSummary = agentTools.getToolsSummary(),
-              )
-            },
+            agentTools.skillManagerViewModel.getSystemPrompt(
+              task.defaultSystemPrompt,
+              toolsSummary = agentTools.getToolsSummary(),
+            ),
           tools = listOf(tool(agentTools)),
-          enableConversationConstrainedDecoding = true,
+          // Constrained decoding is intentionally DISABLED for Agent Chat.
+          // General-purpose Gemma models (E2B/E4B) were not fine-tuned with the
+          // full 21-tool catalog grammar. Enabling constrained decoding restricts
+          // the model from emitting <|tool_call> tokens, producing garbled output
+          // like <|"|> which breaks the tool execution loop entirely.
+          // The litertlm ToolSet framework handles tool-call routing natively
+          // without needing vocabulary constraints.
+          enableConversationConstrainedDecoding = false,
         )
       } catch (e: Throwable) {
         android.util.Log.e("CLU_CRASH_REPORT", "Model initialization failed: ${e.stackTraceToString()}")
