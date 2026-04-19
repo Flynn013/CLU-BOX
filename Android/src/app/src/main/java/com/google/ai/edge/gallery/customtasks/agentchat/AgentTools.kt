@@ -43,11 +43,60 @@ import kotlinx.coroutines.runBlocking
 private const val TAG = "AGAgentTools"
 
 /**
+ * Maximum character length for any single string argument accepted by a tool.
+ * Prevents the LLM (or a prompt-injection) from sending megabytes of junk data
+ * into a tool call. 32 KB is generous for any realistic code file or command.
+ */
+private const val MAX_INPUT_CHARS = 32_768
+
+/**
  * Maximum character length for any single tool output field delivered to the LLM.
  * Prevents runaway outputs (e.g. large file reads, verbose shell dumps) from
  * consuming the context window. ~3000 chars ≈ 750–950 tokens for Gemma.
  */
 private const val MAX_OUTPUT_CHARS = 3000
+
+// ── Input-Validation Helpers ───────────────────────────────────────────────
+
+/** Truncates any input string to [MAX_INPUT_CHARS]. */
+private fun capInput(text: String): String =
+  if (text.length > MAX_INPUT_CHARS) text.take(MAX_INPUT_CHARS) else text
+
+/**
+ * Returns a non-null error message if [path] contains path-traversal sequences
+ * (`..`) or absolute-path prefixes that would escape the FILE_BOX sandbox.
+ */
+private fun validateRelativePath(path: String): String? {
+  val normalized = path.trim()
+  if (normalized.isEmpty()) return "Path must not be empty"
+  if (normalized.contains("..")) return "Path must not contain '..'"
+  if (normalized.startsWith("/")) return "Path must be relative (no leading '/')"
+  return null
+}
+
+/**
+ * Dangerous shell metacharacter patterns that should be blocked from tool-supplied commands.
+ * This prevents the LLM from constructing shell injections via tool arguments.
+ */
+private val DANGEROUS_SHELL_PATTERNS = listOf(
+  "&&", "||", ";", "|", "`", "\$(", "\${", ">", "<", "\n",
+)
+
+/**
+ * Returns a non-null error message if [command] contains suspicious
+ * metacharacters that could enable shell injection via chained commands.
+ */
+private fun validateShellCommand(command: String): String? {
+  if (command.isBlank()) return "Command must not be empty"
+  if (command.length > MAX_INPUT_CHARS) return "Command exceeds maximum length"
+  for (pattern in DANGEROUS_SHELL_PATTERNS) {
+    if (command.contains(pattern)) {
+      return "Command contains disallowed shell metacharacter: '$pattern'. " +
+        "Execute only a single, simple command per call."
+    }
+  }
+  return null
+}
 
 /** Hard cap on the total serialized size of a tool result map (all keys + values).
  *  Prevents recursive tool loops from overflowing the KV cache with accumulated
@@ -811,13 +860,20 @@ class AgentTools() : ToolSet {
   ): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
       try {
-      Log.d(TAG, "fileBoxWrite: path='$file_path' content=${content.length} chars")
+      val safePath = file_path.trim()
+      val safeContent = capInput(content)
+      Log.d(TAG, "fileBoxWrite: path='$safePath' content=${safeContent.length} chars")
+
+      validateRelativePath(safePath)?.let { err ->
+        return@runBlocking mapOf("error" to err, "status" to "failed")
+      }
+
       val mgr = fileBoxManager
 
-      if (!mgr.isAllowedExtension(file_path)) {
+      if (!mgr.isAllowedExtension(safePath)) {
         _actionChannel.send(
           SkillProgressAgentAction(
-            label = "FILE_BOX: rejected '$file_path' (extension not allowed)",
+            label = "FILE_BOX: rejected '$safePath' (extension not allowed)",
             inProgress = false,
           )
         )
@@ -827,8 +883,8 @@ class AgentTools() : ToolSet {
         )
       }
 
-      val isNew = !java.io.File(mgr.root, file_path).exists()
-      val ok = mgr.writeCodeFile(file_path, content)
+      val isNew = !java.io.File(mgr.root, safePath).exists()
+      val ok = mgr.writeCodeFile(safePath, safeContent)
 
       if (!ok) {
         return@runBlocking mapOf("error" to "Failed to write file", "status" to "failed")
@@ -836,10 +892,10 @@ class AgentTools() : ToolSet {
 
       _actionChannel.send(
         SkillProgressAgentAction(
-          label = "FILE_BOX: wrote '$file_path'",
+          label = "FILE_BOX: wrote '$safePath'",
           inProgress = false,
           addItemTitle = "FILE_BOX Write",
-          addItemDescription = "Path: $file_path (${content.length} chars)",
+          addItemDescription = "Path: $safePath (${safeContent.length} chars)",
         )
       )
 
@@ -849,20 +905,20 @@ class AgentTools() : ToolSet {
         if (dao != null) {
           val neuron = NeuronEntity(
             id = UUID.randomUUID().toString(),
-            label = file_path,
+            label = safePath,
             type = "File_Creation_Log",
-            content = content,
+            content = safeContent,
           )
           dao.insertNeuron(neuron)
-          Log.d(TAG, "fileBoxWrite: logged new file creation to BrainBox: $file_path")
+          Log.d(TAG, "fileBoxWrite: logged new file creation to BrainBox: $safePath")
         }
       }
 
       // ── Phase 5: Auto-Validator Interceptor (Syntax Gatekeeper) ──
       // After saving, inspect the file extension and run a syntax check.
       // If validation fails, return the error to force the LLM to debug.
-      val ext = file_path.substringAfterLast('.', "").lowercase()
-      val absolutePath = java.io.File(mgr.root, file_path).absolutePath
+      val ext = safePath.substringAfterLast('.', "").lowercase()
+      val absolutePath = java.io.File(mgr.root, safePath).absolutePath
       val tsm = terminalSessionManager
 
       // Escape the file path for safe shell interpolation (replace ' with '\'').
@@ -878,32 +934,32 @@ class AgentTools() : ToolSet {
         val (exitCode, validationOutput) = tsm.executeCommandWithExitCode(validationCmd)
         if (exitCode != 0) {
           val errMsg = validationOutput.ifEmpty { "Unknown syntax error" }
-          Log.w(TAG, "fileBoxWrite: validation FAILED for '$file_path': $errMsg")
+          Log.w(TAG, "fileBoxWrite: validation FAILED for '$safePath': $errMsg")
 
           // Delete the rejected file to keep the sandbox clean.
-          mgr.deleteFile(file_path)
-          Log.d(TAG, "fileBoxWrite: deleted rejected file '$file_path'")
+          mgr.deleteFile(safePath)
+          Log.d(TAG, "fileBoxWrite: deleted rejected file '$safePath'")
 
           _actionChannel.send(
             SkillProgressAgentAction(
-              label = "FILE_BOX: syntax error in '$file_path' — file deleted",
+              label = "FILE_BOX: syntax error in '$safePath' — file deleted",
               inProgress = false,
               addItemTitle = "Auto-Validator",
               addItemDescription = "REJECTED & DELETED: $errMsg",
             )
           )
           return@runBlocking mapOf(
-            "file_path" to file_path,
+            "file_path" to safePath,
             "status" to "rejected_and_deleted",
             "error" to "FILE REJECTED & DELETED due to syntax error: $errMsg. " +
               "You MUST fix the code and call fileBoxWrite again with the corrected content.",
           )
         }
-        Log.d(TAG, "fileBoxWrite: validation PASSED for '$file_path'")
+        Log.d(TAG, "fileBoxWrite: validation PASSED for '$safePath'")
       }
 
       mapOf(
-        "file_path" to file_path,
+        "file_path" to safePath,
         "status" to "succeeded",
         "message" to if (validationCmd != null) "File written and validated successfully" else "File written successfully",
       )
@@ -927,32 +983,38 @@ class AgentTools() : ToolSet {
   ): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
       try {
-      Log.d(TAG, "fileBoxRead: path='$file_path'")
-      val content = fileBoxManager.readCodeFile(file_path)
+      val safePath = file_path.trim()
+      Log.d(TAG, "fileBoxRead: path='$safePath'")
+
+      validateRelativePath(safePath)?.let { err ->
+        return@runBlocking mapOf("error" to err, "status" to "failed")
+      }
+
+      val content = fileBoxManager.readCodeFile(safePath)
 
       if (content == null) {
         _actionChannel.send(
           SkillProgressAgentAction(
-            label = "FILE_BOX: file not found '$file_path'",
+            label = "FILE_BOX: file not found '$safePath'",
             inProgress = false,
           )
         )
         return@runBlocking mapOf(
-          "error" to "File not found or is not readable: $file_path",
+          "error" to "File not found or is not readable: $safePath",
           "status" to "failed",
         )
       }
 
       _actionChannel.send(
         SkillProgressAgentAction(
-          label = "FILE_BOX: read '$file_path'",
+          label = "FILE_BOX: read '$safePath'",
           inProgress = false,
           addItemTitle = "FILE_BOX Read",
-          addItemDescription = "Path: $file_path (${content.length} chars)",
+          addItemDescription = "Path: $safePath (${content.length} chars)",
         )
       )
 
-      mapOf("file_path" to file_path, "content" to capOutputWithSpill(content, spillDir), "status" to "succeeded")
+      mapOf("file_path" to safePath, "content" to capOutputWithSpill(content, spillDir), "status" to "succeeded")
       } catch (e: Exception) {
         Log.e(TAG, "fileBoxRead: unexpected error", e)
         mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
@@ -982,12 +1044,18 @@ class AgentTools() : ToolSet {
   ): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
       try {
-        Log.d(TAG, "fileBoxReadLines: path='$file_path' lines=$start_line..$end_line")
-        val content = fileBoxManager.readCodeFile(file_path)
+        val safePath = file_path.trim()
+        Log.d(TAG, "fileBoxReadLines: path='$safePath' lines=$start_line..$end_line")
+
+        validateRelativePath(safePath)?.let { err ->
+          return@runBlocking mapOf("error" to err, "status" to "failed")
+        }
+
+        val content = fileBoxManager.readCodeFile(safePath)
 
         if (content == null) {
           return@runBlocking mapOf(
-            "error" to "File not found or not readable: $file_path",
+            "error" to "File not found or not readable: $safePath",
             "status" to "failed",
           )
         }
@@ -999,13 +1067,13 @@ class AgentTools() : ToolSet {
 
         _actionChannel.send(
           SkillProgressAgentAction(
-            label = "FILE_BOX: read lines $safeStart–$safeEnd of '$file_path'",
+            label = "FILE_BOX: read lines $safeStart–$safeEnd of '$safePath'",
             inProgress = false,
           )
         )
 
         mapOf(
-          "file_path" to file_path,
+          "file_path" to safePath,
           "start_line" to safeStart.toString(),
           "end_line" to safeEnd.toString(),
           "total_lines" to allLines.size.toString(),
@@ -1039,18 +1107,28 @@ class AgentTools() : ToolSet {
   ): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
       try {
-        Log.d(TAG, "brainBoxGrep: path='$file_path' keyword='$keyword'")
-        val content = fileBoxManager.readCodeFile(file_path)
+        val safePath = file_path.trim()
+        val safeKeyword = keyword.trim()
+        Log.d(TAG, "brainBoxGrep: path='$safePath' keyword='$safeKeyword'")
+
+        validateRelativePath(safePath)?.let { err ->
+          return@runBlocking mapOf("error" to err, "status" to "failed")
+        }
+        if (safeKeyword.isBlank()) {
+          return@runBlocking mapOf("error" to "keyword must not be empty", "status" to "failed")
+        }
+
+        val content = fileBoxManager.readCodeFile(safePath)
 
         if (content == null) {
           return@runBlocking mapOf(
-            "error" to "File not found or not readable: $file_path",
+            "error" to "File not found or not readable: $safePath",
             "status" to "failed",
           )
         }
 
         val allLines = content.lines()
-        val lowerKeyword = keyword.lowercase()
+        val lowerKeyword = safeKeyword.lowercase()
         val contextRadius = 2
 
         // Collect indices of matching lines.
@@ -1060,10 +1138,10 @@ class AgentTools() : ToolSet {
 
         if (matchIndices.isEmpty()) {
           return@runBlocking mapOf(
-            "file_path" to file_path,
-            "keyword" to keyword,
+            "file_path" to safePath,
+            "keyword" to safeKeyword,
             "matches" to "0",
-            "result" to "No matches found for '$keyword'.",
+            "result" to "No matches found for '$safeKeyword'.",
             "status" to "succeeded",
           )
         }
@@ -1083,14 +1161,14 @@ class AgentTools() : ToolSet {
 
         _actionChannel.send(
           SkillProgressAgentAction(
-            label = "GREP: ${matchIndices.size} matches for '$keyword' in '$file_path'",
+            label = "GREP: ${matchIndices.size} matches for '$safeKeyword' in '$safePath'",
             inProgress = false,
           )
         )
 
         mapOf(
-          "file_path" to file_path,
-          "keyword" to keyword,
+          "file_path" to safePath,
+          "keyword" to safeKeyword,
           "matches" to matchIndices.size.toString(),
           "result" to capOutput(result),
           "status" to "succeeded",
@@ -1285,21 +1363,27 @@ class AgentTools() : ToolSet {
   ): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
       try {
+      val safePath = target_file_path.trim()
+      val safeContent = capInput(code_content)
       val finished = is_project_finished.trim().lowercase() == "true"
-      Log.d(TAG, "workerExecute: path='$target_file_path', finished=$finished, content=${code_content.length} chars")
+      Log.d(TAG, "workerExecute: path='$safePath', finished=$finished, content=${safeContent.length} chars")
+
+      validateRelativePath(safePath)?.let { err ->
+        return@runBlocking mapOf("error" to err, "status" to "failed")
+      }
 
       // 1. Write the file via FileBoxManager.
       val mgr = fileBoxManager
-      if (!mgr.isAllowedExtension(target_file_path)) {
+      if (!mgr.isAllowedExtension(safePath)) {
         return@runBlocking mapOf(
-          "error" to "Extension not allowed for '$target_file_path'.",
+          "error" to "Extension not allowed for '$safePath'.",
           "status" to "failed",
         )
       }
-      val isNew = !java.io.File(mgr.root, target_file_path).exists()
-      val ok = mgr.writeCodeFile(target_file_path, code_content)
+      val isNew = !java.io.File(mgr.root, safePath).exists()
+      val ok = mgr.writeCodeFile(safePath, safeContent)
       if (!ok) {
-        return@runBlocking mapOf("error" to "Failed to write $target_file_path", "status" to "failed")
+        return@runBlocking mapOf("error" to "Failed to write $safePath", "status" to "failed")
       }
 
       // BrainBox telemetry for new files.
@@ -1307,9 +1391,9 @@ class AgentTools() : ToolSet {
         brainBoxDao?.insertNeuron(
           NeuronEntity(
             id = UUID.randomUUID().toString(),
-            label = target_file_path,
+            label = safePath,
             type = "File_Creation_Log",
-            content = code_content,
+            content = safeContent,
           )
         )
       }
@@ -1319,18 +1403,18 @@ class AgentTools() : ToolSet {
       if (blueprint != null) {
         // Replace the first occurrence of "- [ ] target_file_path" with "- [x] target_file_path"
         val updatedBlueprint = blueprint.replaceFirst(
-          "- [ ] $target_file_path",
-          "- [x] $target_file_path",
+          "- [ ] $safePath",
+          "- [x] $safePath",
         )
         mgr.writeCodeFile(BLUEPRINT_PATH, updatedBlueprint)
       }
 
       _actionChannel.send(
         SkillProgressAgentAction(
-          label = if (finished) "Worker: project complete ✓" else "Worker: wrote '$target_file_path'",
+          label = if (finished) "Worker: project complete ✓" else "Worker: wrote '$safePath'",
           inProgress = !finished,
           addItemTitle = "Worker_Execute",
-          addItemDescription = "Path: $target_file_path (${code_content.length} chars)" +
+          addItemDescription = "Path: $safePath (${safeContent.length} chars)" +
             if (finished) "\n✓ All files complete." else "",
         )
       )
@@ -1347,7 +1431,7 @@ class AgentTools() : ToolSet {
       }
 
       mapOf(
-        "file_path" to target_file_path,
+        "file_path" to safePath,
         "is_project_finished" to finished.toString(),
         "status" to "succeeded",
       )
@@ -1382,22 +1466,27 @@ class AgentTools() : ToolSet {
   ): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
       try {
-      Log.d(TAG, "shellExecute: command='$command'")
+      val safeCmd = command.trim()
+      Log.d(TAG, "shellExecute: command='$safeCmd'")
+
+      validateShellCommand(safeCmd)?.let { err ->
+        return@runBlocking mapOf("error" to err, "status" to "failed")
+      }
 
       _actionChannel.send(
         SkillProgressAgentAction(
           label = "Shell: executing command…",
           inProgress = true,
           addItemTitle = "Shell_Execute",
-          addItemDescription = "$ $command",
+          addItemDescription = "$ $safeCmd",
         )
       )
 
       val tsm = terminalSessionManager
       val output = if (tsm != null) {
-        tsm.sendCommand(command, visible = false)
+        tsm.sendCommand(safeCmd, visible = false)
       } else {
-        com.google.ai.edge.gallery.data.executeCommand(command)
+        com.google.ai.edge.gallery.data.executeCommand(safeCmd)
       }
 
       _actionChannel.send(
@@ -1405,7 +1494,7 @@ class AgentTools() : ToolSet {
           label = "Shell: command finished",
           inProgress = false,
           addItemTitle = "Shell_Execute",
-          addItemDescription = "$ $command\n${output.take(200)}${if (output.length > 200) "…" else ""}",
+          addItemDescription = "$ $safeCmd\n${output.take(200)}${if (output.length > 200) "…" else ""}",
         )
       )
 
@@ -1416,7 +1505,7 @@ class AgentTools() : ToolSet {
       }
 
       mapOf(
-        "command" to command,
+        "command" to safeCmd,
         "output" to capOutputWithSpill(output, spillDir),
         "status" to status,
       )
@@ -1459,23 +1548,28 @@ class AgentTools() : ToolSet {
   ): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
       try {
-      Log.d(TAG, "commandOverride: command='$command'")
+      val safeCmd = command.trim()
+      Log.d(TAG, "commandOverride: command='$safeCmd'")
+
+      validateShellCommand(safeCmd)?.let { err ->
+        return@runBlocking mapOf("error" to err, "status" to "failed")
+      }
 
       _actionChannel.send(
         SkillProgressAgentAction(
           label = "MSTR_CTRL: running visible command…",
           inProgress = true,
           addItemTitle = "Command_Override",
-          addItemDescription = "$ $command",
+          addItemDescription = "$ $safeCmd",
         )
       )
 
       val tsm = terminalSessionManager
       val output = if (tsm != null) {
-        tsm.sendCommand(command, visible = true)
+        tsm.sendCommand(safeCmd, visible = true)
       } else {
         // Fallback: run silently if terminal session is not available.
-        com.google.ai.edge.gallery.data.executeCommand(command)
+        com.google.ai.edge.gallery.data.executeCommand(safeCmd)
       }
 
       _actionChannel.send(
@@ -1483,7 +1577,7 @@ class AgentTools() : ToolSet {
           label = "MSTR_CTRL: command complete",
           inProgress = false,
           addItemTitle = "Command_Override",
-          addItemDescription = "$ $command\n${output.take(200)}${if (output.length > 200) "…" else ""}",
+          addItemDescription = "$ $safeCmd\n${output.take(200)}${if (output.length > 200) "…" else ""}",
         )
       )
 
@@ -1494,7 +1588,7 @@ class AgentTools() : ToolSet {
       }
 
       mapOf(
-        "command" to command,
+        "command" to safeCmd,
         "output" to capOutputWithSpill(output, spillDir),
         "status" to status,
       )
@@ -1636,22 +1730,28 @@ class AgentTools() : ToolSet {
   ): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
       try {
-      Log.d(TAG, "gitDiffRead: path='$path'")
+      val safePath = path.trim()
+      Log.d(TAG, "gitDiffRead: path='$safePath'")
+
+      // Block path-traversal when a specific file is requested.
+      if (safePath.isNotBlank() && safePath.contains("..")) {
+        return@runBlocking mapOf("error" to "Path must not contain '..'", "status" to "failed")
+      }
 
       _actionChannel.send(
         SkillProgressAgentAction(
           label = "Git Diff: reading changes…",
           inProgress = true,
           addItemTitle = "Git_Diff_Read",
-          addItemDescription = "Path: ${path.ifEmpty { "(full workspace)" }}",
+          addItemDescription = "Path: ${safePath.ifEmpty { "(full workspace)" }}",
         )
       )
 
       val tsm = terminalSessionManager
-      val cmd = if (path.isBlank()) {
+      val cmd = if (safePath.isBlank()) {
         "git diff --unified=0 2>&1"
       } else {
-        val escapedPath = path.replace("'", "'\\''")
+        val escapedPath = safePath.replace("'", "'\\''")
         "git diff --unified=0 -- '$escapedPath' 2>&1"
       }
 
@@ -1666,7 +1766,7 @@ class AgentTools() : ToolSet {
           label = "Git Diff: done",
           inProgress = false,
           addItemTitle = "Git_Diff_Read",
-          addItemDescription = "Path: ${path.ifEmpty { "(full workspace)" }}\n${output.take(200)}${if (output.length > 200) "…" else ""}",
+          addItemDescription = "Path: ${safePath.ifEmpty { "(full workspace)" }}\n${output.take(200)}${if (output.length > 200) "…" else ""}",
         )
       )
 
@@ -1679,7 +1779,7 @@ class AgentTools() : ToolSet {
       }
 
       mapOf(
-        "path" to path,
+        "path" to safePath,
         "diff" to capOutput(output),
         "status" to status,
       )
@@ -1806,10 +1906,10 @@ class AgentTools() : ToolSet {
         )
       }
 
-      // Sanitize the path: only allow alphanumeric, ., -, _, and / characters.
-      // This prevents shell injection via special characters in file paths.
-      val sanitizedPath = absolutePath.replace(Regex("[^a-zA-Z0-9._/\\-]"), "_")
-      val cmd = "$runtime '$sanitizedPath' 2>&1"
+      // Escape the path for safe shell interpolation (replace ' with '\'').
+      // This preserves the real path while preventing shell injection.
+      val escapedPath = absolutePath.replace("'", "'\\''")
+      val cmd = "$runtime '$escapedPath' 2>&1"
 
       Log.d(TAG, "editorTerminalPipe: $cmd")
 

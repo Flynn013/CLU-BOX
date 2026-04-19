@@ -26,8 +26,7 @@ private const val TAG = "SkillRegistry"
  *
  * Responsibilities:
  * - Holds the canonical list of skills available to the LLM.
- * - Generates the `[AVAILABLE SKILLS]` prompt section via
- *   [getAvailableToolsPrompt].
+ * - Generates a compact tool summary via [getToolsSummary].
  * - Provides an execution router via [dispatch] that looks up a
  *   skill by name and calls its [CluSkill.execute] method.
  * - Builds the final composite system prompt via [buildFinalSystemPrompt],
@@ -59,27 +58,6 @@ class SkillRegistry(agentTools: AgentTools) {
 
     skills = allSkills.associateBy { it.name }
     Log.d(TAG, "Registered ${skills.size} skills: ${skills.keys.joinToString()}")
-  }
-
-  /**
-   * Returns a cleanly formatted Markdown string of all registered skills'
-   * descriptions, JSON schemas, and few-shot examples.
-   *
-   * Intended for injection into the system prompt via the `___TOOLS___`
-   * placeholder.
-   */
-  fun getAvailableToolsPrompt(): String {
-    return skills.values.joinToString("\n") { skill ->
-      buildString {
-        append("• ${skill.name}: ${skill.description}")
-        if (skill.jsonSchema.isNotBlank()) {
-          append(" Schema:${skill.jsonSchema}")
-        }
-        if (skill.fewShotExample.isNotBlank()) {
-          append(" Ex:${skill.fewShotExample}")
-        }
-      }
-    }
   }
 
   /**
