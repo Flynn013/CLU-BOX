@@ -957,19 +957,19 @@ open class LlmChatViewModelBase(
               // ── Check for garbled tool tokens in the recent output ──
               // Inspect the last ~40 chars of the accumulator (enough
               // for any mangled <|…|> sequence) to avoid repeated full
-              // scans. If a broken token is found, cancel inference so
-              // the recursive restart can re-prompt the model cleanly.
+              // scans. If a broken token is found, flag for suppression
+              // and let the native engine cleanly reach its own EOS.
               val tail = fullResponseAccumulator.takeLast(40)
               if (GARBLED_TOOL_TOKEN_PATTERN.containsMatchIn(tail)) {
                 Log.w(TAG, "Garbled tool token detected in output: …${tail}")
                 shouldCancelInference = true
                 tokenForUI = ""
-                // Ask the model helper to stop generating immediately.
-                try {
-                  model.runtimeHelper.stopResponse(model)
-                } catch (e: Exception) {
-                  Log.e(TAG, "Failed to stop inference after garbled token", e)
-                }
+                // NOTE: We intentionally do NOT call stopResponse() here.
+                // A hard cancelProcess() at the JNI boundary can corrupt
+                // the native C++ KV cache state and cause a SIGSEGV on the
+                // next inference call. Instead, we suppress output via the
+                // shouldCancelInference flag and let the engine naturally
+                // finish. The done handler will fire the recovery re-prompt.
               }
             }
 

@@ -291,6 +291,20 @@ object LlmChatModelHelper : LlmModelHelper {
 
     val conversation = instance.conversation
 
+    // ── Defensive input size clamp ──────────────────────────────────
+    // Hard-cap text input to prevent oversized payloads from crashing
+    // the native C++ layer. The ViewModel pre-flight clamp handles most
+    // cases, but this serves as a last-resort JNI boundary guard.
+    val maxTokens =
+      model.getIntConfigValue(key = ConfigKeys.MAX_TOKENS, defaultValue = DEFAULT_MAX_TOKEN)
+    val maxInputChars = (maxTokens * 3.2).toInt()  // conservative chars-per-token
+    val safeInput = if (input.length > maxInputChars) {
+      Log.w(TAG, "runInference: input (${input.length} chars) exceeds safety limit ($maxInputChars chars) — truncating")
+      input.take(maxInputChars) + "\n[System: Input truncated for memory safety.]"
+    } else {
+      input
+    }
+
     val contents = mutableListOf<Content>()
     for (image in images) {
       contents.add(Content.ImageBytes(image.toPngByteArray()))
@@ -299,8 +313,8 @@ object LlmChatModelHelper : LlmModelHelper {
       contents.add(Content.AudioBytes(audioClip))
     }
     // add the text after image and audio for the accurate last token
-    if (input.trim().isNotEmpty()) {
-      contents.add(Content.Text(input))
+    if (safeInput.trim().isNotEmpty()) {
+      contents.add(Content.Text(safeInput))
     }
 
     try {
