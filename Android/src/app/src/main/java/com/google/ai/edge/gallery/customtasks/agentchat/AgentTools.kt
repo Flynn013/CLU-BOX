@@ -64,6 +64,34 @@ private fun capOutput(text: String): String {
 }
 
 /**
+ * Truncates [text] and, when trimming occurs, spills the full content to a temp
+ * file inside `BrainBox/temp_out/` so the LLM can paginate it later via
+ * `fileBoxReadLines` or `brainBoxGrep`.
+ *
+ * @param text The raw tool output.
+ * @param spillDir A writable directory (typically `context.filesDir/clu_file_box/BrainBox`)
+ *                 where overflow files are written. If null, falls back to plain [capOutput].
+ * @return The (possibly truncated) text with a pointer to the spill file.
+ */
+private fun capOutputWithSpill(text: String, spillDir: java.io.File?): String {
+  if (text.length <= MAX_OUTPUT_CHARS) return text
+  if (spillDir == null) return capOutput(text)
+  return try {
+    val dir = java.io.File(spillDir, "BrainBox/temp_out").also { it.mkdirs() }
+    val ts = System.currentTimeMillis()
+    val spillFile = java.io.File(dir, "spill_${ts}.txt")
+    spillFile.writeText(text, Charsets.UTF_8)
+    val relPath = "BrainBox/temp_out/spill_${ts}.txt"
+    text.take(MAX_OUTPUT_CHARS) +
+      "\n\n[SYSTEM OVERRIDE: Output too large (${text.length} chars). " +
+      "Full log saved to $relPath. Use fileBoxReadLines or brainBoxGrep to inspect further.]"
+  } catch (e: Exception) {
+    Log.w(TAG, "capOutputWithSpill: failed to write spill file", e)
+    capOutput(text)
+  }
+}
+
+/**
  * Caps the total serialized size of a tool result map. If the combined
  * key-value content exceeds [MAX_TOOL_RESULT_TOTAL_CHARS], individual values
  * are aggressively truncated proportionally to bring the total under the limit.
@@ -170,6 +198,13 @@ class AgentTools() : ToolSet {
     com.google.ai.edge.gallery.data.OracleManager(context)
   }
 
+  /**
+   * Directory used by [capOutputWithSpill] to persist large tool outputs
+   * that exceed [MAX_OUTPUT_CHARS]. Sits inside the FILE_BOX root so the
+   * LLM can paginate it with `fileBoxReadLines` or search with `brainBoxGrep`.
+   */
+  internal val spillDir: java.io.File by lazy { fileBoxManager.root }
+
   private val _actionChannel = Channel<AgentAction>(Channel.UNLIMITED)
   val actionChannel: ReceiveChannel<AgentAction> = _actionChannel
   var resultImageToShow: CallJsSkillResultImage? = null
@@ -197,7 +232,7 @@ class AgentTools() : ToolSet {
    */
   internal fun getMetadataOnlySkills(): List<CluSkill> {
     // Tools that already have dedicated CluSkill implementations.
-    val ported = setOf("shellExecute", "fileBoxWrite")
+    val ported = setOf("shellExecute", "fileBoxWrite", "fileBoxReadLines", "brainBoxGrep")
 
     data class ToolEntry(val name: String, val description: String)
 
@@ -917,9 +952,151 @@ class AgentTools() : ToolSet {
         )
       )
 
-      mapOf("file_path" to file_path, "content" to capOutput(content), "status" to "succeeded")
+      mapOf("file_path" to file_path, "content" to capOutputWithSpill(content, spillDir), "status" to "succeeded")
       } catch (e: Exception) {
         Log.e(TAG, "fileBoxRead: unexpected error", e)
+        mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
+      }
+    })
+  }
+
+  // =========================================================================
+  // FileBox_Read_Lines — Paginated file reader (Context Pager)
+  // =========================================================================
+
+  /**
+   * Reads a specific range of lines from a file, allowing the LLM to paginate
+   * through large outputs without consuming the entire context window.
+   */
+  @Tool(
+    description = "Reads a specific chunk of a file by line numbers to save memory. " +
+      "Use this if a file or log output was truncated."
+  )
+  fun fileBoxReadLines(
+    @ToolParam(description = "Relative path inside FILE_BOX (e.g. 'BrainBox/temp_out/spill_123.txt').")
+    file_path: String,
+    @ToolParam(description = "0-based start line number (inclusive).")
+    start_line: Int,
+    @ToolParam(description = "0-based end line number (exclusive).")
+    end_line: Int,
+  ): Map<String, String> {
+    return withResolution(runBlocking(Dispatchers.IO) {
+      try {
+        Log.d(TAG, "fileBoxReadLines: path='$file_path' lines=$start_line..$end_line")
+        val content = fileBoxManager.readCodeFile(file_path)
+
+        if (content == null) {
+          return@runBlocking mapOf(
+            "error" to "File not found or not readable: $file_path",
+            "status" to "failed",
+          )
+        }
+
+        val allLines = content.lines()
+        val safeStart = start_line.coerceIn(0, allLines.size)
+        val safeEnd = end_line.coerceIn(safeStart, allLines.size)
+        val chunk = allLines.subList(safeStart, safeEnd).joinToString("\n")
+
+        _actionChannel.send(
+          SkillProgressAgentAction(
+            label = "FILE_BOX: read lines $safeStart–$safeEnd of '$file_path'",
+            inProgress = false,
+          )
+        )
+
+        mapOf(
+          "file_path" to file_path,
+          "start_line" to safeStart.toString(),
+          "end_line" to safeEnd.toString(),
+          "total_lines" to allLines.size.toString(),
+          "content" to capOutput(chunk),
+          "status" to "succeeded",
+        )
+      } catch (e: Exception) {
+        Log.e(TAG, "fileBoxReadLines: unexpected error", e)
+        mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
+      }
+    })
+  }
+
+  // =========================================================================
+  // BrainBox_Grep — Keyword search with context lines
+  // =========================================================================
+
+  /**
+   * Scans a file for a keyword and returns matching lines with ±2 lines of
+   * surrounding context, similar to `grep -C 2`.
+   */
+  @Tool(
+    description = "Searches a file for a keyword or error code and returns the matching lines " +
+      "plus 2 lines of context above and below each match."
+  )
+  fun brainBoxGrep(
+    @ToolParam(description = "Relative path inside FILE_BOX (e.g. 'BrainBox/temp_out/spill_123.txt').")
+    file_path: String,
+    @ToolParam(description = "The keyword or error string to search for (case-insensitive).")
+    keyword: String,
+  ): Map<String, String> {
+    return withResolution(runBlocking(Dispatchers.IO) {
+      try {
+        Log.d(TAG, "brainBoxGrep: path='$file_path' keyword='$keyword'")
+        val content = fileBoxManager.readCodeFile(file_path)
+
+        if (content == null) {
+          return@runBlocking mapOf(
+            "error" to "File not found or not readable: $file_path",
+            "status" to "failed",
+          )
+        }
+
+        val allLines = content.lines()
+        val lowerKeyword = keyword.lowercase()
+        val contextRadius = 2
+
+        // Collect indices of matching lines.
+        val matchIndices = allLines.indices.filter {
+          allLines[it].lowercase().contains(lowerKeyword)
+        }
+
+        if (matchIndices.isEmpty()) {
+          return@runBlocking mapOf(
+            "file_path" to file_path,
+            "keyword" to keyword,
+            "matches" to "0",
+            "result" to "No matches found for '$keyword'.",
+            "status" to "succeeded",
+          )
+        }
+
+        // Build context windows around each match, merging overlaps.
+        val included = mutableSetOf<Int>()
+        for (idx in matchIndices) {
+          for (i in (idx - contextRadius)..(idx + contextRadius)) {
+            if (i in allLines.indices) included.add(i)
+          }
+        }
+
+        val result = included.sorted().joinToString("\n") { i ->
+          val marker = if (i in matchIndices) ">>>" else "   "
+          "$marker ${i + 1}: ${allLines[i]}"
+        }
+
+        _actionChannel.send(
+          SkillProgressAgentAction(
+            label = "GREP: ${matchIndices.size} matches for '$keyword' in '$file_path'",
+            inProgress = false,
+          )
+        )
+
+        mapOf(
+          "file_path" to file_path,
+          "keyword" to keyword,
+          "matches" to matchIndices.size.toString(),
+          "result" to capOutput(result),
+          "status" to "succeeded",
+        )
+      } catch (e: Exception) {
+        Log.e(TAG, "brainBoxGrep: unexpected error", e)
         mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
       }
     })
@@ -1240,7 +1417,7 @@ class AgentTools() : ToolSet {
 
       mapOf(
         "command" to command,
-        "output" to capOutput(output),
+        "output" to capOutputWithSpill(output, spillDir),
         "status" to status,
       )
       } catch (e: SecurityException) {
@@ -1318,7 +1495,7 @@ class AgentTools() : ToolSet {
 
       mapOf(
         "command" to command,
-        "output" to capOutput(output),
+        "output" to capOutputWithSpill(output, spillDir),
         "status" to status,
       )
       } catch (e: SecurityException) {
@@ -1681,7 +1858,7 @@ class AgentTools() : ToolSet {
       val result = mutableMapOf(
         "file_path" to targetPath,
         "runtime" to runtime,
-        "output" to capOutput(output),
+        "output" to capOutputWithSpill(output, spillDir),
         "status" to if (hasError) "error" else "succeeded",
       )
       if (errorLine.isNotEmpty()) {

@@ -44,10 +44,12 @@ class SkillRegistry(agentTools: AgentTools) {
   private val skills: Map<String, CluSkill>
 
   init {
-    // Register the two explicitly ported skills.
+    // Register the explicitly ported skills with full CluSkill implementations.
     val ported: List<CluSkill> = listOf(
       ShellExecuteSkill(agentTools),
       FileBoxWriteSkill(agentTools),
+      FileBoxReadLinesSkill(agentTools),
+      BrainBoxGrepSkill(agentTools),
     )
 
     // Merge with metadata-only entries for all other @Tool methods.
