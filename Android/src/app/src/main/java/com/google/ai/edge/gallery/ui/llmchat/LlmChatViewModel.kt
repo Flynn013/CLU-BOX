@@ -1117,6 +1117,9 @@ open class LlmChatViewModelBase(
                     }
                     setInProgress(false)
                     // Re-invoke inference with a corrective prompt.
+                    // NOTE: This message is an internal recovery prompt
+                    // injected into the LLM conversation for self-correction
+                    // — it is NOT shown to the user.
                     generateResponse(
                       model = model,
                       input = "[System Error: Malformed tool call. Invalid JSON syntax or " +

@@ -290,9 +290,14 @@ object GeminiCloudModelHelper : LlmModelHelper {
               // ── Auto-Heal: malformed tool call recovery ──────────────
               // Do NOT crash the loop. Inject a system error message into
               // the conversation history so the model can self-correct.
+              // NOTE: This message is an internal recovery prompt injected
+              // into the LLM conversation — it is NOT shown to the user.
+              // The exception detail helps the model understand what went
+              // wrong so it can fix its output on the next round.
               Log.e(TAG, "Auto-Heal: malformed function call — injecting error and retrying", e)
+              val sanitizedMsg = (e.message ?: "unknown error").take(200)
               val errorMessage = "[System Error: Malformed tool call. Invalid JSON syntax " +
-                "or missing fields. Exception: ${e.message}. Correct your formatting and try again.]"
+                "or missing fields. Exception: $sanitizedMsg. Correct your formatting and try again.]"
               val errorContent = JsonObject().apply {
                 addProperty("role", "user")
                 add("parts", JsonArray().apply {
