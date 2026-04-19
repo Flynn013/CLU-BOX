@@ -37,8 +37,10 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.reflect.KProperty1
 import kotlin.reflect.full.findAnnotation
 import kotlin.reflect.full.memberFunctions
+import kotlin.reflect.full.memberProperties
 import kotlin.reflect.full.valueParameters
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -199,9 +201,6 @@ object GeminiCloudModelHelper : LlmModelHelper {
           }
 
           round++
-          val context = model.instance?.let {
-            // Re-read the API key each call — the user may have updated it.
-          }
 
           val responseText = callGeminiApi(model, instance)
           if (instance.cancelled.get()) {
@@ -501,14 +500,23 @@ object GeminiCloudModelHelper : LlmModelHelper {
 
   /**
    * Extracts a plain-text system instruction from a [Contents] object.
-   * The Contents structure from LiteRTLM contains content parts.
+   *
+   * [Contents.of] wraps a plain-text string, so we attempt to extract the
+   * text via a `text` property. Falls back to `toString()` if the property
+   * is unavailable (e.g. obfuscated builds).
    */
+  @Suppress("UNCHECKED_CAST")
   private fun buildSystemText(contents: Contents): String {
     return try {
-      // Contents is a LiteRTLM type. Extract text by toString or reflection.
-      contents.toString()
+      val prop = contents::class.memberProperties.find { it.name == "text" }
+      if (prop != null) {
+        (prop as? KProperty1<Contents, *>)?.get(contents)?.toString() ?: contents.toString()
+      } else {
+        contents.toString()
+      }
     } catch (e: Exception) {
-      ""
+      Log.w(TAG, "Could not extract text from Contents, falling back to toString()", e)
+      contents.toString()
     }
   }
 
