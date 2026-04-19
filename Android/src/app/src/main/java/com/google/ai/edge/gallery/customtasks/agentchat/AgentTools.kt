@@ -161,6 +161,7 @@ class AgentTools() : ToolSet {
     ToolEntry("gitDiffRead", "Get git diff (--unified=0) for a file or the whole workspace."),
     ToolEntry("workspaceSyncSnapshot", "Get a unified snapshot of FILE_BOX editor + MSTR_CTRL terminal state for debugging."),
     ToolEntry("editorTerminalPipe", "Pipe the file open in FILE_BOX into MSTR_CTRL for execution. Auto-detects runtime (.py → python3, .js → node, .sh → sh)."),
+    ToolEntry("createSkill", "Create a new custom skill for CLU/BOX by writing a SKILL.md (name, description, instructions). The skill is saved permanently."),
   )
 
   /**
@@ -1444,6 +1445,111 @@ class AgentTools() : ToolSet {
       result
       } catch (e: Exception) {
         Log.e(TAG, "editorTerminalPipe: unexpected error", e)
+        mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
+      }
+    })
+  }
+
+  // =========================================================================
+  // CREATE_SKILL — Let the LLM author its own skills
+  // =========================================================================
+
+  /**
+   * Allows the LLM to create a new custom skill by writing a SKILL.md
+   * (name, description, instructions) through the existing skill manager.
+   * The new skill is immediately persisted and available for future sessions.
+   */
+  @Tool(
+    description = "Create a new custom skill for CLU/BOX. Write a SKILL.md with a name, " +
+      "description, and freeform instructions that teach the AI how to perform a task. " +
+      "The skill is saved permanently and can be loaded with load_skill in future sessions."
+  )
+  fun createSkill(
+    @ToolParam(description = "Short, kebab-case skill name (e.g. 'code-reviewer', 'daily-planner').")
+    skill_name: String,
+    @ToolParam(description = "One-line description of what the skill does.")
+    skill_description: String,
+    @ToolParam(description = "Full freeform instructions (markdown). Describe examples, steps, " +
+      "which native tools to call, constraints, and output format. This is what the AI reads " +
+      "when the skill is loaded.")
+    skill_instructions: String,
+  ): Map<String, String> {
+    return withResolution(runBlocking(Dispatchers.IO) {
+      try {
+        Log.d(TAG, "createSkill: name='$skill_name'")
+
+        val name = skill_name.trim()
+        val description = skill_description.trim()
+        val instructions = skill_instructions.trim()
+
+        if (name.isBlank() || description.isBlank() || instructions.isBlank()) {
+          return@runBlocking mapOf(
+            "error" to "skill_name, skill_description, and skill_instructions must all be non-empty.",
+            "status" to "failed",
+          )
+        }
+
+        _actionChannel.send(
+          SkillProgressAgentAction(
+            label = "Creating skill \"$name\"…",
+            inProgress = true,
+            addItemTitle = "Create_Skill",
+            addItemDescription = "$name — $description",
+          )
+        )
+
+        // Use a blocking latch so we can surface success/failure synchronously.
+        val resultRef = AtomicReference<Map<String, String>>(null)
+        val latch = java.util.concurrent.CountDownLatch(1)
+
+        skillManagerViewModel.saveSkillEdit(
+          index = -1, // negative index = create new skill
+          name = name,
+          description = description,
+          instructions = instructions,
+          scriptsContent = emptyMap(), // no JS scripts — instruction-only skill
+          onSuccess = {
+            resultRef.set(
+              mapOf(
+                "skill_name" to name,
+                "message" to "Skill '$name' created successfully. It is now available in the skill list and can be loaded with load_skill.",
+                "status" to "succeeded",
+              )
+            )
+            latch.countDown()
+          },
+          onError = { error ->
+            resultRef.set(
+              mapOf(
+                "error" to error,
+                "status" to "failed",
+              )
+            )
+            latch.countDown()
+          },
+        )
+
+        // Wait up to 10 seconds for the skill manager to finish writing.
+        latch.await(10, java.util.concurrent.TimeUnit.SECONDS)
+
+        val result = resultRef.get() ?: mapOf(
+          "error" to "Skill creation timed out.",
+          "status" to "failed",
+        )
+
+        val succeeded = result["status"] == "succeeded"
+        _actionChannel.send(
+          SkillProgressAgentAction(
+            label = if (succeeded) "Skill \"$name\" created" else "Failed to create skill \"$name\"",
+            inProgress = false,
+            addItemTitle = "Create_Skill",
+            addItemDescription = if (succeeded) "$name — $description" else result["error"] ?: "unknown error",
+          )
+        )
+
+        result
+      } catch (e: Exception) {
+        Log.e(TAG, "createSkill: unexpected error", e)
         mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
       }
     })

@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.BasicTextField
@@ -142,7 +143,8 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
   Column(
     modifier = Modifier
       .fillMaxSize()
-      .background(absoluteBlack),
+      .background(absoluteBlack)
+      .imePadding(),
   ) {
     // ── Termux TerminalView (main content area) ────────────────
     Box(
@@ -158,7 +160,7 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
             setTerminalViewClient(CluTerminalViewClient(this))
 
             // Style: monospace font, neon-green on black.
-            setTextSize(16)
+            setTextSize(20)
             setTypeface(Typeface.MONOSPACE)
 
             // Black background to match CLU/BOX aesthetic.
@@ -204,7 +206,7 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
         "$",
         color = neonGreen,
         fontFamily = FontFamily.Monospace,
-        fontSize = 16.sp,
+        fontSize = 18.sp,
         modifier = Modifier.padding(end = 6.dp),
       )
 
@@ -216,7 +218,7 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
           .padding(vertical = 4.dp),
         textStyle = TextStyle(
           fontFamily = FontFamily.Monospace,
-          fontSize = 16.sp,
+          fontSize = 18.sp,
           color = neonGreen,
         ),
         cursorBrush = SolidColor(neonGreen),
