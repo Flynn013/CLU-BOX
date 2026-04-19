@@ -45,16 +45,44 @@ private const val TAG = "AGAgentTools"
 /**
  * Maximum character length for any single tool output field delivered to the LLM.
  * Prevents runaway outputs (e.g. large file reads, verbose shell dumps) from
- * consuming the context window. ~4096 chars ≈ 1000–1200 tokens for Gemma.
+ * consuming the context window. ~3000 chars ≈ 750–950 tokens for Gemma.
  */
-private const val MAX_OUTPUT_CHARS = 4096
+private const val MAX_OUTPUT_CHARS = 3000
+
+/** Hard cap on the total serialized size of a tool result map (all keys + values).
+ *  Prevents recursive tool loops from overflowing the KV cache with accumulated
+ *  results. ~6000 chars ≈ ~1500–1900 tokens — leaves room for the model to respond. */
+private const val MAX_TOOL_RESULT_TOTAL_CHARS = 6000
 
 /** Truncates [text] to [MAX_OUTPUT_CHARS] with a suffix marker when trimmed. */
 private fun capOutput(text: String): String {
   return if (text.length > MAX_OUTPUT_CHARS) {
-    text.take(MAX_OUTPUT_CHARS) + "\n\n_[Output truncated to ${MAX_OUTPUT_CHARS} chars]_"
+    text.take(MAX_OUTPUT_CHARS) + "\n...[TRUNCATED FOR MEMORY SAFETY]"
   } else {
     text
+  }
+}
+
+/**
+ * Caps the total serialized size of a tool result map. If the combined
+ * key-value content exceeds [MAX_TOOL_RESULT_TOTAL_CHARS], individual values
+ * are aggressively truncated proportionally to bring the total under the limit.
+ */
+private fun capResultMap(result: Map<String, String>): Map<String, String> {
+  val totalSize = result.entries.sumOf { it.key.length + it.value.length }
+  if (totalSize <= MAX_TOOL_RESULT_TOTAL_CHARS) return result
+
+  Log.w("AgentTools", "capResultMap: total size $totalSize exceeds $MAX_TOOL_RESULT_TOTAL_CHARS — truncating values")
+  val keyOverhead = result.keys.sumOf { it.length }
+  val availableForValues = (MAX_TOOL_RESULT_TOTAL_CHARS - keyOverhead).coerceAtLeast(result.size * 50)
+  val perValueBudget = availableForValues / result.size.coerceAtLeast(1)
+
+  return result.mapValues { (_, v) ->
+    if (v.length > perValueBudget) {
+      v.take(perValueBudget) + "\n...[TRUNCATED FOR MEMORY SAFETY]"
+    } else {
+      v
+    }
   }
 }
 
@@ -91,25 +119,34 @@ private fun withFailureResolution(result: Map<String, String>): Map<String, Stri
 
 /** Auto-selects success or failure resolution based on the `status` field. */
 private fun withResolution(result: Map<String, String>): Map<String, String> {
-  val status = result["status"]?.lowercase() ?: ""
-  return if (status == "failed" || result.containsKey("error")) {
-    withFailureResolution(result)
+  val capped = capResultMap(result)
+  val status = capped["status"]?.lowercase() ?: ""
+  return if (status == "failed" || capped.containsKey("error")) {
+    withFailureResolution(capped)
   } else {
-    withSuccessResolution(result)
+    withSuccessResolution(capped)
   }
 }
 
 /** Overload for Map<String, Any> (used by runJs). */
 @Suppress("UNCHECKED_CAST")
 private fun withResolutionAny(result: Map<String, Any>): Map<String, Any> {
-  val status = (result["status"] as? String)?.lowercase() ?: ""
-  val error = result["error"] as? String
+  // Cap string values in the result map to prevent context overflow.
+  val capped = result.mapValues { (_, v) ->
+    if (v is String && v.length > MAX_OUTPUT_CHARS) {
+      v.take(MAX_OUTPUT_CHARS) + "\n...[TRUNCATED FOR MEMORY SAFETY]"
+    } else {
+      v
+    }
+  }
+  val status = (capped["status"] as? String)?.lowercase() ?: ""
+  val error = capped["error"] as? String
   val resolution = if (status == "failed" || error != null) {
     buildFailureResolution(error ?: "unknown error")
   } else {
-    buildSuccessResolution(result.entries)
+    buildSuccessResolution(capped.entries)
   }
-  return result + ("resolution" to resolution)
+  return capped + ("resolution" to resolution)
 }
 
 class AgentTools() : ToolSet {
