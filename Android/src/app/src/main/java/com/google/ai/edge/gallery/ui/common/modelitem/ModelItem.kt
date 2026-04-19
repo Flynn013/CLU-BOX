@@ -92,6 +92,7 @@ fun ModelItem(
 
   val isDownloadFailed = downloadStatus?.status == ModelDownloadStatusType.FAILED
   val isAicore = model.runtimeType == RuntimeType.AICORE
+  val isCloudModel = model.runtimeType == RuntimeType.GEMINI_CLOUD
 
   var boxModifier =
     modifier
@@ -137,7 +138,7 @@ fun ModelItem(
               modelManagerViewModel = modelManagerViewModel,
               downloadStatus = downloadStatus,
               modifier = Modifier.offset(y = (-12).dp, x = if (model.imported) 12.dp else 0.dp),
-              showDeleteButton = showDeleteButton && !isAicore,
+              showDeleteButton = showDeleteButton && !isAicore && !isCloudModel,
             )
           }
           if (!model.imported) {

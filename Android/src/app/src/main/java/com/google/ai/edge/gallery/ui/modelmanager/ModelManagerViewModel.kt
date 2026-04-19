@@ -287,6 +287,15 @@ constructor(
       status = ModelDownloadStatus(status = ModelDownloadStatusType.IN_PROGRESS),
     )
 
+    // Cloud models require no download — mark them as succeeded immediately.
+    if (model.runtimeType == RuntimeType.GEMINI_CLOUD) {
+      setDownloadStatus(
+        curModel = model,
+        status = ModelDownloadStatus(status = ModelDownloadStatusType.SUCCEEDED),
+      )
+      return
+    }
+
     // TODO: b/494029782 - Both litertlm and aicore download and storage should be unified into a
     // model repository.
     if (model.runtimeType == RuntimeType.AICORE) {
@@ -341,8 +350,8 @@ constructor(
   fun cancelDownloadModel(model: Model) {
     // TODO: b/494029782 - Both litertlm and aicore download and storage should be unified into a
     // model repository.
-    // AICore models cannot be deleted from the download repository within the app.
-    if (model.runtimeType == RuntimeType.AICORE) {
+    // AICore and Cloud models cannot be deleted from the download repository within the app.
+    if (model.runtimeType == RuntimeType.AICORE || model.runtimeType == RuntimeType.GEMINI_CLOUD) {
       return
     }
     downloadRepository.cancelDownloadModel(model)
@@ -861,6 +870,19 @@ constructor(
       // Proactively attempt AICore model download upon app startup.
       for (model in aicoreModels) {
         downloadModel(task = null, model = model)
+      }
+
+      // Cloud models require no download — mark them as available immediately.
+      val cloudModels =
+        uiState.value.tasks
+          .flatMap { it.models }
+          .filter { it.runtimeType == RuntimeType.GEMINI_CLOUD }
+          .distinctBy { it.name }
+      for (model in cloudModels) {
+        setDownloadStatus(
+          curModel = model,
+          status = ModelDownloadStatus(status = ModelDownloadStatusType.SUCCEEDED),
+        )
       }
     }
   }

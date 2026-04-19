@@ -79,6 +79,7 @@ import com.google.ai.edge.gallery.common.CallJsAgentAction
 import com.google.ai.edge.gallery.common.SkillProgressAgentAction
 import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.Model
+import com.google.ai.edge.gallery.data.RuntimeType
 import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.firebaseAnalytics
 import com.google.ai.edge.gallery.ui.common.BaseGalleryWebViewClient
@@ -100,6 +101,8 @@ import com.google.ai.edge.gallery.ui.llmchat.LlmChatViewModel
 import com.google.ai.edge.gallery.ui.modelmanager.ModelInitializationStatusType
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import com.google.ai.edge.gallery.data.brainbox.GraphDatabase
+import com.google.ai.edge.gallery.runtime.geminicloud.GeminiApiKeyDialog
+import com.google.ai.edge.gallery.runtime.geminicloud.GeminiApiKeyStore
 import com.google.ai.edge.gallery.ui.theme.neonGreen
 import com.google.ai.edge.litertlm.tool
 import java.lang.Exception
@@ -170,6 +173,18 @@ fun AgentChatScreen(
   val chatHistoryDao = remember(context) { GraphDatabase.getInstance(context).chatHistoryDao() }
   val chatHistoryScope = rememberCoroutineScope()
   val autonomousLoopScope = rememberCoroutineScope()
+  var showGeminiApiKeyDialog by remember { mutableStateOf(false) }
+
+  // Monitor selected model — prompt for API key when Cloud Node is selected without one.
+  val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
+  val selectedModel = modelManagerUiState.selectedModel
+  LaunchedEffect(selectedModel) {
+    if (selectedModel.runtimeType == RuntimeType.GEMINI_CLOUD &&
+      !GeminiApiKeyStore.hasApiKey(context)
+    ) {
+      showGeminiApiKeyDialog = true
+    }
+  }
 
   LlmChatScreen(
     modelManagerViewModel = modelManagerViewModel,
@@ -613,6 +628,17 @@ fun AgentChatScreen(
         },
       )
     }
+  }
+
+  // ── Gemini Cloud Node: API key dialog ─────────────────────────────────
+  if (showGeminiApiKeyDialog) {
+    GeminiApiKeyDialog(
+      onDismiss = { showGeminiApiKeyDialog = false },
+      onApiKeySaved = { key ->
+        GeminiApiKeyStore.setApiKey(context, key)
+        showGeminiApiKeyDialog = false
+      },
+    )
   }
 }
 

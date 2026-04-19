@@ -119,7 +119,7 @@ fun ModelPicker(
             model.displayName.ifEmpty { model.name },
             style = MaterialTheme.typography.bodyMedium,
           )
-          if (model.runtimeType != RuntimeType.AICORE) {
+          if (model.runtimeType != RuntimeType.AICORE && model.runtimeType != RuntimeType.GEMINI_CLOUD) {
             Row(
               horizontalArrangement = Arrangement.spacedBy(4.dp),
               verticalAlignment = Alignment.CenterVertically,

@@ -123,6 +123,28 @@
       },
       "taskTypes": ["llm_mobile_actions"],
       "bestForTaskTypes": ["llm_mobile_actions"]
+    },
+    {
+      "name": "Gemini-Cloud-Node",
+      "modelId": "google/gemini-2.0-flash",
+      "modelFile": "",
+      "description": "Cloud-powered Gemini 2.0 Flash via Google API. Requires a Gemini API key. Inherits the full CLU/BOX tool registry for agentic tasks.",
+      "sizeInBytes": 0,
+      "commitHash": "cloud",
+      "runtimeType": "gemini_cloud",
+      "defaultConfig": {
+        "topK": 64,
+        "topP": 0.95,
+        "temperature": 1.0,
+        "maxTokens": 8192,
+        "accelerators": "cpu"
+      },
+      "taskTypes": [
+        "llm_chat",
+        "llm_prompt_lab",
+        "llm_agent_chat"
+      ],
+      "bestForTaskTypes": []
     }
   ]
 }

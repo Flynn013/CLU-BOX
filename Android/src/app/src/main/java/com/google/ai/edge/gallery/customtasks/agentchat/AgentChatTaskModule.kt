@@ -24,7 +24,9 @@ import com.google.ai.edge.gallery.customtasks.common.CustomTaskDataForBuiltinTas
 import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.Category
 import com.google.ai.edge.gallery.data.Model
+import com.google.ai.edge.gallery.data.RuntimeType
 import com.google.ai.edge.gallery.data.Task
+import com.google.ai.edge.gallery.runtime.geminicloud.GeminiCloudModelHelper
 import com.google.ai.edge.gallery.ui.llmchat.LlmChatModelHelper
 import com.google.ai.edge.litertlm.tool
 import dagger.Module
@@ -88,7 +90,13 @@ class AgentChatTask @Inject constructor() : CustomTask {
   ) {
     agentTools.skillManagerViewModel.loadSkills {
       try {
-        LlmChatModelHelper.initialize(
+        val helper = if (model.runtimeType == RuntimeType.GEMINI_CLOUD) {
+          GeminiCloudModelHelper.cacheApiKey(context)
+          GeminiCloudModelHelper
+        } else {
+          LlmChatModelHelper
+        }
+        helper.initialize(
           context = context,
           model = model,
           supportImage = true,
@@ -119,7 +127,12 @@ class AgentChatTask @Inject constructor() : CustomTask {
     model: Model,
     onDone: () -> Unit,
   ) {
-    LlmChatModelHelper.cleanUp(model = model, onDone = onDone)
+    val helper = if (model.runtimeType == RuntimeType.GEMINI_CLOUD) {
+      GeminiCloudModelHelper
+    } else {
+      LlmChatModelHelper
+    }
+    helper.cleanUp(model = model, onDone = onDone)
   }
 
   @Composable
