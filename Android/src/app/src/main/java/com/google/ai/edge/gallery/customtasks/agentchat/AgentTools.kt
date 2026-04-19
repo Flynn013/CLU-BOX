@@ -74,7 +74,9 @@ private fun buildSuccessResolution(entries: Iterable<Map.Entry<String, *>>): Str
 
 /** Template for a failed resolution token. */
 private fun buildFailureResolution(error: String): String {
-  return "[System: Tool failed with error: $error. Task aborted. Await further instructions.]"
+  return "[System: Tool failed with error: $error. " +
+    "Analyze the error, explain what went wrong to the user, and " +
+    "if possible, fix the issue and retry. Do NOT stop responding.]"
 }
 
 /** Injects a `resolution` field into a success result map. */
@@ -799,7 +801,8 @@ class AgentTools() : ToolSet {
           return@runBlocking mapOf(
             "file_path" to file_path,
             "status" to "rejected_and_deleted",
-            "error" to "FILE REJECTED. Syntax Error: $errMsg",
+            "error" to "FILE REJECTED & DELETED due to syntax error: $errMsg. " +
+              "You MUST fix the code and call fileBoxWrite again with the corrected content.",
           )
         }
         Log.d(TAG, "fileBoxWrite: validation PASSED for '$file_path'")

@@ -893,6 +893,12 @@ open class LlmChatViewModelBase(
       // needs to abort the current inference run.
       var shouldCancelInference = false
 
+      // Tracks whether at least one tool-call block was buffered during
+      // this inference pass. Used for post-tool recovery: if the model
+      // produces only trivial output (e.g. "}") after a tool call, we
+      // inject a nudge prompt to keep the conversation flowing.
+      var toolCallOccurred = false
+
       val resultListener: (String, Boolean, String?) -> Unit =
           { partialResult, done, partialThinkingResult ->
             // ── Garbled token detection ─────────────────────────────
@@ -925,6 +931,7 @@ open class LlmChatViewModelBase(
                 Log.d(TAG, "Tool-call buffer closed (${toolCallBuffer.length} chars)")
                 isBufferingToolCall = false
                 toolCallBuffer.clear()
+                toolCallOccurred = true
               }
               // While buffering, suppress rendering to the Chat UI.
               tokenForUI = ""
@@ -1098,6 +1105,35 @@ open class LlmChatViewModelBase(
                     allowThinking = allowThinking,
                   )
                 } else {
+                  // ── Post-tool recovery ────────────────────────────────
+                  // If a tool call occurred during this inference pass and
+                  // the model's visible response is trivially short (e.g.
+                  // just "}" or empty), the model likely stalled after
+                  // receiving the tool result. Remove the broken stub and
+                  // re-invoke inference with a nudge prompt.
+                  val lastMsg = getLastMessage(model = model)
+                  val visibleText = (lastMsg as? ChatMessageText)
+                    ?.takeIf { it.side == ChatSide.AGENT }
+                    ?.content?.trim() ?: ""
+                  if (toolCallOccurred && visibleText.length <= 3) {
+                    Log.w(TAG, "Post-tool recovery: model produced trivial output ('$visibleText') after tool call — nudging")
+                    if (lastMsg is ChatMessageText && lastMsg.side == ChatSide.AGENT) {
+                      removeLastMessage(model = model)
+                    }
+                    setInProgress(false)
+                    generateResponse(
+                      model = model,
+                      input = "[System: The tool has returned its result. You MUST now " +
+                        "respond to the user with a clear summary of what happened " +
+                        "and any next steps. Do NOT output only closing braces or " +
+                        "empty text. Continue the conversation normally.]",
+                      taskId = taskId,
+                      onFirstToken = onFirstToken,
+                      onDone = onDone,
+                      onError = onError,
+                      allowThinking = allowThinking,
+                    )
+                  } else {
                   // Persist the completed agent response and track tokens.
                   if (taskId.isNotEmpty()) {
                     val agentMsg = getLastMessage(model = model)
@@ -1115,6 +1151,7 @@ open class LlmChatViewModelBase(
                   setInProgress(false)
                   onDone()
                   drainCommandQueue()
+                  }
               }
             }
           }
