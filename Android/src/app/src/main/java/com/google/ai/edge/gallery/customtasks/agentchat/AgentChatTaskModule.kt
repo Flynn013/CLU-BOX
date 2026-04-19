@@ -81,6 +81,8 @@ class AgentChatTask @Inject constructor() : CustomTask {
         For multi-file project generation: Use the Planner-Worker workflow — call architectInit once with the full blueprint, then the worker loop will automatically call workerExecute for each file. Alternatively, use fileBoxWrite with taskQueueUpdate for simpler projects.
 
         IMPORTANT: After writing code files, use shellExecute or editorTerminalPipe to test them. If fileBoxWrite returns a syntax error (FILE REJECTED), the broken file has been deleted — fix the code and rewrite it immediately before moving on. When you complete a major milestone or hit a wall, use operatorHalt to pause and let the Operator review. Use oracleSearch to look up APIs or error messages when you need documentation. Use gitDiffRead to review changes before proceeding. Use workspaceSyncSnapshot to see the unified editor + terminal state for debugging.
+
+        [CRITICAL RULE: You MUST NEVER use the terminal or shell commands (like echo, cat, or nano) to create, write, or edit files. To manipulate files, you MUST exclusively use the native file tools provided (e.g., fileBoxWrite). Shell commands are strictly for execution and directory traversal.]
         """
           .trimIndent(),
     )

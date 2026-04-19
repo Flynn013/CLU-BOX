@@ -194,13 +194,13 @@ class AgentTools() : ToolSet {
     ToolEntry("vectorRecall", "Semantic search: embed a query and find the top-3 most relevant neurons via cosine similarity."),
     ToolEntry("commitMemory", "Autonomously write a memory to BrainBox with title, synapses, ground_truth, and false_paths. Auto-embeds for future vector recall."),
     ToolEntry("workspaceMap", "Scan the clu_file_box workspace and return a JSON tree of all files and folders. Always call this first to orient yourself."),
-    ToolEntry("fileBoxWrite", "Write a text/code file to the FILE_BOX workspace. Nested folders are created automatically. Python and JavaScript files are auto-validated — syntax errors cause the file to be DELETED."),
+    ToolEntry("fileBoxWrite", "The ONLY permitted tool for creating, writing, or overwriting files on disk. Pass the absolute path and the raw file content. NEVER use shell commands to write files."),
     ToolEntry("fileBoxRead", "Read a file from the FILE_BOX workspace."),
     ToolEntry("taskQueueUpdate", "Set status='pending' + next_task_description to continue working autonomously, or status='complete' when finished."),
     ToolEntry("architectInit", "(Planner-Worker) Call ONCE to commit a project blueprint with goal and file list. Starts the worker phase automatically."),
     ToolEntry("workerExecute", "(Planner-Worker) Write one file, mark it DONE in blueprint.md, auto-continue until is_project_finished=true."),
-    ToolEntry("shellExecute", "Run a terminal command invisibly (10 s timeout). Use to test code or debug."),
-    ToolEntry("commandOverride", "Run a terminal command visibly on the MSTR_CTRL screen so the user can watch."),
+    ToolEntry("shellExecute", "Executes bash commands in the Termux environment. STRICTLY PROHIBITED FOR FILE CREATION OR EDITING. Use only to run/test code or debug."),
+    ToolEntry("commandOverride", "Run a terminal command visibly on the MSTR_CTRL screen so the user can watch. STRICTLY PROHIBITED FOR FILE CREATION OR EDITING."),
     ToolEntry("operatorHalt", "Stop the autonomous loop and present a reason to the user."),
     ToolEntry("oracleSearch", "Search offline .zim documentation (StackOverflow, API docs) for technical answers."),
     ToolEntry("gitDiffRead", "Get git diff (--unified=0) for a file or the whole workspace."),
@@ -741,10 +741,12 @@ class AgentTools() : ToolSet {
    * (e.g. "new_project/backend/src/api.js").
    */
   @Tool(
-    description = "Writes a text or code file to the CLU/BOX FILE_BOX workspace. " +
+    description = "The ONLY permitted tool for creating, writing, or overwriting files on disk. " +
+      "Pass the relative path and the raw file content. " +
       "You can create nested folders automatically by including them in the file_path " +
       "(e.g. 'new_project/folder/file.txt'). Only text-based extensions are allowed " +
-      "(e.g. .txt, .kt, .js, .json, .md, .html, .py, .ts, .css, .xml, .yaml)."
+      "(e.g. .txt, .kt, .js, .json, .md, .html, .py, .ts, .css, .xml, .yaml). " +
+      "NEVER use shell commands (echo, cat, nano) to write files — always use this tool."
   )
   fun fileBoxWrite(
     @ToolParam(description = "Relative path inside FILE_BOX (e.g. 'my_app/src/main.kt'). Nested directories are auto-created.")
@@ -1173,12 +1175,12 @@ class AgentTools() : ToolSet {
    * A strict 10-second timeout is enforced.
    */
   @Tool(
-    description = "Use this to execute terminal commands, run test scripts, or check file states. " +
-      "You will receive the raw terminal output. Use this to verify your code works or to debug " +
-      "stack traces before moving to the next task."
+    description = "Executes bash commands in the Termux environment. STRICTLY PROHIBITED FOR FILE CREATION OR EDITING. " +
+      "Use only to run test scripts, check directory listings, execute programs, or debug stack traces. " +
+      "You will receive the raw terminal output. To create or modify files, you MUST use fileBoxWrite instead."
   )
   fun shellExecute(
-    @ToolParam(description = "The shell command to execute (e.g. 'ls -la', 'cat file.txt', 'python3 test.py').")
+    @ToolParam(description = "The shell command to execute (e.g. 'ls -la', 'python3 test.py', 'git status'). NEVER use echo/cat/nano/tee/sed to write files.")
     command: String,
   ): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
@@ -1251,11 +1253,11 @@ class AgentTools() : ToolSet {
    */
   @Tool(
     description = "Execute a terminal command and display both input and output visibly on the " +
-      "MSTR_CTRL terminal screen so the user can watch in real time. Use this when you want the " +
-      "user to see what you are doing. You will also receive the raw output."
+      "MSTR_CTRL terminal screen so the user can watch in real time. STRICTLY PROHIBITED FOR FILE CREATION OR EDITING. " +
+      "Use this when you want the user to see what you are doing. You will also receive the raw output."
   )
   fun commandOverride(
-    @ToolParam(description = "The shell command to execute visibly (e.g. 'git status', 'npm test').")
+    @ToolParam(description = "The shell command to execute visibly (e.g. 'git status', 'npm test'). NEVER use echo/cat/nano/tee/sed to write files.")
     command: String,
   ): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
