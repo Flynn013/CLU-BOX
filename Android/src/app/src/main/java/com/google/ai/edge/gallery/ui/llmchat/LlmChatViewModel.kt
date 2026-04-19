@@ -1118,6 +1118,7 @@ open class LlmChatViewModelBase(
               }
             }
           }
+        }
 
         val cleanUpListener: () -> Unit = {
           setInProgress(false)
