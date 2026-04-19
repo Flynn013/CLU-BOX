@@ -101,7 +101,7 @@ class VectorEngine(private val context: Context) {
       return try {
         val result = embedder.embed(text)
         val embedding = result.embeddingResult().embeddings().firstOrNull()
-        embedding?.floatEmbedding()?.toFloatArray() ?: bowEmbed(text)
+        embedding?.floatEmbedding()?.let { list -> FloatArray(list.size) { list[it] } } ?: bowEmbed(text)
       } catch (e: Exception) {
         Log.e(TAG, "MediaPipe embed failed — falling back to BoW", e)
         bowEmbed(text)

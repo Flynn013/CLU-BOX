@@ -19,7 +19,9 @@ package com.google.ai.edge.gallery.ui.navigation
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.EaseOutExpo
@@ -206,7 +208,7 @@ fun GalleryNavHost(
     composable(
       route = ROUTE_MODEL_LIST,
       enterTransition = { EnterTransition.None },
-      exitTransition = { EnterTransition.None },
+      exitTransition = { ExitTransition.None },
     ) {
       pickedTask?.let {
         ModelManager(
