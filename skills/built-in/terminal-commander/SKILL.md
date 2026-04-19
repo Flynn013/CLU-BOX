@@ -57,3 +57,4 @@ Returns minimal `--unified=0` diff output to save tokens.
 - Chain commands with `&&` for dependent operations
 - Use `2>&1` to capture stderr in the output
 - The sandbox is shared with FILE_BOX — files written by either tool are immediately visible to both
+- If output is truncated with a `[SYSTEM OVERRIDE]` notice, use the **context-pager** skill (`brainBoxGrep` / `fileBoxReadLines`) to inspect the full log
