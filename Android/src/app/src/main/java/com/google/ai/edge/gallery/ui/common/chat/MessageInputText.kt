@@ -646,12 +646,14 @@ fun MessageInputText(
                     }
                   }
                 }
-                // Send button.
-                else {
+                // Send button — always visible.  When inference is running
+                // and the user taps Send, the message is enqueued in the
+                // ViewModel's command buffer and rendered in the chat with
+                // a "queued" style until inference completes.
+                if (!inProgress || !showStopButtonWhenInProgress || (curMessage.isNotEmpty() || pickedAudioClips.isNotEmpty())) {
                   IconButton(
                     enabled =
-                      !inProgress &&
-                        !isResettingSession &&
+                      !isResettingSession &&
                         (curMessage.isNotEmpty() || pickedAudioClips.isNotEmpty()),
                     onClick = {
                       var message = curMessage.trim()

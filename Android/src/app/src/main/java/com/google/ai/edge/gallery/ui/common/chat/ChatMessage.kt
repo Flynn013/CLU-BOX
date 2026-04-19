@@ -117,6 +117,14 @@ open class ChatMessageText(
   override val accelerator: String = "",
   override val hideSenderLabel: Boolean = false,
   var data: Any? = null,
+
+  /**
+   * When `true`, this message was sent while inference was already in
+   * progress and is waiting in the command buffer.  The UI renders it
+   * with a muted / dashed-border style.  Once the command is dequeued
+   * and inference begins, a fresh non-queued message replaces this one.
+   */
+  val isQueued: Boolean = false,
 ) :
   ChatMessage(
     type = ChatMessageType.TEXT,
@@ -135,6 +143,7 @@ open class ChatMessageText(
       llmBenchmarkResult = llmBenchmarkResult,
       hideSenderLabel = hideSenderLabel,
       data = data,
+      isQueued = isQueued,
     )
   }
 }

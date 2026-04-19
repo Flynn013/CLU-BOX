@@ -385,6 +385,14 @@ fun ChatPanel(
                     }
                     messageBubbleModifier = messageBubbleModifier.background(backgroundColor)
                   }
+                  // ── Queued message visual indicator ────────────────
+                  // Messages waiting in the command buffer are rendered
+                  // at 50 % opacity so the user can see they were
+                  // accepted but not yet processed.
+                  val isQueuedMessage = message is ChatMessageText && message.isQueued
+                  if (isQueuedMessage) {
+                    messageBubbleModifier = messageBubbleModifier.graphicsLayer { alpha = 0.5f }
+                  }
                   Box(modifier = messageBubbleModifier) {
                     when (message) {
                       // Text

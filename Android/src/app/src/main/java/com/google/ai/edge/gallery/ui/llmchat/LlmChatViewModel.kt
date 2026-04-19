@@ -700,6 +700,11 @@ open class LlmChatViewModelBase(
     _commandQueue.update { it.drop(1) }
     Log.d(TAG, "drainCommandQueue: popping queued command — remaining: ${queue.size - 1}")
 
+    // Transition the queued message in the UI to normal styling by
+    // finding the first ChatMessageText with isQueued=true and replacing
+    // it with a non-queued copy.
+    dequeueMessageInUI(next.model, next.input)
+
     generateResponse(
       model = next.model,
       input = next.input,
@@ -711,6 +716,34 @@ open class LlmChatViewModelBase(
       onError = next.onError,
       allowThinking = next.allowThinking,
     )
+  }
+
+  /**
+   * Finds the first queued [ChatMessageText] in the UI for [model] whose
+   * content matches [input] and replaces it with a non-queued copy so the
+   * bubble transitions from muted to standard styling.
+   */
+  private fun dequeueMessageInUI(model: Model, input: String) {
+    val messages = uiState.value.messagesByModel[model.name] ?: return
+    val idx = messages.indexOfFirst {
+      it is ChatMessageText && it.isQueued && it.content == input
+    }
+    if (idx >= 0) {
+      val queued = messages[idx] as ChatMessageText
+      replaceMessage(
+        model = model,
+        index = idx,
+        message = ChatMessageText(
+          content = queued.content,
+          side = queued.side,
+          latencyMs = queued.latencyMs,
+          isMarkdown = queued.isMarkdown,
+          accelerator = queued.accelerator,
+          hideSenderLabel = queued.hideSenderLabel,
+          isQueued = false,
+        ),
+      )
+    }
   }
 
   fun generateResponse(
@@ -1208,6 +1241,8 @@ open class LlmChatViewModelBase(
   ) {
     viewModelScope.launch(Dispatchers.Default) {
       setIsResettingSession(true)
+      // Clear any pending commands — they belong to the old session.
+      _commandQueue.update { emptyList() }
       clearAllMessages(model = model)
       stopResponse(model = model)
 

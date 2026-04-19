@@ -278,8 +278,24 @@ fun ChatViewWrapper(
     viewModel = viewModel,
     modelManagerViewModel = modelManagerViewModel,
     onSendMessage = { model, messages ->
+      // Check if inference is currently running — if so, mark text
+      // messages as "queued" so they render with the muted style.
+      val isCurrentlyProcessing = viewModel.uiState.value.inProgress
       for (message in messages) {
-        viewModel.addMessage(model = model, message = message)
+        val messageToAdd = if (isCurrentlyProcessing && message is ChatMessageText) {
+          ChatMessageText(
+            content = message.content,
+            side = message.side,
+            latencyMs = message.latencyMs,
+            isMarkdown = message.isMarkdown,
+            accelerator = message.accelerator,
+            hideSenderLabel = message.hideSenderLabel,
+            isQueued = true,
+          )
+        } else {
+          message
+        }
+        viewModel.addMessage(model = model, message = messageToAdd)
       }
 
       var text = ""
