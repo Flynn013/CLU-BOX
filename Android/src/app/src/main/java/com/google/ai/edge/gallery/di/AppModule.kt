@@ -35,6 +35,7 @@ import com.google.ai.edge.gallery.data.DownloadRepository
 import com.google.ai.edge.gallery.data.brainbox.BrainBoxDao
 import com.google.ai.edge.gallery.data.brainbox.ChatHistoryDao
 import com.google.ai.edge.gallery.data.brainbox.GraphDatabase
+import com.google.ai.edge.gallery.data.brainbox.VectorEngine
 import com.google.ai.edge.gallery.proto.BenchmarkResults
 import com.google.ai.edge.gallery.proto.CutoutCollection
 import com.google.ai.edge.gallery.proto.Settings
@@ -206,5 +207,12 @@ internal object AppModule {
   @Singleton
   fun provideBrainBoxDao(db: GraphDatabase): BrainBoxDao {
     return db.brainBoxDao()
+  }
+
+  // Provides VectorEngine — MediaPipe TextEmbedder + cosine similarity
+  @Provides
+  @Singleton
+  fun provideVectorEngine(@ApplicationContext context: Context): VectorEngine {
+    return VectorEngine(context)
   }
 }

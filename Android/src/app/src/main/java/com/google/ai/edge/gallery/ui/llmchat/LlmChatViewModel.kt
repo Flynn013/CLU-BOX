@@ -29,6 +29,7 @@ import com.google.ai.edge.gallery.data.brainbox.BrainBoxDao
 import com.google.ai.edge.gallery.data.brainbox.ChatHistoryDao
 import com.google.ai.edge.gallery.data.brainbox.ChatMessageEntity
 import com.google.ai.edge.gallery.data.brainbox.NeuronEntity
+import com.google.ai.edge.gallery.data.brainbox.VectorEngine
 import com.google.ai.edge.gallery.runtime.runtimeHelper
 import java.io.File
 import java.util.Collections
@@ -181,6 +182,7 @@ internal fun sanitizeToolCallArtifacts(text: String): String {
 open class LlmChatViewModelBase(
   private val chatHistoryDao: ChatHistoryDao? = null,
   private val brainBoxDao: BrainBoxDao? = null,
+  private val vectorEngine: VectorEngine? = null,
 ) : ChatViewModel() {
 
   /** Tracks which (taskId, modelName) pairs have already had their history loaded. */
@@ -576,16 +578,29 @@ open class LlmChatViewModelBase(
         val timestamp =
           java.time.LocalDateTime.now()
             .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
+
+        val label = "Session_$timestamp"
+
+        // Generate vector embedding for the session transcript.
+        val engine = vectorEngine
+        val embedding = if (engine != null) {
+          val textToEmbed = "$label $transcript $extractedSynapses"
+          engine.embed(textToEmbed)
+        } else {
+          floatArrayOf()
+        }
+
         val neuron =
           NeuronEntity(
             id = UUID.randomUUID().toString(),
-            label = "Session_$timestamp",
+            label = label,
             type = "Session_Log",
             content = transcript,
             synapses = extractedSynapses,
+            embedding = embedding,
           )
         dao.insertNeuron(neuron)
-        Log.d(TAG, "Forged neuron: ${neuron.label} (${transcript.length} chars)")
+        Log.d(TAG, "Forged neuron: ${neuron.label} (${transcript.length} chars, ${embedding.size}-dim embedding)")
 
         withContext(Dispatchers.Main) {
           addMessage(
@@ -594,7 +609,8 @@ open class LlmChatViewModelBase(
               ChatMessageText(
                 content =
                   "⚡ **FORGED TO BRAINBOX** — session locked as `${neuron.label}`.\n" +
-                    "CLU will remember this the next time you reference it.",
+                    "CLU will remember this the next time you reference it." +
+                    if (embedding.isNotEmpty()) "\n📐 Vector embedding: ${embedding.size} dimensions" else "",
                 side = ChatSide.AGENT,
               ),
           )
@@ -1126,8 +1142,8 @@ open class LlmChatViewModelBase(
 }
 
 @HiltViewModel
-class LlmChatViewModel @Inject constructor(chatHistoryDao: ChatHistoryDao, brainBoxDao: BrainBoxDao) :
-  LlmChatViewModelBase(chatHistoryDao, brainBoxDao)
+class LlmChatViewModel @Inject constructor(chatHistoryDao: ChatHistoryDao, brainBoxDao: BrainBoxDao, vectorEngine: VectorEngine) :
+  LlmChatViewModelBase(chatHistoryDao, brainBoxDao, vectorEngine)
 
 @HiltViewModel class LlmAskImageViewModel @Inject constructor() : LlmChatViewModelBase()
 

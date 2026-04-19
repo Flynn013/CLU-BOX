@@ -27,6 +27,7 @@ import com.google.ai.edge.gallery.common.LOCAL_URL_BASE
 import com.google.ai.edge.gallery.common.SkillProgressAgentAction
 import com.google.ai.edge.gallery.data.brainbox.BrainBoxDao
 import com.google.ai.edge.gallery.data.brainbox.NeuronEntity
+import com.google.ai.edge.gallery.data.brainbox.VectorEngine
 import com.google.ai.edge.litertlm.Tool
 import com.google.ai.edge.litertlm.ToolParam
 import com.google.ai.edge.litertlm.ToolSet
@@ -114,6 +115,9 @@ class AgentTools() : ToolSet {
   lateinit var skillManagerViewModel: SkillManagerViewModel
   var brainBoxDao: BrainBoxDao? = null
 
+  /** Optional VectorEngine for embedding generation and semantic search. */
+  var vectorEngine: VectorEngine? = null
+
   /** Optional reference to the MSTR_CTRL terminal session for shell tools. */
   var terminalSessionManager: com.google.ai.edge.gallery.data.TerminalSessionManager? = null
 
@@ -148,6 +152,8 @@ class AgentTools() : ToolSet {
     ToolEntry("runIntent", "Run an Android intent to perform actions on the device."),
     ToolEntry("queryBrain", "Search the BrainBox knowledge graph for stored memories/neurons."),
     ToolEntry("saveBrainNeuron", "Save a new memory/fact/context to the BrainBox knowledge graph."),
+    ToolEntry("vectorRecall", "Semantic search: embed a query and find the top-3 most relevant neurons via cosine similarity."),
+    ToolEntry("commitMemory", "Autonomously write a memory to BrainBox with title, synapses, ground_truth, and false_paths. Auto-embeds for future vector recall."),
     ToolEntry("workspaceMap", "Scan the clu_file_box workspace and return a JSON tree of all files and folders. Always call this first to orient yourself."),
     ToolEntry("fileBoxWrite", "Write a text/code file to the FILE_BOX workspace. Nested folders are created automatically. Python and JavaScript files are auto-validated — syntax errors cause the file to be DELETED."),
     ToolEntry("fileBoxRead", "Read a file from the FILE_BOX workspace."),
@@ -462,6 +468,185 @@ class AgentTools() : ToolSet {
       mapOf("label" to label, "type" to type, "status" to "succeeded")
       } catch (e: Exception) {
         Log.e(TAG, "saveBrainNeuron: unexpected error", e)
+        mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
+      }
+    })
+  }
+
+  // =========================================================================
+  // VECTOR_RECALL — Semantic vector search across BrainBox
+  // =========================================================================
+
+  /**
+   * Embeds the [search_query], runs cosine similarity against all stored
+   * neuron embeddings, and returns the top-3 most relevant neurons.
+   */
+  @Tool(
+    description = "Semantic search: embed a query and find the top-3 most relevant neurons " +
+      "in the BrainBox knowledge graph via cosine similarity. Returns the title, type, " +
+      "ground_truth (content), synapses, and similarity score for each match."
+  )
+  fun vectorRecall(
+    @ToolParam(description = "The natural-language search query to embed and match against stored memories.")
+    search_query: String,
+  ): Map<String, String> {
+    return withResolution(runBlocking(Dispatchers.IO) {
+      try {
+        val dao = brainBoxDao
+        val engine = vectorEngine
+        if (dao == null) {
+          return@runBlocking mapOf("error" to "BrainBox not available", "status" to "failed")
+        }
+        if (engine == null) {
+          return@runBlocking mapOf("error" to "VectorEngine not available", "status" to "failed")
+        }
+
+        val query = search_query.trim()
+        if (query.isBlank()) {
+          return@runBlocking mapOf("error" to "search_query must not be empty", "status" to "failed")
+        }
+
+        // Embed the query.
+        val queryEmbedding = engine.embed(query)
+
+        // Fetch all neurons and filter to those with non-empty embeddings.
+        val allNeurons = dao.getAllNeurons()
+        val candidates = allNeurons
+          .filter { it.embedding.isNotEmpty() }
+          .map { it.id to it.embedding }
+
+        if (candidates.isEmpty()) {
+          // Fallback to keyword search if no embeddings exist yet.
+          val q = query.lowercase()
+          val keywordMatched = allNeurons.filter {
+            it.label.lowercase().contains(q) || it.content.lowercase().contains(q)
+          }.take(3)
+          val summary = keywordMatched.joinToString(separator = "\n---\n") { n ->
+            "[${n.type}] ${n.label}\nContent: ${n.content}\nSynapses: ${n.synapses}"
+          }.ifEmpty { "(no neurons found)" }
+          return@runBlocking mapOf(
+            "result" to capOutput(summary),
+            "count" to keywordMatched.size.toString(),
+            "search_mode" to "keyword_fallback",
+            "status" to "succeeded",
+          )
+        }
+
+        // Run vector search — top 3.
+        val topResults = engine.search(queryEmbedding, candidates, topK = 3)
+        val neuronMap = allNeurons.associateBy { it.id }
+
+        val summary = topResults.mapNotNull { (id, similarity) ->
+          val n = neuronMap[id] ?: return@mapNotNull null
+          "[${n.type}] ${n.label} (similarity: ${"%.3f".format(similarity)})\n" +
+            "Content: ${n.content}\n" +
+            "Synapses: ${n.synapses}\n" +
+            "False Paths: ${n.falsePaths}"
+        }.joinToString(separator = "\n---\n").ifEmpty { "(no matching neurons)" }
+
+        Log.d(TAG, "vectorRecall query='$query' returned ${topResults.size} results")
+        _actionChannel.send(
+          SkillProgressAgentAction(
+            label = "Vector_Recall: ${topResults.size} matches for \"${query.take(40)}\"",
+            inProgress = false,
+            addItemTitle = "Vector_Recall",
+            addItemDescription = "Query: $query → ${topResults.size} results",
+          )
+        )
+
+        mapOf(
+          "result" to capOutput(summary),
+          "count" to topResults.size.toString(),
+          "search_mode" to if (engine.isMediaPipeAvailable) "mediapipe_semantic" else "bow_fallback",
+          "status" to "succeeded",
+        )
+      } catch (e: Exception) {
+        Log.e(TAG, "vectorRecall: unexpected error", e)
+        mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
+      }
+    })
+  }
+
+  // =========================================================================
+  // COMMIT_MEMORY — AI autonomously writes a vectorised memory
+  // =========================================================================
+
+  /**
+   * Allows the AI to autonomously write a new memory to BrainBox.
+   * The text is automatically embedded for future vector recall.
+   */
+  @Tool(
+    description = "Autonomously write a memory to BrainBox. Kotlin intercepts the data, " +
+      "generates a vector embedding, saves it to the database, and returns a success " +
+      "resolution token. Use this to remember facts, decisions, or context."
+  )
+  fun commitMemory(
+    @ToolParam(description = "Short, unique title for this memory (e.g. 'User prefers Python').")
+    title: String,
+    @ToolParam(description = "Comma-separated [[Wiki-Links]] connecting this memory to related neurons (e.g. '[[Python]],[[User_Prefs]]'). Pass empty string if none.")
+    synapses: String,
+    @ToolParam(description = "The verified ground truth content to store — the actual knowledge.")
+    ground_truth: String,
+    @ToolParam(description = "Incorrect assumptions or dead-end paths to avoid. Pass empty string if none.")
+    false_paths: String,
+  ): Map<String, String> {
+    return withResolution(runBlocking(Dispatchers.IO) {
+      try {
+        val dao = brainBoxDao
+        val engine = vectorEngine
+        if (dao == null) {
+          return@runBlocking mapOf("error" to "BrainBox not available", "status" to "failed")
+        }
+        if (engine == null) {
+          return@runBlocking mapOf("error" to "VectorEngine not available", "status" to "failed")
+        }
+
+        val cleanTitle = title.trim()
+        val cleanTruth = ground_truth.trim()
+        if (cleanTitle.isBlank() || cleanTruth.isBlank()) {
+          return@runBlocking mapOf(
+            "error" to "title and ground_truth must not be empty",
+            "status" to "failed",
+          )
+        }
+
+        // Concatenate text for embedding: title + ground truth + synapses.
+        val textToEmbed = "$cleanTitle $cleanTruth ${synapses.trim()}"
+        val embedding = engine.embed(textToEmbed)
+
+        // Reuse existing ID if a neuron with this title already exists.
+        val existing = dao.getAllNeurons().find { it.label.equals(cleanTitle, ignoreCase = true) }
+        val neuron = NeuronEntity(
+          id = existing?.id ?: UUID.randomUUID().toString(),
+          label = cleanTitle,
+          type = "Memory",
+          content = cleanTruth,
+          synapses = synapses.trim(),
+          falsePaths = false_paths.trim(),
+          embedding = embedding,
+        )
+        dao.insertNeuron(neuron)
+
+        val action = if (existing != null) "updated" else "created"
+        Log.d(TAG, "commitMemory: $action neuron '$cleanTitle' (${embedding.size}-dim embedding)")
+
+        _actionChannel.send(
+          SkillProgressAgentAction(
+            label = "Commit_Memory: $action \"$cleanTitle\"",
+            inProgress = false,
+            addItemTitle = "Commit_Memory",
+            addItemDescription = "$cleanTitle — ${cleanTruth.take(80)}…",
+          )
+        )
+
+        mapOf(
+          "title" to cleanTitle,
+          "action" to action,
+          "embedding_dims" to embedding.size.toString(),
+          "status" to "succeeded",
+        )
+      } catch (e: Exception) {
+        Log.e(TAG, "commitMemory: unexpected error", e)
         mapOf("error" to "System Error: ${e.message ?: "unknown"}", "status" to "failed")
       }
     })

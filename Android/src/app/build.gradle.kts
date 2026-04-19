@@ -128,6 +128,9 @@ dependencies {
   implementation(libs.room.runtime)
   implementation(libs.room.ktx)
 
+  // ── MediaPipe Text Embedder (vector engine for BrainBox) ──
+  implementation(libs.mediapipe.tasks.text)
+
   // ── Termux terminal emulator (PTY-backed shell sessions + TerminalView) ──
   // From JitPack — https://github.com/termux/termux-app/wiki/Termux-Libraries
   implementation("com.termux.termux-app:terminal-view:0.118.0")

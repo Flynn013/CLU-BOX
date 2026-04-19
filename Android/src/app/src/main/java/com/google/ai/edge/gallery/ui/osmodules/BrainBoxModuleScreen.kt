@@ -22,6 +22,7 @@ import android.provider.MediaStore
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -70,6 +71,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.google.ai.edge.gallery.data.brainbox.BrainBoxDao
 import com.google.ai.edge.gallery.data.brainbox.NeuronEntity
+import com.google.ai.edge.gallery.data.brainbox.VectorEngine
 import com.google.ai.edge.gallery.data.brainbox.exportBrain
 import com.google.ai.edge.gallery.data.brainbox.exportBrainToMarkdown
 import com.google.ai.edge.gallery.data.brainbox.importBrain
@@ -84,7 +86,7 @@ import kotlinx.coroutines.launch
  * BRAIN_BOX module — view, create, edit, and delete Neurons with Upload/Download Brain I/O.
  */
 @Composable
-fun BrainBoxModuleScreen(dao: BrainBoxDao) {
+fun BrainBoxModuleScreen(dao: BrainBoxDao, vectorEngine: VectorEngine? = null) {
   val scope = rememberCoroutineScope()
   val context = LocalContext.current
   val neurons = remember { mutableStateListOf<NeuronEntity>() }
@@ -98,6 +100,9 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao) {
   var importJson by remember { mutableStateOf("") }
   var importError by remember { mutableStateOf("") }
 
+  // Loading state for import/export with embedding regeneration.
+  var isCompiling by remember { mutableStateOf(false) }
+
   // Markdown file picker launcher (Phase 3).
   val mdImportLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.OpenDocument(),
@@ -105,12 +110,15 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao) {
     if (uri != null) {
       scope.launch {
         try {
-          val count = importBrainFromMarkdown(context, dao, uri)
+          isCompiling = true
+          val count = importBrainFromMarkdown(context, dao, uri, vectorEngine)
           neurons.clear()
           neurons.addAll(dao.getAllNeurons())
-          Toast.makeText(context, "Imported $count neuron(s) from Markdown", Toast.LENGTH_LONG).show()
+          Toast.makeText(context, "Imported $count neuron(s) — embeddings regenerated", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
           Toast.makeText(context, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
+        } finally {
+          isCompiling = false
         }
       }
     }
@@ -179,6 +187,10 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao) {
         TextButton(onClick = {
           scope.launch {
             try {
+              // Generate embedding for the neuron content.
+              val textToEmbed = "${label.trim()} ${content.trim()} ${synapses.trim()}"
+              val embedding = vectorEngine?.embed(textToEmbed) ?: floatArrayOf()
+
               val neuron = NeuronEntity(
                 id = existing?.id ?: UUID.randomUUID().toString(),
                 label = label.trim(),
@@ -186,6 +198,7 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao) {
                 content = content.trim(),
                 synapses = synapses.trim(),
                 isCore = isCore,
+                embedding = embedding,
               )
               dao.insertNeuron(neuron)
               neurons.clear()
@@ -283,8 +296,9 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao) {
       }
     },
   ) { innerPadding ->
+    Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
     Column(
-      modifier = Modifier.fillMaxSize().padding(innerPadding).padding(horizontal = 16.dp),
+      modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
     ) {
       Spacer(Modifier.height(12.dp))
       Text(
@@ -397,6 +411,28 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao) {
         }
       }
     }
+
+    // ── "Compiling Neural Graph..." loading overlay ──
+    if (isCompiling) {
+      Box(
+        modifier = Modifier
+          .fillMaxSize()
+          .background(absoluteBlack.copy(alpha = 0.85f)),
+        contentAlignment = Alignment.Center,
+      ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+          androidx.compose.material3.CircularProgressIndicator(color = neonGreen)
+          Spacer(Modifier.height(16.dp))
+          Text(
+            "Compiling Neural Graph...",
+            color = neonGreen,
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.titleMedium,
+          )
+        }
+      }
+    }
+    } // End Box
   }
 }
 

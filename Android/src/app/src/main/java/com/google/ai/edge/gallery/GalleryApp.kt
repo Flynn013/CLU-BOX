@@ -139,6 +139,7 @@ fun GalleryApp(
   }
   agentTools.context = context
   agentTools.brainBoxDao = remember(context) { GraphDatabase.getInstance(context).brainBoxDao() }
+  agentTools.vectorEngine = remember(context) { com.google.ai.edge.gallery.data.brainbox.VectorEngine(context) }
   agentTools.terminalSessionManager = terminalSessionManager
 
   // Separate nav controllers so each module retains its own back stack.
@@ -271,7 +272,10 @@ fun GalleryApp(
             ) { innerPadding ->
               Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
                 when (activeModule) {
-                  OsModule.BRAIN_BOX -> BrainBoxModuleScreen(dao = db.brainBoxDao())
+                  OsModule.BRAIN_BOX -> BrainBoxModuleScreen(
+                    dao = db.brainBoxDao(),
+                    vectorEngine = remember(context) { com.google.ai.edge.gallery.data.brainbox.VectorEngine(context) },
+                  )
                   OsModule.FILE_BOX -> FileBoxScreen(fileBoxManager = fileBoxManager)
                   OsModule.MSTR_CTRL -> MstrCtrlScreen(sessionManager = terminalSessionManager)
                   OsModule.THE_GRID -> TheGridScreen(

@@ -142,6 +142,7 @@ fun AgentChatScreen(
   agentTools.context = context
   agentTools.skillManagerViewModel = skillManagerViewModel
   agentTools.brainBoxDao = remember(context) { GraphDatabase.getInstance(context).brainBoxDao() }
+  agentTools.vectorEngine = remember(context) { com.google.ai.edge.gallery.data.brainbox.VectorEngine(context) }
   agentTools.terminalSessionManager = remember(context) {
     com.google.ai.edge.gallery.data.TerminalSessionManager(context)
   }
