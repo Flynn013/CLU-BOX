@@ -32,31 +32,13 @@ class FileBoxWriteSkill(private val agentTools: AgentTools) : CluSkill {
   override val name: String = "fileBoxWrite"
 
   override val description: String =
-    "The ONLY permitted tool for creating or writing files. NEVER use shell commands to write files."
+    "ONLY tool for file writes."
 
-  override val jsonSchema: String = """
-    {
-      "name": "fileBoxWrite",
-      "parameters": {
-        "file_path": {
-          "type": "string",
-          "description": "Relative path inside FILE_BOX (e.g. 'my_app/src/main.kt'). Nested directories are auto-created."
-        },
-        "content": {
-          "type": "string",
-          "description": "The full text/code content to write to the file."
-        }
-      },
-      "required": ["file_path", "content"]
-    }
-  """.trimIndent()
+  override val jsonSchema: String =
+    """{"name":"fileBoxWrite","parameters":{"file_path":{"type":"string"},"content":{"type":"string"}},"required":["file_path","content"]}"""
 
-  override val fewShotExample: String = """
-    Example — Write a Python script:
-      fileBoxWrite(file_path="my_app/script.py", content="print('hello world')")
-    Example — Write a Kotlin file:
-      fileBoxWrite(file_path="my_app/src/Main.kt", content="fun main() { println(\"Hello\") }")
-  """.trimIndent()
+  override val fewShotExample: String =
+    """fileBoxWrite(file_path="my_app/script.py", content="print('hi')")"""
 
   override suspend fun execute(args: JSONObject): String {
     val filePath = args.optString("file_path", "")

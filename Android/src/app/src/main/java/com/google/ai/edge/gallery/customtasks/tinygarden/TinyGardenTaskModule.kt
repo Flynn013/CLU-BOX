@@ -25,9 +25,10 @@ import dagger.multibindings.IntoSet
 @Module
 @InstallIn(SingletonComponent::class)
 internal object TinyGardenTaskModule {
-  @Provides
-  @IntoSet
-  fun provideTask(): CustomTask {
-    return TinyGardenTask()
-  }
+  // Boilerplate task stripped — not used in CLU/BOX.
+  // @Provides
+  // @IntoSet
+  // fun provideTask(): CustomTask {
+  //   return TinyGardenTask()
+  // }
 }

@@ -32,27 +32,13 @@ class ShellExecuteSkill(private val agentTools: AgentTools) : CluSkill {
   override val name: String = "shellExecute"
 
   override val description: String =
-    "Executes bash commands in Termux. STRICTLY PROHIBITED FOR FILE CREATION. Use only to run/test code or debug."
+    "Termux bash. PROHIBITED for file creation."
 
-  override val jsonSchema: String = """
-    {
-      "name": "shellExecute",
-      "parameters": {
-        "command": {
-          "type": "string",
-          "description": "The shell command to execute. NEVER use echo/cat/nano/tee/sed to write files."
-        }
-      },
-      "required": ["command"]
-    }
-  """.trimIndent()
+  override val jsonSchema: String =
+    """{"name":"shellExecute","parameters":{"command":{"type":"string"}},"required":["command"]}"""
 
-  override val fewShotExample: String = """
-    Example — Run a Python script:
-      shellExecute(command="python3 /data/user/0/com.google.ai.edge.gallery/files/clu_file_box/my_app/script.py")
-    Example — Check directory listing:
-      shellExecute(command="ls -la")
-  """.trimIndent()
+  override val fewShotExample: String =
+    """shellExecute(command="python3 /data/user/0/com.google.ai.edge.gallery/files/clu_file_box/my_app/script.py")"""
 
   override suspend fun execute(args: JSONObject): String {
     val command = args.optString("command", "")

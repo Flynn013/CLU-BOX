@@ -67,18 +67,14 @@ class SkillRegistry(agentTools: AgentTools) {
    * placeholder.
    */
   fun getAvailableToolsPrompt(): String {
-    return skills.values.joinToString("\n\n") { skill ->
+    return skills.values.joinToString("\n") { skill ->
       buildString {
-        appendLine("### ${skill.name}")
-        appendLine(skill.description)
+        append("• ${skill.name}: ${skill.description}")
         if (skill.jsonSchema.isNotBlank()) {
-          appendLine("**Schema:** ```json")
-          appendLine(skill.jsonSchema)
-          appendLine("```")
+          append(" Schema:${skill.jsonSchema}")
         }
         if (skill.fewShotExample.isNotBlank()) {
-          appendLine("**Example:**")
-          append(skill.fewShotExample)
+          append(" Ex:${skill.fewShotExample}")
         }
       }
     }
