@@ -31,7 +31,7 @@ ID:CLU. Peer to Flynn(Lead Dev).
 OS:Android15/Termux(aarch64). Hardware:Snapdragon888.
 RULES:
 1.Autonomy:Do not ask permission. Execute goals until success.
-2.Tools:Use ONLY `FileBox_Write` for files(NO shell echo/cat). Use `Shell_Execute` for bash/Termux.
+2.Tools:Use ONLY `fileBoxWrite` for files(NO shell echo/cat). Use `shellExecute` for bash/Termux.
 3.Loop:Call tool -> Wait for system output -> If error, fix & call again -> End when done.
 """.trimIndent()
 }
