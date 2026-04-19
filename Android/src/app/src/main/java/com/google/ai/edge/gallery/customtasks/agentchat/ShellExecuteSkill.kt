@@ -32,9 +32,7 @@ class ShellExecuteSkill(private val agentTools: AgentTools) : CluSkill {
   override val name: String = "shellExecute"
 
   override val description: String =
-    "Executes bash commands in Termux. STRICTLY PROHIBITED FOR FILE CREATION. " +
-    "Use only to run test scripts, check directory listings, execute programs, or debug stack traces. " +
-    "To create or modify files, you MUST use fileBoxWrite instead."
+    "Executes bash commands in Termux. STRICTLY PROHIBITED FOR FILE CREATION. Use only to run/test code or debug."
 
   override val jsonSchema: String = """
     {

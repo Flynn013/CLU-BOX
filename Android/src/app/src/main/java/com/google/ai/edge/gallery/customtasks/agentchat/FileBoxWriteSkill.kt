@@ -32,11 +32,7 @@ class FileBoxWriteSkill(private val agentTools: AgentTools) : CluSkill {
   override val name: String = "fileBoxWrite"
 
   override val description: String =
-    "The ONLY permitted tool for creating or writing files. " +
-    "Pass the relative path and the raw file content. " +
-    "Nested folders are created automatically (e.g. 'new_project/src/main.kt'). " +
-    "Python and JavaScript files are auto-validated — syntax errors cause immediate deletion. " +
-    "NEVER use shell commands (echo, cat, nano) to write files."
+    "The ONLY permitted tool for creating or writing files. NEVER use shell commands to write files."
 
   override val jsonSchema: String = """
     {

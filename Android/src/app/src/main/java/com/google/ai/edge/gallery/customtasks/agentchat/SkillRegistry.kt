@@ -115,16 +115,28 @@ class SkillRegistry(agentTools: AgentTools) {
   }
 
   /**
-   * Constructs the final composite system prompt by combining:
-   * 1. [CluIdentity.GENESIS_IDENTITY_BLOCK]
-   * 2. The `[AVAILABLE SKILLS]` section from this registry
-   * 3. The application-level [basePrompt]
+   * Constructs the final composite system prompt by replacing the
+   * first paragraph of [basePrompt] (the generic "You are CLU..."
+   * identity line) with [CluIdentity.GENESIS_IDENTITY_BLOCK].
+   *
+   * This avoids duplicating identity text and keeps the total prompt
+   * within the tight token budget of small models like Gemma-4-E2B
+   * (4 000-token input limit).
    *
    * The [basePrompt] should contain `___TOOLS___` placeholder which
    * will be left intact for [SkillManagerViewModel.getSystemPrompt]
    * to replace.
    */
   fun buildFinalSystemPrompt(basePrompt: String): String {
-    return "${CluIdentity.GENESIS_IDENTITY_BLOCK}\n\n$basePrompt"
+    // The defaultSystemPrompt starts with a one-paragraph CLU identity
+    // sentence followed by a blank line. Replace that paragraph with
+    // the Genesis Block so we don't double-count identity tokens.
+    val firstBlankLine = basePrompt.indexOf("\n\n")
+    val remainder = if (firstBlankLine >= 0) {
+      basePrompt.substring(firstBlankLine) // keeps the leading "\n\n"
+    } else {
+      "\n\n$basePrompt"
+    }
+    return "${CluIdentity.GENESIS_IDENTITY_BLOCK}$remainder"
   }
 }
