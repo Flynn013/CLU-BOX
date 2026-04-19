@@ -79,7 +79,7 @@ private fun validateRelativePath(path: String): String? {
  * This prevents the LLM from constructing shell injections via tool arguments.
  */
 private val DANGEROUS_SHELL_PATTERNS = listOf(
-  "&&", "||", ";", "|", "`", "\$(", "\${", ">", "<", "\n",
+  "&&", "||", ";", "|", "`", "\$(", "\${", ">", "<", "\n", "*", "?",
 )
 
 /**
@@ -1906,8 +1906,10 @@ class AgentTools() : ToolSet {
         )
       }
 
-      // Escape the path for safe shell interpolation (replace ' with '\'').
-      // This preserves the real path while preventing shell injection.
+      // POSIX single-quote escaping: replace each literal ' with the sequence '\''.
+      // This closes the current single-quoted string, appends an escaped literal
+      // single-quote (\'), then reopens a new single-quoted string — a standard
+      // POSIX shell idiom for safely quoting arbitrary file paths.
       val escapedPath = absolutePath.replace("'", "'\\''")
       val cmd = "$runtime '$escapedPath' 2>&1"
 
