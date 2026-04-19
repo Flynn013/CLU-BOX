@@ -587,8 +587,6 @@ fun AppTitleGm4(enableAnimation: Boolean) {
 
 @Composable
 private fun IntroText(enableAnimation: Boolean, gm4: Boolean) {
-  val litertUrl = "https://huggingface.co/litert-community"
-
   // Intro text animation:
   //
   // fade in + slide up.
@@ -604,21 +602,10 @@ private fun IntroText(enableAnimation: Boolean, gm4: Boolean) {
     }
 
   val introText = buildAnnotatedString {
-    val gemma4Url = "https://ai.google.dev/gemma"
     if (gm4) {
-      append("Discover the power of on-device AI models from the ")
-      append(buildTrackableUrlAnnotatedString(url = litertUrl, linkText = "LiteRT community"))
-      append(", featuring the all-new ")
-      append(buildTrackableUrlAnnotatedString(url = gemma4Url, linkText = "Gemma 4"))
-      append(".")
+      append("CLU/BOX — your on-device AI workspace. All models run locally, offline, and private.")
     } else {
       append("${stringResource(R.string.app_intro)} ")
-      append(
-        buildTrackableUrlAnnotatedString(
-          url = litertUrl,
-          linkText = stringResource(R.string.litert_community_label),
-        )
-      )
     }
   }
   Text(

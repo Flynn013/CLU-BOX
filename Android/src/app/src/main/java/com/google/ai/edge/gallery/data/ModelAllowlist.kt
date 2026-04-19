@@ -163,7 +163,7 @@ data class AllowedModel(
           .toMutableList()
     }
 
-    var learnMoreUrl = "https://huggingface.co/${modelId}"
+    var learnMoreUrl = ""
 
     if (runtimeType == RuntimeType.AICORE) {
       downloadUrl = ""

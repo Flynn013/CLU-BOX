@@ -40,11 +40,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.DashboardCustomize
-import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.ShoppingCart
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
@@ -94,7 +92,6 @@ import com.google.ai.edge.gallery.data.TerminalSessionManager
 import com.google.ai.edge.gallery.ui.osmodules.BrainBoxModuleScreen
 import com.google.ai.edge.gallery.ui.osmodules.FileBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.MstrCtrlScreen
-import com.google.ai.edge.gallery.ui.osmodules.TheGridScreen
 import com.google.ai.edge.gallery.ui.theme.absoluteBlack
 import com.google.ai.edge.gallery.ui.theme.neonGreen
 import com.google.ai.edge.gallery.ui.theme.terminalMidGrey
@@ -106,9 +103,8 @@ private enum class OsModule(val label: String, val icon: ImageVector) {
   BRAIN_BOX("BRAIN_BOX", Icons.Outlined.Hub),
   FILE_BOX("FILE_BOX", Icons.Outlined.Code),
   MSTR_CTRL("MSTR_CTRL", Icons.Outlined.Terminal),
-  THE_GRID("THE_GRID", Icons.Outlined.GridView),
   SKILL_BOX("SKILL_BOX", Icons.Outlined.Psychology),
-  VENDING_MACHINE("MODELS", Icons.Outlined.ShoppingCart),
+  MODEL_MANAGER("MODEL_MANAGER", Icons.Outlined.DashboardCustomize),
   SYS_SETTINGS("SETTINGS", Icons.Outlined.Settings),
 }
 
@@ -125,8 +121,6 @@ fun GalleryApp(
   var showSysSettingsDialog by remember { mutableStateOf(false) }
   // True when the SKILL_BOX drawer item is tapped — shows the SkillManagerBottomSheet overlay.
   var showSkillBoxSheet by remember { mutableStateOf(false) }
-  // Grid prompt override: when a Grid game is initialized, this holds the injected system prompt.
-  var gridPromptOverride by remember { mutableStateOf<String?>(null) }
   val db = remember { GraphDatabase.getInstance(context) }
   val fileBoxManager = remember { FileBoxManager(context) }
   val terminalSessionManager = remember { TerminalSessionManager(context) }
@@ -233,8 +227,8 @@ fun GalleryApp(
       // ── Other modules: rendered on top when active ─────────────
       if (!chatBoxVisible) {
         when (activeModule) {
-          // VENDING_MACHINE (MODELS): full-screen, manages own Scaffold.
-          OsModule.VENDING_MACHINE -> GlobalModelManager(
+          // MODEL_MANAGER: full-screen, manages own Scaffold.
+          OsModule.MODEL_MANAGER -> GlobalModelManager(
             viewModel = modelManagerViewModel,
             navigateUp = { activeModule = OsModule.CHAT_BOX },
             onModelSelected = { task, model ->
@@ -278,12 +272,6 @@ fun GalleryApp(
                   )
                   OsModule.FILE_BOX -> FileBoxScreen(fileBoxManager = fileBoxManager)
                   OsModule.MSTR_CTRL -> MstrCtrlScreen(sessionManager = terminalSessionManager)
-                  OsModule.THE_GRID -> TheGridScreen(
-                    onInitializeMatch = { systemPrompt ->
-                      gridPromptOverride = systemPrompt
-                      activeModule = OsModule.CHAT_BOX
-                    },
-                  )
                   else -> {} // all modules covered above
                 }
               }

@@ -19,9 +19,7 @@ package com.google.ai.edge.gallery.ui.navigation
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentTransitionScope
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.EaseOutExpo
@@ -29,12 +27,8 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
@@ -81,18 +75,14 @@ import com.google.ai.edge.gallery.ui.benchmark.BenchmarkScreen
 import com.google.ai.edge.gallery.ui.common.ErrorDialog
 import com.google.ai.edge.gallery.ui.common.ModelPageAppBar
 import com.google.ai.edge.gallery.ui.common.chat.ModelDownloadStatusInfoPanel
-import com.google.ai.edge.gallery.ui.home.HomeScreen
-import com.google.ai.edge.gallery.ui.home.PromoScreenGm4
 import com.google.ai.edge.gallery.ui.modelmanager.GlobalModelManager
 import com.google.ai.edge.gallery.ui.modelmanager.ModelInitializationStatusType
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManager
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private const val TAG = "AGGalleryNavGraph"
-private const val ROUTE_HOMESCREEN = "homepage"
 private const val ROUTE_MODEL_LIST = "model_list"
 internal const val GALLERY_ROUTE_MODEL = "route_model"
 internal const val GALLERY_ROUTE_BENCHMARK = "benchmark"
@@ -162,10 +152,26 @@ fun GalleryNavHost(
       if (initialTaskId != null) modelManagerViewModel.getTaskById(initialTaskId) else null
     )
   }
-  val startDestination = if (initialTaskId != null) ROUTE_MODEL_LIST else ROUTE_HOMESCREEN
-  var enableHomeScreenAnimation by remember { mutableStateOf(true) }
+  // Always start at the model list — auto-navigation to the first model happens below.
+  val startDestination = ROUTE_MODEL_LIST
   var enableModelListAnimation by remember { mutableStateOf(true) }
   var lastNavigatedModelName = remember { "" }
+
+  // ── Auto-navigate straight to the first model (Navigation Short-Circuit) ──
+  // When an initialTaskId is provided, skip the model-list interstitial and
+  // navigate directly to the first available model so the user lands on the
+  // chat workspace instantly.
+  LaunchedEffect(pickedTask) {
+    val task = pickedTask ?: return@LaunchedEffect
+    val firstModel = task.models.firstOrNull() ?: return@LaunchedEffect
+    // Only navigate once — if we're still on the model list.
+    if (navController.currentDestination?.route == ROUTE_MODEL_LIST) {
+      navController.navigate("$ROUTE_MODEL/${task.id}/${firstModel.name}") {
+        // Pop the model list off the back stack so pressing back exits the app.
+        popUpTo(ROUTE_MODEL_LIST) { inclusive = true }
+      }
+    }
+  }
 
   // Track whether app is in foreground.
   DisposableEffect(lifecycleOwner) {
@@ -196,85 +202,11 @@ fun GalleryNavHost(
     enterTransition = { EnterTransition.None },
     exitTransition = { ExitTransition.None },
   ) {
-    // Home screen.
-    composable(route = ROUTE_HOMESCREEN) {
-      // Create a state to trigger PromoScreen fade in animation.
-      val promoId = "gm4"
-      Box(modifier = modifier.fillMaxSize()) {
-        var promoDismissed by remember { mutableStateOf(false) }
-
-        val homeScreenContent: @Composable () -> Unit = {
-          HomeScreen(
-            modelManagerViewModel = modelManagerViewModel,
-            tosViewModel = hiltViewModel(),
-            enableAnimation = enableHomeScreenAnimation,
-            navigateToTaskScreen = { task ->
-              pickedTask = task
-              enableModelListAnimation = true
-              navController.navigate(ROUTE_MODEL_LIST)
-              firebaseAnalytics?.logEvent(
-                GalleryEvent.CAPABILITY_SELECT.id,
-                Bundle().apply { putString("capability_name", task.id) },
-              )
-            },
-            onModelsClicked = { navController.navigate(ROUTE_MODEL_MANAGER) },
-            gm4 = true,
-          )
-        }
-
-        // Show home page directly if promo has been viewed.
-        if (modelManagerViewModel.dataStoreRepository.hasViewedPromo(promoId = promoId)) {
-          homeScreenContent()
-        }
-        // If the promo has not been viewed, show promo screen first.
-        else {
-          AnimatedContent(
-            targetState = promoDismissed,
-            label = "PromoToHome",
-            transitionSpec = { fadeIn() togetherWith fadeOut() },
-          ) { dismissed ->
-            if (dismissed) {
-              homeScreenContent()
-            } else {
-              var startAnimation by remember { mutableStateOf(false) }
-              LaunchedEffect(Unit) {
-                delay(0L)
-                startAnimation = true
-              }
-              AnimatedVisibility(
-                visible = startAnimation,
-                enter = scaleIn(initialScale = 1.05f, animationSpec = tween(durationMillis = 1000)),
-              ) {
-                PromoScreenGm4(
-                  onDismiss = {
-                    modelManagerViewModel.dataStoreRepository.addViewedPromoId(promoId = promoId)
-                    promoDismissed = true
-                  }
-                )
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // Model list.
+    // Model list (fallback — the LaunchedEffect above auto-navigates past this).
     composable(
       route = ROUTE_MODEL_LIST,
-      enterTransition = {
-        if (initialState.destination.route == ROUTE_HOMESCREEN) {
-          slideEnter()
-        } else {
-          EnterTransition.None
-        }
-      },
-      exitTransition = {
-        if (targetState.destination.route == ROUTE_HOMESCREEN) {
-          slideExit()
-        } else {
-          ExitTransition.None
-        }
-      },
+      enterTransition = { EnterTransition.None },
+      exitTransition = { EnterTransition.None },
     ) {
       pickedTask?.let {
         ModelManager(
@@ -285,8 +217,7 @@ fun GalleryNavHost(
             navController.navigate("$ROUTE_MODEL/${it.id}/${model.name}")
           },
           navigateUp = {
-            enableHomeScreenAnimation = false
-            navController.navigateUp()
+            // Model list is the root — nothing to navigate back to.
           },
         )
       }
@@ -404,7 +335,6 @@ fun GalleryNavHost(
       GlobalModelManager(
         viewModel = modelManagerViewModel,
         navigateUp = {
-          enableHomeScreenAnimation = false
           navController.navigateUp()
         },
         onModelSelected = { task, model ->
