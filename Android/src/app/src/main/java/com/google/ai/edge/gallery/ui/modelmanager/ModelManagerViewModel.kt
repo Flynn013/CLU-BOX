@@ -945,6 +945,12 @@ constructor(
           }
         }
 
+        // Fallback: load bundled allowlist from app assets.
+        if (modelAllowlist == null) {
+          Log.w(TAG, "Disk cache miss. Loading bundled model allowlist from assets")
+          modelAllowlist = readModelAllowlistFromAssets()
+        }
+
         if (modelAllowlist == null) {
           _uiState.update {
             uiState.value.copy(loadingModelAllowlistError = "Failed to load model list")
@@ -1097,6 +1103,19 @@ constructor(
     }
 
     return null
+  }
+
+  /** Read the bundled model allowlist shipped inside the APK assets folder. */
+  private fun readModelAllowlistFromAssets(): ModelAllowlist? {
+    return try {
+      Log.d(TAG, "Reading bundled model allowlist from assets")
+      val content = context.assets.open(MODEL_ALLOWLIST_FILENAME).bufferedReader().use { it.readText() }
+      val gson = Gson()
+      gson.fromJson(content, ModelAllowlist::class.java)
+    } catch (e: Exception) {
+      Log.e(TAG, "Failed to read model allowlist from assets", e)
+      null
+    }
   }
 
   private fun isModelPartiallyDownloaded(model: Model): Boolean {
