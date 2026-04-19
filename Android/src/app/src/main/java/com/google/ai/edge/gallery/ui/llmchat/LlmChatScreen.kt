@@ -50,6 +50,7 @@ import com.google.ai.edge.gallery.GalleryEvent
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.EMPTY_MODEL
+import com.google.ai.edge.gallery.data.LogBoxManager
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.RuntimeType
 import com.google.ai.edge.gallery.data.Task
@@ -218,6 +219,9 @@ fun ChatViewWrapper(
   val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
   val selectedModel = modelManagerUiState.selectedModel
   var showWipeConfirmDialog by remember { mutableStateOf(false) }
+
+  // LOG_BOX manager — created once per ChatViewWrapper lifecycle.
+  val logBoxManager = remember { LogBoxManager(context.applicationContext) }
 
   // Load persisted chat history whenever the selected model changes,
   // but only when a real model is selected (not the EMPTY_MODEL sentinel).
@@ -390,5 +394,6 @@ fun ChatViewWrapper(
     showAudioPicker = showAudioPicker,
     onForgeNeuronClicked = { viewModel.forgeNeuron(selectedModel) },
     onChatHistoryClicked = onChatHistoryClicked,
+    logBoxManager = logBoxManager,
   )
 }
