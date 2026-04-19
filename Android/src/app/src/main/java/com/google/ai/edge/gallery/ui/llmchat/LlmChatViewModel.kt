@@ -51,6 +51,9 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -139,6 +142,26 @@ private const val TOOL_CALL_SCRUB_NOTICE =
 private const val TOOL_CALL_CIRCUIT_BREAKER_NOTICE =
   "[System: Previous tool execution forcefully aborted by new user input. Clear active tasks.]"
 
+// ── Command Buffer (Message Queue) ─────────────────────────────────
+/** Maximum number of commands that can be buffered while inference is running. */
+private const val MAX_COMMAND_QUEUE_SIZE = 10
+
+/**
+ * A pending user command that was submitted while inference was already in progress.
+ * Commands are drained sequentially once the current inference completes.
+ */
+data class QueuedCommand(
+  val model: Model,
+  val input: String,
+  val taskId: String = "",
+  val images: List<Bitmap> = listOf(),
+  val audioMessages: List<ChatMessageAudioClip> = listOf(),
+  val onFirstToken: (Model) -> Unit = {},
+  val onDone: () -> Unit = {},
+  val onError: (String) -> Unit = {},
+  val allowThinking: Boolean = false,
+)
+
 /**
  * Scrubs incomplete or malformed tool-call blocks from [text] before it is
  * persisted to chat history, BrainBox, or Session_Resume.
@@ -214,6 +237,14 @@ open class LlmChatViewModelBase(
   fun initAppContext(context: Context) {
     appContext = context.applicationContext
   }
+
+  // ── Command Buffer (Message Queue) ─────────────────────────────────
+  // When the user sends a message while inference is already running,
+  // the command is enqueued here and drained sequentially on completion.
+  private val _commandQueue = MutableStateFlow<List<QueuedCommand>>(emptyList())
+
+  /** Observable command queue for the UI to show queued message status. */
+  val commandQueue = _commandQueue.asStateFlow()
 
   /**
    * Returns (or creates) the [TokenMonitor] for [model], sized to the model's
@@ -653,6 +684,35 @@ open class LlmChatViewModelBase(
     }
   }
 
+  // ── Command Buffer: drain helper ───────────────────────────────────
+  /**
+   * Pops the first entry from [_commandQueue] (if any) and dispatches it
+   * to [generateResponse].  Called after every terminal completion of an
+   * inference run (normal finish, error, timeout).  The queued messages
+   * have already been rendered in the Chat UI with a "queued" style; once
+   * they are popped, the UI transitions them to standard styling.
+   */
+  private fun drainCommandQueue() {
+    val queue = _commandQueue.value
+    if (queue.isEmpty()) return
+
+    val next = queue.first()
+    _commandQueue.update { it.drop(1) }
+    Log.d(TAG, "drainCommandQueue: popping queued command — remaining: ${queue.size - 1}")
+
+    generateResponse(
+      model = next.model,
+      input = next.input,
+      taskId = next.taskId,
+      images = next.images,
+      audioMessages = next.audioMessages,
+      onFirstToken = next.onFirstToken,
+      onDone = next.onDone,
+      onError = next.onError,
+      allowThinking = next.allowThinking,
+    )
+  }
+
   fun generateResponse(
     model: Model,
     input: String,
@@ -664,12 +724,32 @@ open class LlmChatViewModelBase(
     onError: (String) -> Unit,
     allowThinking: Boolean = false,
   ) {
-    // ── Re-entrancy guard ────────────────────────────────────────────
-    // If inference is already in progress, refuse the new request.  The
-    // native C++ LLM backend does not support concurrent sendMessageAsync
-    // calls on the same Conversation, and re-entering causes a crash.
+    // ── Re-entrancy guard + Command Buffer ─────────────────────────
+    // The native C++ LLM backend does not support concurrent
+    // sendMessageAsync calls on the same Conversation — re-entering
+    // would cause a hard crash.  Instead of silently dropping the
+    // request, we enqueue it and drain after the current inference
+    // completes.
     if (uiState.value.inProgress) {
-      Log.w(TAG, "generateResponse: BLOCKED — inference already in progress. Dropping request.")
+      val currentSize = _commandQueue.value.size
+      if (currentSize >= MAX_COMMAND_QUEUE_SIZE) {
+        Log.w(TAG, "generateResponse: command queue full ($currentSize). Dropping request.")
+        return
+      }
+      Log.d(TAG, "generateResponse: inference in progress — enqueueing command (queue size: ${currentSize + 1})")
+      _commandQueue.update { queue ->
+        queue + QueuedCommand(
+          model = model,
+          input = input,
+          taskId = taskId,
+          images = images,
+          audioMessages = audioMessages,
+          onFirstToken = onFirstToken,
+          onDone = onDone,
+          onError = onError,
+          allowThinking = allowThinking,
+        )
+      }
       return
     }
 
@@ -749,6 +829,7 @@ open class LlmChatViewModelBase(
           setInProgress(false)
           setPreparing(false)
           onError("Model failed to initialize within ${maxInstanceWaitMs / 1000}s. Try resetting the session.")
+          drainCommandQueue()
           return@launch
         }
       }
@@ -1000,7 +1081,7 @@ open class LlmChatViewModelBase(
 
                   setInProgress(false)
                   onDone()
-                }
+                  drainCommandQueue()
               }
             }
           }
@@ -1008,6 +1089,7 @@ open class LlmChatViewModelBase(
         val cleanUpListener: () -> Unit = {
           setInProgress(false)
           setPreparing(false)
+          drainCommandQueue()
         }
 
         val errorListener: (String) -> Unit = { message ->
@@ -1015,6 +1097,7 @@ open class LlmChatViewModelBase(
           setInProgress(false)
           setPreparing(false)
           onError(message)
+          drainCommandQueue()
         }
 
         val enableThinking =
@@ -1097,6 +1180,7 @@ open class LlmChatViewModelBase(
         setInProgress(false)
         setPreparing(false)
         onError(e.message ?: "")
+        drainCommandQueue()
       }
     }
   }
@@ -1109,6 +1193,7 @@ open class LlmChatViewModelBase(
     setInProgress(false)
     model.runtimeHelper.stopResponse(model)
     Log.d(TAG, "Done stopping response")
+    drainCommandQueue()
   }
 
   fun resetSession(
