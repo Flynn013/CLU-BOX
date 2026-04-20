@@ -277,6 +277,7 @@ class DownloadWorker(context: Context, params: WorkerParameters) :
               val zipFilePath =
                 "${externalFilesDir}${File.separator}$modelDir${File.separator}$version${File.separator}${fileName}"
               val zipIn = ZipInputStream(BufferedInputStream(FileInputStream(zipFilePath)))
+              try {
               var zipEntry: ZipEntry? = zipIn.nextEntry
 
               while (zipEntry != null) {
@@ -302,7 +303,9 @@ class DownloadWorker(context: Context, params: WorkerParameters) :
                 zipIn.closeEntry()
                 zipEntry = zipIn.nextEntry
               }
-              zipIn.close()
+              } finally {
+                zipIn.close()
+              }
 
               // Delete the original file.
               val zipFile = File(zipFilePath)

@@ -34,8 +34,8 @@ android {
 
   defaultConfig {
     applicationId = "com.google.aiedge.gallery"
-    minSdk = 31
-    targetSdk = 35
+    minSdk = 28
+    targetSdk = 28
     versionCode = 23
     versionName = "1.0.11"
 
@@ -66,6 +66,10 @@ android {
   buildFeatures {
     compose = true
     buildConfig = true
+  }
+  lint {
+    // targetSdk 28 is intentional (Termux W^X bypass); suppress the Play Store lint error.
+    disable += "ExpiredTargetSdkVersion"
   }
 }
 
@@ -127,6 +131,9 @@ dependencies {
   implementation(libs.mlkit.genai.prompt)
   implementation(libs.room.runtime)
   implementation(libs.room.ktx)
+
+  // ── MediaPipe Text Embedder (vector engine for BrainBox) ──
+  implementation(libs.mediapipe.tasks.text)
 
   // ── Termux terminal emulator (PTY-backed shell sessions + TerminalView) ──
   // From JitPack — https://github.com/termux/termux-app/wiki/Termux-Libraries

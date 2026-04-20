@@ -23,15 +23,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Log
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Email
-import androidx.compose.material.icons.outlined.Kitchen
-import androidx.compose.material.icons.outlined.LocalLibrary
-import androidx.compose.material.icons.outlined.Map
 import androidx.compose.material.icons.outlined.Password
-import androidx.compose.material.icons.outlined.QrCode
-import androidx.compose.material.icons.outlined.ScreenRotation
-import androidx.compose.material.icons.outlined.SentimentVerySatisfied
-import androidx.compose.material.icons.outlined.Tag
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -62,58 +54,7 @@ private const val TAG = "AGSkillManagerVM"
 
 private const val SKILL_ALLOWLIST_URL = ""
 
-val TRYOUT_CHIPS: List<SkillTryOutChip> =
-  listOf(
-    SkillTryOutChip(
-      icon = Icons.Outlined.Map,
-      label = "Interactive Map",
-      prompt = "Show me San Francisco on interactive map.",
-      skillName = "interactive-map",
-    ),
-    SkillTryOutChip(
-      icon = Icons.Outlined.Kitchen,
-      label = "Kitchen Adventure",
-      prompt = "Start kitchen adventure",
-      skillName = "kitchen-adventure",
-    ),
-    SkillTryOutChip(
-      icon = Icons.Outlined.Tag,
-      label = "Calculate Hash",
-      prompt = "What is the sha1 hash of \"gemma\"?",
-      skillName = "calculate-hash",
-    ),
-    SkillTryOutChip(
-      icon = Icons.Outlined.ScreenRotation,
-      label = "Text Spinner",
-      prompt = "Spin \"Gemma\" on my head",
-      skillName = "text-spinner",
-    ),
-    SkillTryOutChip(
-      icon = Icons.Outlined.Email,
-      label = "Send Email",
-      prompt = "Send email 'Good morning' to abc@example.com. Content: 'Any plans for tonight?'",
-      skillName = "send-email",
-    ),
-    SkillTryOutChip(
-      icon = Icons.Outlined.SentimentVerySatisfied,
-      label = "Track my mood",
-      prompt =
-        "Log yesterday's mood as 2 because it was raining quite heavily, and log today's mood as 9 because I had a great time playing pickleball again. Then show me my mood dashboard.",
-      skillName = "mood-tracker",
-    ),
-    SkillTryOutChip(
-      icon = Icons.Outlined.LocalLibrary,
-      label = "Query Wikipedia",
-      prompt = "Check Wikipedia about Oscars 2026. Tell me who won the best picture.",
-      skillName = "query-wikipedia",
-    ),
-    SkillTryOutChip(
-      icon = Icons.Outlined.QrCode,
-      label = "Generate QR code",
-      prompt = "Generate QR code for https://github.com/Flynn013/CLU-BOX",
-      skillName = "qr-code",
-    ),
-  )
+val TRYOUT_CHIPS: List<SkillTryOutChip> = emptyList()
 
 data class SkillState(val skill: Skill)
 
@@ -677,19 +618,10 @@ constructor(
   }
 
   fun getSystemPrompt(baseSystemPrompt: String): Contents {
-    // Replace ___SKILLS___ with the following skills list:
-    //
-    // # Skill name: skill_name_1
-    // ##Description: skill_description_1
-    // ------
-    // Skill name: skill_name_2
-    // Description: skill_description_2
-    // ------
-    // Skill name: skill_name_3
-    // Description: skill_description_3
-    // ------
+    // Replace ___SKILLS___ with the selected skill names/descriptions.
     val selectedSkillsNamesAndDescriptions = getSelectedSkillsNamesAndDescriptions()
-    val systemPrompt = baseSystemPrompt.replace("___SKILLS___", selectedSkillsNamesAndDescriptions)
+    val systemPrompt = baseSystemPrompt
+      .replace("___SKILLS___", selectedSkillsNamesAndDescriptions)
     Log.d(TAG, "System prompt:\n$systemPrompt")
     return Contents.of(systemPrompt)
   }
@@ -1080,7 +1012,11 @@ constructor(
     $instructions
     """
         .trimIndent()
-    skillMdFile.writeText(mdContent, Charsets.UTF_8)
+    try {
+      skillMdFile.writeText(mdContent, Charsets.UTF_8)
+    } catch (e: Exception) {
+      Log.e(TAG, "Failed to write skill.md: ${skillMdFile.path}", e)
+    }
   }
 
   private fun saveScripts(scriptDestDir: File, scriptsContent: Map<String, String>) {

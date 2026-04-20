@@ -64,12 +64,14 @@ import androidx.compose.ui.unit.dp
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.ConfigKeys
+import com.google.ai.edge.gallery.data.LogBoxManager
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.ModelDownloadStatusType
 import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.ui.common.ModelPageAppBar
 import com.google.ai.edge.gallery.ui.modelmanager.ModelInitializationStatusType
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
+import com.google.ai.edge.gallery.ui.osmodules.LogBoxView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
@@ -111,6 +113,7 @@ fun ChatView(
   sendMessageTrigger: SendMessageTrigger? = null,
   onForgeNeuronClicked: (() -> Unit)? = null,
   onChatHistoryClicked: (() -> Unit)? = null,
+  logBoxManager: LogBoxManager? = null,
 ) {
   val uiState by viewModel.uiState.collectAsState()
   val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
@@ -120,6 +123,9 @@ fun ChatView(
   var selectedImageIndex by remember { mutableIntStateOf(-1) }
   var allImageViewerImages by remember { mutableStateOf<List<Bitmap>>(listOf()) }
   var showImageViewer by remember { mutableStateOf(false) }
+
+  // LOG_BOX toggle state.
+  var isLogBoxVisible by remember { mutableStateOf(false) }
 
   val context = LocalContext.current
   val scope = rememberCoroutineScope()
@@ -203,6 +209,10 @@ fun ChatView(
         onSystemPromptChanged = onSystemPromptChanged,
         onForgeNeuronClicked = onForgeNeuronClicked,
         onChatHistoryClicked = onChatHistoryClicked,
+        onLogBoxToggled = if (logBoxManager != null) {
+          { isLogBoxVisible = !isLogBoxVisible }
+        } else null,
+        isLogBoxVisible = isLogBoxVisible,
       )
     },
   ) { innerPadding ->
@@ -218,40 +228,50 @@ fun ChatView(
           when (targetState) {
             // Main UI when model is downloaded.
             true ->
-              ChatPanel(
-                modelManagerViewModel = modelManagerViewModel,
-                task = task,
-                selectedModel = selectedModel,
-                viewModel = viewModel,
-                innerPadding = innerPadding,
-                navigateUp = navigateUp,
-                onSendMessage = { model, messages -> onSendMessage(model, messages) },
-                onRunAgainClicked = onRunAgainClicked,
-                onBenchmarkClicked = onBenchmarkClicked,
-                onStreamImageMessage = onStreamImageMessage,
-                onStreamEnd = { averageFps ->
-                  viewModel.addMessage(
-                    model = selectedModel,
-                    message =
-                      ChatMessageInfo(
-                        content = "Live camera session ended. Average FPS: $averageFps"
-                      ),
-                  )
-                },
-                onStopButtonClicked = { onStopButtonClicked(selectedModel) },
-                onImageSelected = { bitmaps, selectedBitmapIndex ->
-                  selectedImageIndex = selectedBitmapIndex
-                  allImageViewerImages = bitmaps
-                  showImageViewer = true
-                },
-                onSkillClicked = onSkillClicked,
-                onForgeNeuronClicked = onForgeNeuronClicked,
-                modifier = Modifier.weight(1f),
-                showStopButtonInInputWhenInProgress = showStopButtonInInputWhenInProgress,
-                showImagePicker = showImagePicker,
-                showAudioPicker = showAudioPicker,
-                emptyStateComposable = emptyStateComposable,
-              )
+              // LOG_BOX swap: when the toggle is active, show the
+              // telemetry viewer instead of the chat panel.
+              if (isLogBoxVisible && logBoxManager != null) {
+                LogBoxView(
+                  logBoxManager = logBoxManager,
+                  innerPadding = innerPadding,
+                  modifier = Modifier.weight(1f),
+                )
+              } else {
+                ChatPanel(
+                  modelManagerViewModel = modelManagerViewModel,
+                  task = task,
+                  selectedModel = selectedModel,
+                  viewModel = viewModel,
+                  innerPadding = innerPadding,
+                  navigateUp = navigateUp,
+                  onSendMessage = { model, messages -> onSendMessage(model, messages) },
+                  onRunAgainClicked = onRunAgainClicked,
+                  onBenchmarkClicked = onBenchmarkClicked,
+                  onStreamImageMessage = onStreamImageMessage,
+                  onStreamEnd = { averageFps ->
+                    viewModel.addMessage(
+                      model = selectedModel,
+                      message =
+                        ChatMessageInfo(
+                          content = "Live camera session ended. Average FPS: $averageFps"
+                        ),
+                    )
+                  },
+                  onStopButtonClicked = { onStopButtonClicked(selectedModel) },
+                  onImageSelected = { bitmaps, selectedBitmapIndex ->
+                    selectedImageIndex = selectedBitmapIndex
+                    allImageViewerImages = bitmaps
+                    showImageViewer = true
+                  },
+                  onSkillClicked = onSkillClicked,
+                  onForgeNeuronClicked = onForgeNeuronClicked,
+                  modifier = Modifier.weight(1f),
+                  showStopButtonInInputWhenInProgress = showStopButtonInInputWhenInProgress,
+                  showImagePicker = showImagePicker,
+                  showAudioPicker = showAudioPicker,
+                  emptyStateComposable = emptyStateComposable,
+                )
+              }
             // Model download
             false ->
               ModelDownloadStatusInfoPanel(

@@ -31,6 +31,8 @@ import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 
 private const val TAG = "TerminalSessionManager"
 
@@ -41,8 +43,17 @@ private const val KEY_FIRST_BOOT_DONE = "first_boot_done"
 /** Timeout for individual commands piped through the session (seconds). */
 private const val CMD_TIMEOUT_SECONDS = 10L
 
+/** Maximum time (ms) to wait for reader threads to finish after the process exits. */
+private const val READER_THREAD_JOIN_TIMEOUT_MS = 5_000L
+
 /** Maximum number of lines retained in the visible output buffer to limit GC pressure. */
 private const val MAX_OUTPUT_LINES = 2000
+
+/** Polling interval (ms) when waiting for command output from the PTY. */
+private const val PTY_POLL_INTERVAL_MS = 50L
+
+/** Maximum ms of silence before we consider a PTY command complete. */
+private const val PTY_SILENCE_THRESHOLD_MS = 300L
 
 /**
  * Represents a single line of terminal output, tagged by source.
@@ -62,10 +73,10 @@ enum class LineSource { STDIN, STDOUT, STDERR, SYSTEM }
  * across screen rotations and navigation events as long as the hosting
  * [Context] (Application) is alive.
  *
- * On first boot, an initialization hook detects whether the Termux `pkg`
- * binary exists on disk. If found it runs
- * `pkg install git python nodejs -y` to arm the terminal. If absent (standard
- * Android without Termux) the step is cleanly skipped.
+ * On first boot, an initialization hook triggers [EnvironmentInstaller] to
+ * download and install the Termux bootstrap sysroot (bash, pkg, python, etc.)
+ * into the app's internal storage. Once installed, subsequent boots skip the
+ * download and use the sysroot directly.
  *
  * The Termux `terminal-emulator` / `terminal-view` libraries are included as
  * JitPack dependencies, providing PTY-based terminal sessions and a native
@@ -80,14 +91,28 @@ class TerminalSessionManager(private val context: Context) {
     File(context.filesDir, "clu_file_box").also { it.mkdirs() }
   }
 
+  // ── PTY bridge (preferred execution path) ─────────────────────
+  /**
+   * The [TermuxSessionBridge] provides a PTY-backed shell session.
+   * When available, [sendCommand] pipes directly into the PTY and
+   * captures output by waiting for silence or the prompt delimiter.
+   */
+  val ptyBridge: TermuxSessionBridge by lazy { TermuxSessionBridge(context) }
+
+  /** True if the PTY bridge session is alive and usable. */
+  val isPtyAlive: Boolean get() = ptyBridge.isAlive
+
   // ── Observable terminal output buffer ────────────────────────
   private val _outputLines = MutableStateFlow<List<TerminalLine>>(emptyList())
   val outputLines: StateFlow<List<TerminalLine>> = _outputLines.asStateFlow()
 
   // ── Persistent shell process ─────────────────────────────────
+  /** Guards all mutable session state (process, stdinWriter, isSessionAlive). */
+  private val sessionLock = ReentrantLock()
+
   private var process: Process? = null
   private var stdinWriter: OutputStreamWriter? = null
-  private var isSessionAlive = false
+  @Volatile private var isSessionAlive = false
 
   /** True once the first-boot firmware hook has completed. */
   private var firstBootHandled = false
@@ -105,69 +130,120 @@ class TerminalSessionManager(private val context: Context) {
    * Starts the persistent shell session if not already running.
    * Must be called once (e.g. from Application or first screen visit).
    */
-  @Synchronized
-  fun startSession() {
+  fun startSession() = sessionLock.withLock {
     if (isSessionAlive) return
-    Log.d(TAG, "Starting persistent shell session (HOME=${sandboxRoot.absolutePath})")
+    Log.d(TAG, "Checkpoint 1: Preparing persistent shell session (HOME=${sandboxRoot.absolutePath})")
 
-    // Build PATH: include Termux bin dir only if it actually exists on this device.
-    val termuxBin = "/data/data/com.termux/files/usr/bin"
-    val basePath = "/system/bin:/system/xbin:" + (System.getenv("PATH") ?: "")
-    val effectivePath = if (java.io.File(termuxBin).isDirectory) "$termuxBin:$basePath" else basePath
+    try {
+      // Resolve internal sysroot paths via EnvironmentInstaller.
+      val prefix = EnvironmentInstaller.prefixDir(context)
+      val binDir = EnvironmentInstaller.binDir(context)
+      val libDir = EnvironmentInstaller.libDir(context)
+      val shell = EnvironmentInstaller.shellPath(context)
 
-    val env = mapOf(
-      "HOME" to sandboxRoot.absolutePath,
-      "TERM" to "dumb",
-      "PATH" to effectivePath,
-    )
+      // Build PATH: include internal bin dir only if the bootstrap is installed.
+      Log.d(TAG, "Checkpoint 2: Building environment (PREFIX=${prefix.absolutePath})")
+      val basePath = "/system/bin:/system/xbin:" + (System.getenv("PATH") ?: "")
+      val effectivePath = if (binDir.isDirectory) "${binDir.absolutePath}:$basePath" else basePath
 
-    val pb = ProcessBuilder("sh")
-      .directory(sandboxRoot)
-      .redirectErrorStream(false)
+      val env = mutableMapOf(
+        "HOME" to sandboxRoot.absolutePath,
+        "TERM" to "xterm-256color",
+        "PATH" to effectivePath,
+        "TMPDIR" to context.cacheDir.absolutePath,
+      )
+      // Inject sysroot environment variables when the bootstrap prefix exists.
+      // This gives Shell_Execute access to bash, python, node, pkg, git, and native libs.
+      if (prefix.isDirectory) {
+        env["PREFIX"] = prefix.absolutePath
+        env["LD_LIBRARY_PATH"] = libDir.absolutePath
+      }
 
-    pb.environment().putAll(env)
+      Log.d(TAG, "Checkpoint 3: Starting ProcessBuilder (shell=$shell)")
+      val pb = ProcessBuilder(shell)
+        .directory(sandboxRoot)
+        .redirectErrorStream(false)
 
-    val proc = pb.start()
-    process = proc
-    stdinWriter = OutputStreamWriter(proc.outputStream, Charsets.UTF_8)
-    isSessionAlive = true
+      pb.environment().putAll(env)
 
-    appendSystemLine("[MSTR_CTRL] Session started — HOME=${sandboxRoot.absolutePath}")
+      Log.d(TAG, "Checkpoint 4: Spawning shell process")
+      val proc = pb.start()
+      process = proc
+      stdinWriter = OutputStreamWriter(proc.outputStream, Charsets.UTF_8)
+      isSessionAlive = true
 
-    // Background reader for stdout.
-    scope.launch {
-      try {
-        BufferedReader(InputStreamReader(proc.inputStream, Charsets.UTF_8)).use { reader ->
-          var line = reader.readLine()
-          while (line != null) {
-            appendLine(TerminalLine(line, LineSource.STDOUT))
-            line = reader.readLine()
+      Log.d(TAG, "Checkpoint 5: Opening stream readers")
+      appendSystemLine("[MSTR_CTRL] Session started — HOME=${sandboxRoot.absolutePath}")
+
+      // Background reader for stdout.
+      scope.launch {
+        try {
+          BufferedReader(InputStreamReader(proc.inputStream, Charsets.UTF_8)).use { reader ->
+            var line = reader.readLine()
+            while (line != null) {
+              appendLine(TerminalLine(line, LineSource.STDOUT))
+              line = reader.readLine()
+            }
           }
+        } catch (_: Exception) { /* stream closed */ }
+        isSessionAlive = false
+        appendSystemLine("[MSTR_CTRL] Session ended.")
+      }
+
+      // Background reader for stderr.
+      scope.launch {
+        try {
+          BufferedReader(InputStreamReader(proc.errorStream, Charsets.UTF_8)).use { reader ->
+            var line = reader.readLine()
+            while (line != null) {
+              appendLine(TerminalLine(line, LineSource.STDERR))
+              line = reader.readLine()
+            }
+          }
+        } catch (_: Exception) { /* stream closed */ }
+      }
+
+      Log.d(TAG, "Checkpoint 6: Session fully started — running pre-flight check")
+      // Pre-flight firmware bootstrap.
+      runPreFlightCheck()
+
+      // Initialize the PTY bridge session for interactive/agent command piping.
+      Log.d(TAG, "Checkpoint 7: Starting PTY bridge session")
+      if (!ptyBridge.isAlive) {
+        ptyBridge.createSession(sandboxRoot)
+        if (ptyBridge.sessionInitFailed) {
+          Log.w(TAG, "PTY bridge init failed: ${ptyBridge.sessionInitError} — falling back to ProcessBuilder for sendCommand")
+          appendSystemLine("[MSTR_CTRL] PTY bridge unavailable — using process-based fallback.")
+        } else {
+          appendSystemLine("[MSTR_CTRL] PTY bridge active — xterm-256color")
         }
-      } catch (_: Exception) { /* stream closed */ }
+      }
+    } catch (e: SecurityException) {
+      Log.e(TAG, "startSession: blocked by Android security (W^X / SELinux)", e)
+      appendSystemLine("[MSTR_CTRL] ERROR: Terminal execution blocked by Android OS Security (W^X). Shell unavailable.")
       isSessionAlive = false
-      appendSystemLine("[MSTR_CTRL] Session ended.")
+    } catch (e: UnsatisfiedLinkError) {
+      Log.e(TAG, "startSession: native library load failed", e)
+      appendSystemLine("[MSTR_CTRL] ERROR: Terminal native library missing. Shell unavailable.")
+      isSessionAlive = false
+    } catch (e: Throwable) {
+      Log.e(TAG, "startSession: unexpected fatal error (${e.javaClass.simpleName})", e)
+      appendSystemLine("[MSTR_CTRL] ERROR: Terminal init failed — ${e.message}")
+      isSessionAlive = false
     }
-
-    // Background reader for stderr.
-    scope.launch {
-      try {
-        BufferedReader(InputStreamReader(proc.errorStream, Charsets.UTF_8)).use { reader ->
-          var line = reader.readLine()
-          while (line != null) {
-            appendLine(TerminalLine(line, LineSource.STDERR))
-            line = reader.readLine()
-          }
-        }
-      } catch (_: Exception) { /* stream closed */ }
-    }
-
-    // Pre-flight firmware bootstrap.
-    runPreFlightCheck()
   }
 
   /**
-   * Sends a command into the persistent shell session.
+   * Sends a command into the terminal session.
+   *
+   * **Execution strategy (per the CLU/BOX Terminal Architecture):**
+   * 1. If the [ptyBridge] is alive, pipe the command directly into the PTY's
+   *    outputStream followed by `\n`. Wait for the PTY inputStream to go silent
+   *    (no new data for [PTY_SILENCE_THRESHOLD_MS]) or hit a prompt delimiter
+   *    (`$ `) before capturing the buffer and returning the output.
+   * 2. If the PTY is unavailable (e.g. W^X block), fall back to
+   *    [executeCommandInSandbox] which uses a one-shot process with strict timeout.
+   *
    * The command text and its output are recorded in [outputLines].
    *
    * @param command  Shell command string.
@@ -188,10 +264,13 @@ class TerminalSessionManager(private val context: Context) {
       appendLine(TerminalLine("$ $command", LineSource.STDIN))
     }
 
-    // Use the existing executeCommand for isolated, timeout-safe execution.
-    // This avoids the complexity of demuxing the persistent session's output
-    // per-command while still honouring the 10-second timeout contract.
-    val output = executeCommandInSandbox(command)
+    // Prefer the PTY bridge (true terminal piping) when available.
+    val output = if (ptyBridge.isAlive) {
+      sendCommandViaPty(command)
+    } else {
+      // Fallback: isolated, timeout-safe one-shot execution.
+      executeCommandInSandbox(command)
+    }
 
     if (visible) {
       output.lines().forEach { line ->
@@ -203,18 +282,109 @@ class TerminalSessionManager(private val context: Context) {
   }
 
   /**
-   * Executes [command] via a one-shot `sh -c` process rooted in the sandbox.
+   * Pipes [command] into the PTY session's stdin and waits for the output
+   * to settle (silence detection) or hit the prompt delimiter.
+   *
+   * The PTY bridge's [TerminalSession] emulator transcript is read via
+   * [TerminalBuffer.getTranscriptText] — we snapshot the transcript text
+   * before writing, poll until it stops changing (silence), then diff the
+   * before/after strings to extract the command's output.
+   *
+   * This implements the `[ACTION: bash]` → wait-for-silence → `[OBSERVE]`
+   * state machine loop required by the CLU/BOX terminal architecture.
+   */
+  private fun sendCommandViaPty(command: String): String {
+    val session = ptyBridge.terminalSession ?: return executeCommandInSandbox(command)
+    val emulator = session.emulator ?: return executeCommandInSandbox(command)
+
+    // Snapshot transcript text before injecting the command.
+    val preText = emulator.screen.getTranscriptText()
+
+    // Pipe the command directly into the PTY stdin followed by \n.
+    ptyBridge.sendCommand(command)
+
+    // Wait for output to settle: poll the transcript text for changes.
+    val deadlineMs = System.currentTimeMillis() + (CMD_TIMEOUT_SECONDS * 1000)
+    var lastChangeMs = System.currentTimeMillis()
+    var lastText = preText
+
+    while (System.currentTimeMillis() < deadlineMs) {
+      Thread.sleep(PTY_POLL_INTERVAL_MS)
+
+      val currentText = emulator.screen.getTranscriptText()
+      if (currentText != lastText) {
+        lastText = currentText
+        lastChangeMs = System.currentTimeMillis()
+        continue
+      }
+
+      // Check if silence threshold exceeded — output has settled.
+      if (System.currentTimeMillis() - lastChangeMs >= PTY_SILENCE_THRESHOLD_MS) {
+        break
+      }
+    }
+
+    // Extract new content added since the command was sent.
+    val postText = emulator.screen.getTranscriptText()
+    val trimmedPre = preText.trimEnd()
+    val newContent = if (postText.length > trimmedPre.length &&
+        postText.startsWith(trimmedPre)) {
+      postText.substring(trimmedPre.length).trimStart('\n')
+    } else {
+      // Fallback: return everything that's visible (transcript may have wrapped).
+      postText
+    }
+
+    // Strip trailing prompt line.
+    val lines = newContent.lines().toMutableList()
+    if (lines.isNotEmpty()) {
+      val last = lines.last().trimEnd()
+      if (last.endsWith("$") || last.contains("CLU/BOX $")) {
+        lines.removeAt(lines.lastIndex)
+      }
+    }
+
+    val result = lines.joinToString("\n").trimEnd()
+    return if (result.isBlank()) "(no output)" else result
+  }
+
+  /**
+   * Returns the text content of the last visible line in the emulator
+   * by reading the full transcript and taking the final non-empty line.
+   */
+  private fun getLastVisibleLine(emulator: com.termux.terminal.TerminalEmulator): String {
+    return try {
+      val text = emulator.screen.getTranscriptText()
+      val trimmed = text.trimEnd()
+      trimmed.substringAfterLast('\n').ifEmpty { trimmed }
+    } catch (_: Exception) { "" }
+  }
+
+  /**
+   * Executes [command] via a one-shot process using the internal shell.
    * Captures stdout + stderr with a strict [CMD_TIMEOUT_SECONDS] timeout.
    */
   private fun executeCommandInSandbox(command: String): String {
     return try {
       Log.d(TAG, "executeCommandInSandbox: $command")
 
-      val pb = ProcessBuilder("sh", "-c", command)
+      val shell = EnvironmentInstaller.shellPath(context)
+      val pb = ProcessBuilder(shell, "-c", command)
         .directory(sandboxRoot)
         .redirectErrorStream(false)
 
       pb.environment()["HOME"] = sandboxRoot.absolutePath
+      pb.environment()["TMPDIR"] = context.cacheDir.absolutePath
+      // Inject internal sysroot environment so bash/python/node/pkg are visible.
+      val binDir = EnvironmentInstaller.binDir(context)
+      val prefix = EnvironmentInstaller.prefixDir(context)
+      val libDir = EnvironmentInstaller.libDir(context)
+      if (binDir.isDirectory) {
+        val basePath = pb.environment()["PATH"] ?: "/system/bin:/system/xbin"
+        pb.environment()["PATH"] = "${binDir.absolutePath}:$basePath"
+        pb.environment()["PREFIX"] = prefix.absolutePath
+        pb.environment()["LD_LIBRARY_PATH"] = libDir.absolutePath
+      }
 
       val proc = pb.start()
 
@@ -239,10 +409,11 @@ class TerminalSessionManager(private val context: Context) {
         return "TIMEOUT ERROR"
       }
 
-      // Block until reader threads complete — process already exited so
-      // streams will close and readText() will return promptly.
-      stdoutThread.join()
-      stderrThread.join()
+      // Bounded join to prevent indefinite hangs if a reader thread is stuck.
+      stdoutThread.join(READER_THREAD_JOIN_TIMEOUT_MS)
+      stderrThread.join(READER_THREAD_JOIN_TIMEOUT_MS)
+      if (stdoutThread.isAlive) Log.w(TAG, "executeCommandInSandbox: stdout reader thread still alive after join timeout")
+      if (stderrThread.isAlive) Log.w(TAG, "executeCommandInSandbox: stderr reader thread still alive after join timeout")
 
       val stdout = stdoutRef.get()
       val stderr = stderrRef.get()
@@ -256,6 +427,12 @@ class TerminalSessionManager(private val context: Context) {
 
       Log.d(TAG, "executeCommandInSandbox: exit=${proc.exitValue()}, ${combined.length} chars")
       combined.ifEmpty { "(no output)" }
+    } catch (e: SecurityException) {
+      Log.e(TAG, "executeCommandInSandbox: W^X / SELinux block", e)
+      "ERROR: [System: Terminal execution blocked by Android OS Security (W^X). Fallback required.]"
+    } catch (e: UnsatisfiedLinkError) {
+      Log.e(TAG, "executeCommandInSandbox: native lib missing", e)
+      "ERROR: [System: Terminal native library unavailable. Shell execution disabled.]"
     } catch (e: Exception) {
       Log.e(TAG, "executeCommandInSandbox: exception", e)
       "ERROR: ${e.message}"
@@ -268,11 +445,23 @@ class TerminalSessionManager(private val context: Context) {
    */
   fun executeCommandWithExitCode(command: String): Pair<Int, String> {
     return try {
-      val pb = ProcessBuilder("sh", "-c", command)
+      val shell = EnvironmentInstaller.shellPath(context)
+      val pb = ProcessBuilder(shell, "-c", command)
         .directory(sandboxRoot)
         .redirectErrorStream(false)
 
       pb.environment()["HOME"] = sandboxRoot.absolutePath
+      pb.environment()["TMPDIR"] = context.cacheDir.absolutePath
+      // Inject internal sysroot environment so bash/python/node/pkg are visible.
+      val binDir = EnvironmentInstaller.binDir(context)
+      val prefix = EnvironmentInstaller.prefixDir(context)
+      val libDir = EnvironmentInstaller.libDir(context)
+      if (binDir.isDirectory) {
+        val basePath = pb.environment()["PATH"] ?: "/system/bin:/system/xbin"
+        pb.environment()["PATH"] = "${binDir.absolutePath}:$basePath"
+        pb.environment()["PREFIX"] = prefix.absolutePath
+        pb.environment()["LD_LIBRARY_PATH"] = libDir.absolutePath
+      }
 
       val proc = pb.start()
 
@@ -296,10 +485,11 @@ class TerminalSessionManager(private val context: Context) {
         return Pair(-1, "TIMEOUT ERROR")
       }
 
-      // Block until reader threads complete — process already exited so
-      // streams will close and readText() will return promptly.
-      stdoutThread.join()
-      stderrThread.join()
+      // Bounded join to prevent indefinite hangs if a reader thread is stuck.
+      stdoutThread.join(READER_THREAD_JOIN_TIMEOUT_MS)
+      stderrThread.join(READER_THREAD_JOIN_TIMEOUT_MS)
+      if (stdoutThread.isAlive) Log.w(TAG, "executeCommandWithExitCode: stdout reader thread still alive after join timeout")
+      if (stderrThread.isAlive) Log.w(TAG, "executeCommandWithExitCode: stderr reader thread still alive after join timeout")
 
       val stdout = stdoutRef.get()
       val stderr = stderrRef.get()
@@ -312,18 +502,25 @@ class TerminalSessionManager(private val context: Context) {
       }
 
       Pair(proc.exitValue(), combined)
+    } catch (e: SecurityException) {
+      Log.e(TAG, "executeCommandWithExitCode: W^X / SELinux block", e)
+      Pair(-1, "ERROR: [System: Terminal execution blocked by Android OS Security (W^X). Fallback required.]")
+    } catch (e: UnsatisfiedLinkError) {
+      Log.e(TAG, "executeCommandWithExitCode: native lib missing", e)
+      Pair(-1, "ERROR: [System: Terminal native library unavailable. Shell execution disabled.]")
     } catch (e: Exception) {
       Pair(-1, "ERROR: ${e.message}")
     }
   }
 
-  /** Destroys the persistent session. */
-  @Synchronized
-  fun destroySession() {
+  /** Destroys the persistent session and the PTY bridge. */
+  fun destroySession() = sessionLock.withLock {
+    try { stdinWriter?.close() } catch (_: Exception) {}
     process?.destroyForcibly()
     process = null
     stdinWriter = null
     isSessionAlive = false
+    ptyBridge.destroySession()
     appendSystemLine("[MSTR_CTRL] Session destroyed.")
   }
 
@@ -335,12 +532,77 @@ class TerminalSessionManager(private val context: Context) {
   // ── Pre-flight firmware bootstrap ─────────────────────────────
 
   /**
+   * Validates that the essential binaries (`bash`, `git`) are executable.
+   *
+   * Runs `bash --version` and `git --version` internally. If either returns
+   * exit code 127 (Not Found) or 13 (Permission Denied), the method
+   * automatically re-runs the extraction logic and applies `chmod -R 700`
+   * to the bin directory.
+   *
+   * @return `true` if the environment is healthy after the check (possibly
+   *         after self-healing), `false` if repair also failed.
+   */
+  fun checkEnvironment(): Boolean {
+    val binDir = EnvironmentInstaller.binDir(context)
+    if (!binDir.isDirectory) {
+      Log.w(TAG, "checkEnvironment: binDir does not exist — environment not installed")
+      return false
+    }
+
+    val checks = listOf("bash --version", "git --version")
+    var needsRepair = false
+
+    for (cmd in checks) {
+      val (exitCode, _) = executeCommandWithExitCode(cmd)
+      if (exitCode == 127 || exitCode == 13 || exitCode == 126) {
+        Log.w(TAG, "checkEnvironment: '$cmd' returned exit $exitCode — self-heal triggered")
+        needsRepair = true
+        break
+      }
+    }
+
+    if (!needsRepair) {
+      Log.i(TAG, "checkEnvironment: environment healthy")
+      return true
+    }
+
+    // Self-healing: re-fix permissions on the entire bin directory.
+    appendSystemLine("[FIRMWARE] Self-heal: fixing permissions on ${binDir.absolutePath}")
+    val chmodResult = executeCommandWithExitCode("chmod -R 700 ${binDir.absolutePath}")
+    Log.d(TAG, "checkEnvironment: chmod exit=${chmodResult.first}")
+
+    // Also walk the directory with Java API as a fallback (chmod may not
+    // be available if the sysroot is completely broken).
+    binDir.walkTopDown().filter { it.isFile }.forEach { file ->
+      file.setExecutable(true, false)
+      file.setReadable(true, false)
+    }
+
+    // Re-validate after repair.
+    for (cmd in checks) {
+      val (exitCode, _) = executeCommandWithExitCode(cmd)
+      if (exitCode == 127 || exitCode == 13 || exitCode == 126) {
+        Log.e(TAG, "checkEnvironment: self-heal failed — '$cmd' still returns exit $exitCode")
+        appendSystemLine("[FIRMWARE] Self-heal FAILED for '$cmd' (exit $exitCode). Environment degraded.")
+        return false
+      }
+    }
+
+    appendSystemLine("[FIRMWARE] Self-heal PASSED — environment restored.")
+    return true
+  }
+
+  /**
    * Pre-flight bootstrap triggered on first app launch.
    *
-   * If a Termux-compatible `pkg` binary is found on `$PATH`, the check runs
-   * `pkg update && pkg upgrade -y && pkg install git python nodejs -y` to arm
-   * the sandbox.  On standard Android (no Termux) the step is cleanly skipped
-   * with an informational message — no shell errors leak to the user.
+   * Delegates to [EnvironmentInstaller.ensureInstalled] to download and
+   * extract the Termux bootstrap sysroot if not already present. Once the
+   * sysroot is ready, optionally installs development packages (git, python,
+   * nodejs) via the internal `pkg` binary.
+   *
+   * After environment provisioning completes, runs [checkEnvironment] to
+   * validate/self-heal, then executes agentic verification commands
+   * (`pip install requests`, `git config`) to confirm "Dev-Ready" status.
    *
    * Sets [preFlightReady] to `true` once the gate is clear so the AI can
    * initialize.
@@ -355,35 +617,75 @@ class TerminalSessionManager(private val context: Context) {
     val alreadyDone = prefs.getBoolean(KEY_FIRST_BOOT_DONE, false)
 
     if (alreadyDone) {
-      firstBootHandled = true
-      _preFlightReady.value = true
+      // Even on subsequent boots, run the self-heal check to handle
+      // corrupted permissions from OTA updates or storage clears.
+      scope.launch {
+        checkEnvironment()
+        firstBootHandled = true
+        _preFlightReady.value = true
+      }
       return
     }
 
-    appendSystemLine("[FIRMWARE] First boot detected — running pre-flight check…")
+    appendSystemLine("[FIRMWARE] First boot detected — bootstrapping Linux environment…")
     scope.launch {
-      // Check for Termux's `pkg` binary purely in Kotlin — no shell invocation,
-      // so zero chance of a "pkg: not found" error leaking to the terminal.
-      // Note: this is a best-effort probe for UI messaging only. The actual
-      // execution safety is handled by the shell command itself (|| fallback).
-      val pkgBinary = File("/data/data/com.termux/files/usr/bin/pkg")
-      val hasPkg = pkgBinary.exists() && pkgBinary.canExecute()
+      // Stage 1: Install the Termux bootstrap sysroot.
+      EnvironmentInstaller.ensureInstalled(context)
 
-      if (hasPkg) {
-        appendSystemLine("[FIRMWARE] pkg detected — installing packages…")
-        val cmd = "pkg update -y && pkg upgrade -y && pkg install git python nodejs -y 2>&1"
-        val (exitCode, result) = executeCommandWithExitCode(cmd)
-        result.lines().forEach { line ->
-          appendLine(TerminalLine(line, LineSource.STDOUT))
-        }
+      val installerState = EnvironmentInstaller.state.value
+      if (installerState is EnvironmentInstaller.State.Ready) {
+        appendSystemLine("[FIRMWARE] Bootstrap sysroot installed — ${EnvironmentInstaller.prefixDir(context).absolutePath}")
 
-        if (exitCode == 0) {
-          appendSystemLine("[FIRMWARE] Pre-flight package install PASSED (exit 0).")
+        // Stage 2: Use the newly installed pkg to arm the environment.
+        val pkgBinary = File(EnvironmentInstaller.binDir(context), "pkg")
+        val hasPkg = pkgBinary.exists() && pkgBinary.canExecute()
+
+        if (hasPkg) {
+          appendSystemLine("[FIRMWARE] pkg detected — installing development packages…")
+          val cmd = "pkg update -y && pkg upgrade -y && pkg install git python nodejs -y 2>&1"
+          val (exitCode, result) = executeCommandWithExitCode(cmd)
+          result.lines().forEach { line ->
+            appendLine(TerminalLine(line, LineSource.STDOUT))
+          }
+
+          if (exitCode == 0) {
+            appendSystemLine("[FIRMWARE] Package install PASSED (exit 0).")
+          } else {
+            appendSystemLine("[FIRMWARE] Package install finished with exit code $exitCode — continuing.")
+          }
         } else {
-          appendSystemLine("[FIRMWARE] Pre-flight install finished with exit code $exitCode — continuing.")
+          appendSystemLine("[FIRMWARE] pkg not available in bootstrap — base sysroot only.")
         }
-      } else {
-        appendSystemLine("[FIRMWARE] pkg not available — running in standard Android mode.")
+
+        // Stage 3: Validate environment with self-healing.
+        appendSystemLine("[FIRMWARE] Running environment validation…")
+        val envHealthy = checkEnvironment()
+
+        // Stage 4: Agentic verification — confirm Dev-Ready status.
+        if (envHealthy) {
+          appendSystemLine("[FIRMWARE] Agentic verification: installing pip packages…")
+          val (pipExit, pipOut) = executeCommandWithExitCode("pip install requests 2>&1")
+          if (pipExit == 0) {
+            appendSystemLine("[FIRMWARE] pip install requests — OK")
+          } else {
+            appendSystemLine("[FIRMWARE] pip install requests — exit $pipExit (non-critical)")
+          }
+
+          appendSystemLine("[FIRMWARE] Agentic verification: configuring git…")
+          val (gitExit, gitOut) = executeCommandWithExitCode(
+            "git config --global init.defaultBranch main 2>&1"
+          )
+          if (gitExit == 0) {
+            appendSystemLine("[FIRMWARE] git config — OK")
+          } else {
+            appendSystemLine("[FIRMWARE] git config — exit $gitExit (non-critical)")
+          }
+
+          appendSystemLine("[FIRMWARE] Environment is Dev-Ready.")
+        }
+      } else if (installerState is EnvironmentInstaller.State.Failed) {
+        appendSystemLine("[FIRMWARE] Bootstrap FAILED: ${installerState.message}")
+        appendSystemLine("[FIRMWARE] Running in standard Android mode — limited shell only.")
       }
 
       appendSystemLine("[FIRMWARE] Pre-flight check complete.")

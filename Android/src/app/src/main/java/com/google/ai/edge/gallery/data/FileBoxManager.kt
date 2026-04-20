@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.atomic.AtomicInteger
 
 private const val TAG = "FileBoxManager"
 
@@ -95,7 +96,11 @@ class FileBoxManager(context: Context) {
   // event is detected in the sandbox. The FILE_BOX UI collects this flow and
   // rebuilds the tree automatically — even when changes originate from the
   // MSTR_CTRL terminal writing directly to the shared directory.
+  //
+  // Uses [AtomicInteger] for the counter so concurrent FileObserver events
+  // never lose an increment, then publishes through a [StateFlow] for the UI.
 
+  private val _revisionCounter = AtomicInteger(0)
   private val _revision = MutableStateFlow(0)
 
   /** Collect this in the UI to trigger automatic file-tree rebuilds. */
@@ -108,7 +113,7 @@ class FileBoxManager(context: Context) {
   ) {
     override fun onEvent(event: Int, path: String?) {
       Log.d(TAG, "FileObserver event=$event path=$path")
-      _revision.value = _revision.value + 1
+      _revision.value = _revisionCounter.incrementAndGet()
     }
   }
 
@@ -131,13 +136,23 @@ class FileBoxManager(context: Context) {
     return ext in ALLOWED_EXTENSIONS
   }
 
+  /**
+   * Returns `true` if the resolved [target] file is safely within the sandbox [root].
+   * Uses [File.canonicalFile] comparison to block directory-traversal attacks
+   * (e.g., `../../etc/passwd`).
+   */
+  private fun isPathWithinSandbox(target: File): Boolean {
+    return target.canonicalFile.startsWith(root.canonicalFile)
+  }
+
   // ── Write ────────────────────────────────────────────────────
 
   /**
    * Writes [content] to a file at the given [relativePath] inside the sandbox.
    *
    * Automatically creates any missing intermediate directories. Returns `true` on
-   * success or `false` if the extension is not allowed or an I/O error occurs.
+   * success or `false` if the extension is not allowed, the resolved path escapes
+   * the sandbox, or an I/O error occurs.
    */
   fun writeCodeFile(relativePath: String, content: String): Boolean {
     if (!isAllowedExtension(relativePath)) {
@@ -146,6 +161,10 @@ class FileBoxManager(context: Context) {
     }
     return try {
       val target = File(root, relativePath)
+      if (!isPathWithinSandbox(target)) {
+        Log.w(TAG, "writeCodeFile: path traversal blocked for '$relativePath'")
+        return false
+      }
       target.parentFile?.mkdirs()
       target.writeText(content, Charsets.UTF_8)
       Log.d(TAG, "writeCodeFile: wrote ${content.length} chars to '$relativePath'")
@@ -160,11 +179,15 @@ class FileBoxManager(context: Context) {
 
   /**
    * Reads and returns the contents of the file at [relativePath], or `null` if the
-   * file does not exist, is a directory, or cannot be read.
+   * file does not exist, is a directory, escapes the sandbox, or cannot be read.
    */
   fun readCodeFile(relativePath: String): String? {
     return try {
       val target = File(root, relativePath)
+      if (!isPathWithinSandbox(target)) {
+        Log.w(TAG, "readCodeFile: path traversal blocked for '$relativePath'")
+        return null
+      }
       if (!target.exists() || target.isDirectory) null else target.readText(Charsets.UTF_8)
     } catch (e: Exception) {
       Log.e(TAG, "readCodeFile: failed for '$relativePath'", e)
@@ -177,6 +200,10 @@ class FileBoxManager(context: Context) {
   /** Deletes a single file. Returns `true` if the file existed and was deleted. */
   fun deleteFile(relativePath: String): Boolean {
     val target = File(root, relativePath)
+    if (!isPathWithinSandbox(target)) {
+      Log.w(TAG, "deleteFile: path traversal blocked for '$relativePath'")
+      return false
+    }
     return target.exists() && target.isFile && target.delete()
   }
 
@@ -197,12 +224,22 @@ class FileBoxManager(context: Context) {
   /**
    * Returns a recursive tree representation of [dir] suitable for display.
    * Each entry is a [FileNode].
+   *
+   * @param maxDepth Maximum recursion depth to prevent stack overflow on deeply nested directories.
    */
-  fun getFileTree(dir: File = root): FileNode {
+  fun getFileTree(dir: File = root, maxDepth: Int = 50): FileNode {
+    if (maxDepth <= 0) {
+      return FileNode(
+        name = dir.name,
+        relativePath = if (dir == root) "" else dir.relativeTo(root).path,
+        isDirectory = true,
+        children = listOf(FileNode(name = "[depth limit reached]", relativePath = "", isDirectory = false)),
+      )
+    }
     val children = (dir.listFiles() ?: emptyArray())
       .sortedWith(compareBy<File> { !it.isDirectory }.thenBy { it.name })
       .map { child ->
-        if (child.isDirectory) getFileTree(child)
+        if (child.isDirectory) getFileTree(child, maxDepth - 1)
         else FileNode(name = child.name, relativePath = child.relativeTo(root).path, isDirectory = false)
       }
     return FileNode(

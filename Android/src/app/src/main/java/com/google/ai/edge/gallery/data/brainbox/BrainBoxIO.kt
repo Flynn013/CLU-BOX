@@ -34,6 +34,7 @@ private const val TAG = "BrainBoxIO"
 private const val NEURON_START = "===NEURON_START==="
 private const val NEURON_END = "===NEURON_END==="
 private const val PAYLOAD_SEPARATOR = "---PAYLOAD---"
+private const val FALSE_PATHS_SEPARATOR = "---FALSE_PATHS---"
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Legacy JSON Export/Import (kept for backward compatibility)
@@ -49,12 +50,15 @@ suspend fun exportBrain(dao: BrainBoxDao): String {
 
 /**
  * Parses [json] and **overwrites** the BrainBox database with the deserialized neurons.
+ *
+ * The delete-all + insert-all is executed inside a single Room transaction.
+ * If the process crashes mid-import the transaction is rolled back — preventing
+ * data loss from a partial write.
  */
 suspend fun importBrain(dao: BrainBoxDao, json: String) {
   val type = object : TypeToken<List<NeuronEntity>>() {}.type
   val neurons: List<NeuronEntity> = Gson().fromJson(json, type)
-  dao.deleteAllNeurons()
-  neurons.forEach { dao.insertNeuron(it) }
+  dao.replaceAllNeurons(neurons)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -63,6 +67,9 @@ suspend fun importBrain(dao: BrainBoxDao, json: String) {
 
 /**
  * Exports neurons from the BrainBox into the strict Markdown review format.
+ *
+ * Includes all fields: ID, LABEL, TYPE, IS_CORE, SYNAPSES, FALSE_PATHS, and PAYLOAD (content).
+ * The embedding vector is NOT exported — it is regenerated on import.
  *
  * @param dao           The BrainBox DAO.
  * @param includeCore   When `true`, both Core and Malleable neurons are exported.
@@ -78,8 +85,13 @@ suspend fun exportBrainToMarkdown(dao: BrainBoxDao, includeCore: Boolean): Strin
       appendLine("LABEL: ${neuron.label}")
       appendLine("TYPE: ${neuron.type}")
       appendLine("IS_CORE: ${neuron.isCore}")
+      appendLine("SYNAPSES: ${neuron.synapses}")
       appendLine(PAYLOAD_SEPARATOR)
       appendLine(neuron.content)
+      if (neuron.falsePaths.isNotBlank()) {
+        appendLine(FALSE_PATHS_SEPARATOR)
+        appendLine(neuron.falsePaths)
+      }
       appendLine(NEURON_END)
       appendLine()  // blank line between entries for readability
     }
@@ -128,27 +140,37 @@ fun saveBrainMarkdownToDownloads(context: Context, markdown: String): Boolean {
 
 /**
  * Reads a Markdown file from the given [uri], parses it using the
- * `===NEURON_START===` / `===NEURON_END===` delimiter format, and upserts
- * each neuron into the BrainBox database.
+ * `===NEURON_START===` / `===NEURON_END===` delimiter format, clears the
+ * existing Neurons table, regenerates vector embeddings for every imported
+ * block using the [VectorEngine], and rebuilds the database from scratch.
  *
- * - If a neuron ID already exists in the DB, its record is **updated**.
- * - If the ID is new (e.g. the user manually added a block in the text file),
- *   it is **inserted** as a new record.
- *
+ * @param vectorEngine  The VectorEngine for embedding regeneration (nullable for backward compat).
  * @return The number of neurons processed.
  */
-suspend fun importBrainFromMarkdown(context: Context, dao: BrainBoxDao, uri: Uri): Int {
+suspend fun importBrainFromMarkdown(
+  context: Context,
+  dao: BrainBoxDao,
+  uri: Uri,
+  vectorEngine: VectorEngine? = null,
+): Int {
   val text = context.contentResolver.openInputStream(uri)?.use { stream ->
     BufferedReader(InputStreamReader(stream, Charsets.UTF_8)).readText()
   } ?: throw IllegalArgumentException("Could not read file from uri: $uri")
 
-  return importBrainFromMarkdownText(dao, text)
+  return importBrainFromMarkdownText(dao, text, vectorEngine)
 }
 
 /**
  * Core parsing logic separated from Android I/O for testability.
+ *
+ * Clears the existing Neurons table and rebuilds from the parsed Markdown.
+ * Each neuron's embedding is regenerated via [vectorEngine] if available.
  */
-suspend fun importBrainFromMarkdownText(dao: BrainBoxDao, text: String): Int {
+suspend fun importBrainFromMarkdownText(
+  dao: BrainBoxDao,
+  text: String,
+  vectorEngine: VectorEngine? = null,
+): Int {
   // Split into blocks between NEURON_START and NEURON_END.
   val blocks = mutableListOf<String>()
   var remaining = text
@@ -162,8 +184,8 @@ suspend fun importBrainFromMarkdownText(dao: BrainBoxDao, text: String): Int {
     remaining = remaining.substring(endIdx + NEURON_END.length)
   }
 
-  val existingIds = dao.getAllNeurons().map { it.id }.toSet()
-  var count = 0
+  // Parse all neurons first, then replace atomically.
+  val neurons = mutableListOf<NeuronEntity>()
 
   for (block in blocks) {
     val payloadIdx = block.indexOf(PAYLOAD_SEPARATOR)
@@ -173,7 +195,20 @@ suspend fun importBrainFromMarkdownText(dao: BrainBoxDao, text: String): Int {
     }
 
     val headerSection = block.substring(0, payloadIdx).trim()
-    val payload = block.substring(payloadIdx + PAYLOAD_SEPARATOR.length).trim()
+
+    // Check for FALSE_PATHS section after PAYLOAD.
+    val afterPayloadStart = payloadIdx + PAYLOAD_SEPARATOR.length
+    val falsePathsIdx = block.indexOf(FALSE_PATHS_SEPARATOR, afterPayloadStart)
+
+    val payload: String
+    val falsePaths: String
+    if (falsePathsIdx != -1) {
+      payload = block.substring(afterPayloadStart, falsePathsIdx).trim()
+      falsePaths = block.substring(falsePathsIdx + FALSE_PATHS_SEPARATOR.length).trim()
+    } else {
+      payload = block.substring(afterPayloadStart).trim()
+      falsePaths = ""
+    }
 
     // Parse header fields.
     val headers = mutableMapOf<String, String>()
@@ -190,21 +225,29 @@ suspend fun importBrainFromMarkdownText(dao: BrainBoxDao, text: String): Int {
     val label = headers["LABEL"] ?: "Imported"
     val type = headers["TYPE"] ?: "Imported"
     val isCore = headers["IS_CORE"]?.lowercase() == "true"
+    val synapses = headers["SYNAPSES"] ?: ""
+
+    // Regenerate embedding from the imported content.
+    val textToEmbed = "$label $payload $synapses"
+    val embedding = vectorEngine?.embed(textToEmbed) ?: floatArrayOf()
 
     val neuron = NeuronEntity(
       id = id,
       label = label,
       type = type,
       content = payload,
-      synapses = "",  // Synapses are embedded in the payload as [[Wiki-Links]].
+      synapses = synapses,
       isCore = isCore,
+      falsePaths = falsePaths,
+      embedding = embedding,
     )
 
-    // insertNeuron uses REPLACE on conflict, so this handles both insert and update.
-    dao.insertNeuron(neuron)
-    count++
+    neurons.add(neuron)
   }
 
-  Log.d(TAG, "importBrainFromMarkdown: processed $count neuron(s)")
-  return count
+  // Atomic replace: clear all existing neurons and insert the imported ones.
+  dao.replaceAllNeurons(neurons)
+
+  Log.d(TAG, "importBrainFromMarkdown: processed ${neurons.size} neuron(s), embeddings regenerated")
+  return neurons.size
 }

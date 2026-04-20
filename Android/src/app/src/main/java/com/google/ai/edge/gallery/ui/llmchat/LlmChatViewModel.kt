@@ -29,6 +29,7 @@ import com.google.ai.edge.gallery.data.brainbox.BrainBoxDao
 import com.google.ai.edge.gallery.data.brainbox.ChatHistoryDao
 import com.google.ai.edge.gallery.data.brainbox.ChatMessageEntity
 import com.google.ai.edge.gallery.data.brainbox.NeuronEntity
+import com.google.ai.edge.gallery.data.brainbox.VectorEngine
 import com.google.ai.edge.gallery.runtime.runtimeHelper
 import java.io.File
 import java.util.Collections
@@ -50,6 +51,9 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -110,8 +114,24 @@ private const val MAX_AGENT_RESPONSE_PREVIEW_LENGTH = 500
 /** Opening delimiter emitted by the LLM when it wants to invoke a tool. */
 private const val TOOL_CALL_OPEN_TAG = "<|tool_call>"
 
+/**
+ * Approximate characters per SentencePiece token for Gemma models.
+ * Used for the pre-flight token clamp to convert token counts to char limits.
+ * Gemma SentencePiece averages ~3.2 chars/token for mixed English/code text.
+ */
+private const val APPROX_CHARS_PER_TOKEN = 3.2
+
 /** Closing delimiters that signal the tool call payload is complete. */
 private val TOOL_CALL_CLOSE_TAGS = listOf("</tool_call>", "<end_of_turn>")
+
+/**
+ * Regex patterns that detect garbled / broken tool-call tokens emitted by the
+ * model when constrained decoding or tokenisation corrupts the output.
+ * Common examples: `<|"|>`, `<|'|>`, `<||>`, `<| |>`, `<|tool_`.
+ * These patterns are checked against the running output accumulator so we
+ * can halt the model early rather than letting it spiral into garbage.
+ */
+private val GARBLED_TOOL_TOKEN_PATTERN = Regex("""<\|["'|  ].*?\|?>""")
 
 /** Replacement text injected when a broken tool call is scrubbed from history. */
 private const val TOOL_CALL_SCRUB_NOTICE =
@@ -121,6 +141,30 @@ private const val TOOL_CALL_SCRUB_NOTICE =
  *  tool call is detected at the start of a new user turn. */
 private const val TOOL_CALL_CIRCUIT_BREAKER_NOTICE =
   "[System: Previous tool execution forcefully aborted by new user input. Clear active tasks.]"
+
+// ── Command Buffer (Message Queue) ─────────────────────────────────
+/** Maximum number of commands that can be buffered while inference is running. */
+private const val MAX_COMMAND_QUEUE_SIZE = 10
+
+/** Max number of recovery re-invocations before giving up. Prevents infinite
+ *  loops when the model persistently produces garbled or trivial output. */
+private const val MAX_RECOVERY_DEPTH = 2
+
+/**
+ * A pending user command that was submitted while inference was already in progress.
+ * Commands are drained sequentially once the current inference completes.
+ */
+data class QueuedCommand(
+  val model: Model,
+  val input: String,
+  val taskId: String = "",
+  val images: List<Bitmap> = listOf(),
+  val audioMessages: List<ChatMessageAudioClip> = listOf(),
+  val onFirstToken: (Model) -> Unit = {},
+  val onDone: () -> Unit = {},
+  val onError: (String) -> Unit = {},
+  val allowThinking: Boolean = false,
+)
 
 /**
  * Scrubs incomplete or malformed tool-call blocks from [text] before it is
@@ -174,6 +218,7 @@ internal fun sanitizeToolCallArtifacts(text: String): String {
 open class LlmChatViewModelBase(
   private val chatHistoryDao: ChatHistoryDao? = null,
   private val brainBoxDao: BrainBoxDao? = null,
+  private val vectorEngine: VectorEngine? = null,
 ) : ChatViewModel() {
 
   /** Tracks which (taskId, modelName) pairs have already had their history loaded. */
@@ -196,6 +241,14 @@ open class LlmChatViewModelBase(
   fun initAppContext(context: Context) {
     appContext = context.applicationContext
   }
+
+  // ── Command Buffer (Message Queue) ─────────────────────────────────
+  // When the user sends a message while inference is already running,
+  // the command is enqueued here and drained sequentially on completion.
+  private val _commandQueue = MutableStateFlow<List<QueuedCommand>>(emptyList())
+
+  /** Observable command queue for the UI to show queued message status. */
+  val commandQueue = _commandQueue.asStateFlow()
 
   /**
    * Returns (or creates) the [TokenMonitor] for [model], sized to the model's
@@ -451,7 +504,7 @@ open class LlmChatViewModelBase(
 
     val summary = resumeLines.joinToString("\n")
 
-    // ── Save resume_current.md to FILE_BOX ──────────────────────────
+    // ── Save resume_current.md to FILE_BOX (atomic write) ─────────────
     val ctx = appContext
     if (ctx != null) {
       withContext(Dispatchers.IO) {
@@ -459,7 +512,11 @@ open class LlmChatViewModelBase(
           val fileBoxRoot = File(ctx.filesDir, "clu_file_box")
           val resumeFile = File(fileBoxRoot, RESUME_FILE_PATH)
           resumeFile.parentFile?.mkdirs()
-          resumeFile.writeText(summary, Charsets.UTF_8)
+          // Atomic write: write to a temp file, then rename. This prevents
+          // a half-written file if the OS kills the process mid-write.
+          val tmpFile = File(resumeFile.parentFile, "${resumeFile.name}.tmp")
+          tmpFile.writeText(summary, Charsets.UTF_8)
+          tmpFile.renameTo(resumeFile)
           Log.d(TAG, "compressContext: saved resume_current.md (${summary.length} chars)")
         } catch (e: Exception) {
           Log.e(TAG, "compressContext: failed to write resume_current.md", e)
@@ -565,16 +622,29 @@ open class LlmChatViewModelBase(
         val timestamp =
           java.time.LocalDateTime.now()
             .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
+
+        val label = "Session_$timestamp"
+
+        // Generate vector embedding for the session transcript.
+        val engine = vectorEngine
+        val embedding = if (engine != null) {
+          val textToEmbed = "$label $transcript $extractedSynapses"
+          engine.embed(textToEmbed)
+        } else {
+          floatArrayOf()
+        }
+
         val neuron =
           NeuronEntity(
             id = UUID.randomUUID().toString(),
-            label = "Session_$timestamp",
+            label = label,
             type = "Session_Log",
             content = transcript,
             synapses = extractedSynapses,
+            embedding = embedding,
           )
         dao.insertNeuron(neuron)
-        Log.d(TAG, "Forged neuron: ${neuron.label} (${transcript.length} chars)")
+        Log.d(TAG, "Forged neuron: ${neuron.label} (${transcript.length} chars, ${embedding.size}-dim embedding)")
 
         withContext(Dispatchers.Main) {
           addMessage(
@@ -583,7 +653,8 @@ open class LlmChatViewModelBase(
               ChatMessageText(
                 content =
                   "⚡ **FORGED TO BRAINBOX** — session locked as `${neuron.label}`.\n" +
-                    "CLU will remember this the next time you reference it.",
+                    "CLU will remember this the next time you reference it." +
+                    if (embedding.isNotEmpty()) "\n📐 Vector embedding: ${embedding.size} dimensions" else "",
                 side = ChatSide.AGENT,
               ),
           )
@@ -617,6 +688,68 @@ open class LlmChatViewModelBase(
     }
   }
 
+  // ── Command Buffer: drain helper ───────────────────────────────────
+  /**
+   * Pops the first entry from [_commandQueue] (if any) and dispatches it
+   * to [generateResponse].  Called after every terminal completion of an
+   * inference run (normal finish, error, timeout).  The queued messages
+   * have already been rendered in the Chat UI with a "queued" style; once
+   * they are popped, the UI transitions them to standard styling.
+   */
+  private fun drainCommandQueue() {
+    val queue = _commandQueue.value
+    if (queue.isEmpty()) return
+
+    val next = queue.first()
+    _commandQueue.update { it.drop(1) }
+    Log.d(TAG, "drainCommandQueue: popping queued command — remaining: ${queue.size - 1}")
+
+    // Transition the queued message in the UI to normal styling by
+    // finding the first ChatMessageText with isQueued=true and replacing
+    // it with a non-queued copy.
+    dequeueMessageInUI(next.model, next.input)
+
+    generateResponse(
+      model = next.model,
+      input = next.input,
+      taskId = next.taskId,
+      images = next.images,
+      audioMessages = next.audioMessages,
+      onFirstToken = next.onFirstToken,
+      onDone = next.onDone,
+      onError = next.onError,
+      allowThinking = next.allowThinking,
+    )
+  }
+
+  /**
+   * Finds the first queued [ChatMessageText] in the UI for [model] whose
+   * content matches [input] and replaces it with a non-queued copy so the
+   * bubble transitions from muted to standard styling.
+   */
+  private fun dequeueMessageInUI(model: Model, input: String) {
+    val messages = uiState.value.messagesByModel[model.name] ?: return
+    val idx = messages.indexOfFirst {
+      it is ChatMessageText && it.isQueued && it.content == input
+    }
+    if (idx >= 0) {
+      val queued = messages[idx] as ChatMessageText
+      replaceMessage(
+        model = model,
+        index = idx,
+        message = ChatMessageText(
+          content = queued.content,
+          side = queued.side,
+          latencyMs = queued.latencyMs,
+          isMarkdown = queued.isMarkdown,
+          accelerator = queued.accelerator,
+          hideSenderLabel = queued.hideSenderLabel,
+          isQueued = false,
+        ),
+      )
+    }
+  }
+
   fun generateResponse(
     model: Model,
     input: String,
@@ -627,7 +760,37 @@ open class LlmChatViewModelBase(
     onDone: () -> Unit = {},
     onError: (String) -> Unit,
     allowThinking: Boolean = false,
+    recoveryDepth: Int = 0,
   ) {
+    // ── Re-entrancy guard + Command Buffer ─────────────────────────
+    // The native C++ LLM backend does not support concurrent
+    // sendMessageAsync calls on the same Conversation — re-entering
+    // would cause a hard crash.  Instead of silently dropping the
+    // request, we enqueue it and drain after the current inference
+    // completes.
+    if (uiState.value.inProgress) {
+      val currentSize = _commandQueue.value.size
+      if (currentSize >= MAX_COMMAND_QUEUE_SIZE) {
+        Log.w(TAG, "generateResponse: command queue full ($currentSize). Dropping request.")
+        return
+      }
+      Log.d(TAG, "generateResponse: inference in progress — enqueueing command (queue size: ${currentSize + 1})")
+      _commandQueue.update { queue ->
+        queue + QueuedCommand(
+          model = model,
+          input = input,
+          taskId = taskId,
+          images = images,
+          audioMessages = audioMessages,
+          onFirstToken = onFirstToken,
+          onDone = onDone,
+          onError = onError,
+          allowThinking = allowThinking,
+        )
+      }
+      return
+    }
+
     val accelerator = model.getStringConfigValue(key = ConfigKeys.ACCELERATOR, defaultValue = "")
     val monitor = getTokenMonitor(model)
     viewModelScope.launch(Dispatchers.Default) {
@@ -693,9 +856,20 @@ open class LlmChatViewModelBase(
       // Loading.
       addMessage(model = model, message = ChatMessageLoading(accelerator = accelerator))
 
-      // Wait for instance to be initialized.
+      // Wait for instance to be initialized (timeout after 30 seconds).
+      var instanceWaitMs = 0L
+      val maxInstanceWaitMs = 30_000L
       while (model.instance == null) {
         delay(100)
+        instanceWaitMs += 100
+        if (instanceWaitMs >= maxInstanceWaitMs) {
+          Log.e(TAG, "generateResponse: model instance not initialized after ${maxInstanceWaitMs}ms")
+          setInProgress(false)
+          setPreparing(false)
+          onError("Model failed to initialize within ${maxInstanceWaitMs / 1000}s. Try resetting the session.")
+          drainCommandQueue()
+          return@launch
+        }
       }
       delay(500)
 
@@ -715,15 +889,48 @@ open class LlmChatViewModelBase(
       var isBufferingToolCall = false
       val toolCallBuffer = StringBuilder()
 
+      // Running accumulator of ALL tokens emitted so far (including
+      // tool-call blocks). Used to detect garbled tool-call artifacts
+      // that span multiple token emissions.
+      val fullResponseAccumulator = StringBuilder()
+
+      // Flag set when the interceptor detects a garbled tool call and
+      // needs to abort the current inference run.
+      var shouldCancelInference = false
+
+      // Tracks whether at least one tool-call block was buffered during
+      // this inference pass. Used for post-tool recovery: if the model
+      // produces only trivial output (e.g. "}") after a tool call, we
+      // inject a nudge prompt to keep the conversation flowing.
+      var toolCallOccurred = false
+
       val resultListener: (String, Boolean, String?) -> Unit =
           { partialResult, done, partialThinkingResult ->
+            // ── Garbled token detection ─────────────────────────────
+            // Append every token to the running accumulator before any
+            // other processing. If we spot a known-broken pattern
+            // (e.g. <|"|>) we immediately flag for cancellation and
+            // suppress the garbage from reaching the UI.
+            fullResponseAccumulator.append(partialResult)
+
             // ── Tool-call buffering interceptor ─────────────────────
             // Accumulate the token first; detect open/close boundaries
             // on the *running accumulation* (toolCallBuffer) so that
             // tags split across multiple token emissions are handled.
             var tokenForUI = partialResult
 
-            if (isBufferingToolCall) {
+            if (shouldCancelInference) {
+              // Already flagged — suppress everything until done.
+              // NOTE: Do NOT reset shouldCancelInference here. It must
+              // remain true so the garbled-recovery block in the `done`
+              // handler (line ~1084) can detect it and fire the corrective
+              // re-prompt. Resetting it prematurely makes the recovery
+              // dead code.
+              tokenForUI = ""
+              if (done) {
+                Log.w(TAG, "Inference ended after garbled-token cancellation")
+              }
+            } else if (isBufferingToolCall) {
               toolCallBuffer.append(partialResult)
               val bufStr = toolCallBuffer.toString()
               val closed = TOOL_CALL_CLOSE_TAGS.any { bufStr.contains(it) }
@@ -733,6 +940,7 @@ open class LlmChatViewModelBase(
                 Log.d(TAG, "Tool-call buffer closed (${toolCallBuffer.length} chars)")
                 isBufferingToolCall = false
                 toolCallBuffer.clear()
+                toolCallOccurred = true
               }
               // While buffering, suppress rendering to the Chat UI.
               tokenForUI = ""
@@ -745,6 +953,24 @@ open class LlmChatViewModelBase(
               toolCallBuffer.append(partialResult.substring(idx))
               isBufferingToolCall = true
               Log.d(TAG, "Tool-call buffer started")
+            } else if (!done) {
+              // ── Check for garbled tool tokens in the recent output ──
+              // Inspect the last ~40 chars of the accumulator (enough
+              // for any mangled <|…|> sequence) to avoid repeated full
+              // scans. If a broken token is found, flag for suppression
+              // and let the native engine cleanly reach its own EOS.
+              val tail = fullResponseAccumulator.takeLast(40)
+              if (GARBLED_TOOL_TOKEN_PATTERN.containsMatchIn(tail)) {
+                Log.w(TAG, "Garbled tool token detected in output: …${tail}")
+                shouldCancelInference = true
+                tokenForUI = ""
+                // NOTE: We intentionally do NOT call stopResponse() here.
+                // A hard cancelProcess() at the JNI boundary can corrupt
+                // the native C++ KV cache state and cause a SIGSEGV on the
+                // next inference call. Instead, we suppress output via the
+                // shouldCancelInference flag and let the engine naturally
+                // finish. The done handler will fire the recovery re-prompt.
+              }
             }
 
             if (tokenForUI.startsWith("<ctrl")) {
@@ -857,29 +1083,118 @@ open class LlmChatViewModelBase(
                   }
                 }
 
-                // Persist the completed agent response and track tokens.
-                if (taskId.isNotEmpty()) {
-                  val agentMsg = getLastMessage(model = model)
-                  if (agentMsg is ChatMessageText && agentMsg.side == ChatSide.AGENT) {
-                    monitor.trackMessage(agentMsg.content)
-                    persistMessage(
-                      taskId = taskId,
+                // ── Recursive Restart: garbled tool-call recovery ─────
+                // If the interceptor flagged a garbled tool token, the
+                // model's output is garbage. Instead of persisting it and
+                // calling onDone (which would show broken text to the
+                // user), we scrub the broken response and re-invoke
+                // inference with a corrective system message that tells
+                // the model to retry with clean syntax.
+                if (shouldCancelInference) {
+                  shouldCancelInference = false
+                  if (recoveryDepth >= MAX_RECOVERY_DEPTH) {
+                    Log.w(TAG, "Garbled tool-call detected but max recovery depth ($MAX_RECOVERY_DEPTH) reached — giving up")
+                    val brokenMsg = getLastMessage(model = model)
+                    if (brokenMsg is ChatMessageText && brokenMsg.side == ChatSide.AGENT) {
+                      removeLastMessage(model = model)
+                    }
+                    addMessage(
                       model = model,
-                      side = ChatSide.AGENT,
-                      content = agentMsg.content,
+                      message = ChatMessageText(
+                        content = "I encountered repeated issues trying to use tools. Please try rephrasing your request.",
+                        side = ChatSide.AGENT,
+                      ),
+                    )
+                    setInProgress(false)
+                    onDone()
+                    drainCommandQueue()
+                  } else {
+                    Log.w(TAG, "Garbled tool-call detected — initiating recursive restart (depth=${recoveryDepth + 1})")
+                    // Remove the broken agent message from the chat.
+                    val brokenMsg = getLastMessage(model = model)
+                    if (brokenMsg is ChatMessageText && brokenMsg.side == ChatSide.AGENT) {
+                      removeLastMessage(model = model)
+                    }
+                    setInProgress(false)
+                    // Re-invoke inference with a corrective prompt.
+                    // NOTE: This message is an internal recovery prompt
+                    // injected into the LLM conversation for self-correction
+                    // — it is NOT shown to the user.
+                    generateResponse(
+                      model = model,
+                      input = "[System Error: Malformed tool call. Invalid JSON syntax or " +
+                        "missing XML tags. The broken output has been discarded. " +
+                        "Correct your formatting and try again. To use a tool, you MUST " +
+                        "invoke it through the native function-calling mechanism. Do " +
+                        "NOT manually type <|tool_call> tags or JSON. Simply invoke the tool " +
+                        "function directly. Now, please retry the user's original request.]",
+                      taskId = taskId,
+                      onFirstToken = onFirstToken,
+                      onDone = onDone,
+                      onError = onError,
+                      allowThinking = allowThinking,
+                      recoveryDepth = recoveryDepth + 1,
                     )
                   }
-                }
+                } else {
+                  // ── Post-tool recovery ────────────────────────────────
+                  // If a tool call occurred during this inference pass and
+                  // the model's visible response is trivially short (e.g.
+                  // just "}" or empty), the model likely stalled after
+                  // receiving the tool result. Remove the broken stub and
+                  // re-invoke inference with a nudge prompt.
+                  val lastMsg = getLastMessage(model = model)
+                  val visibleText = (lastMsg as? ChatMessageText)
+                    ?.takeIf { it.side == ChatSide.AGENT }
+                    ?.content?.trim() ?: ""
+                  if (toolCallOccurred && visibleText.length <= 3 && recoveryDepth < MAX_RECOVERY_DEPTH) {
+                    Log.w(TAG, "Post-tool recovery: model produced trivial output ('$visibleText') after tool call — nudging (depth=${recoveryDepth + 1})")
+                    if (lastMsg is ChatMessageText && lastMsg.side == ChatSide.AGENT) {
+                      removeLastMessage(model = model)
+                    }
+                    setInProgress(false)
+                    generateResponse(
+                      model = model,
+                      input = "[System: The tool returned its result but you produced no " +
+                        "visible output. You MUST continue with the current task. If you " +
+                        "need to call another tool, do so now. Otherwise, respond to the " +
+                        "user with the result. Do NOT output only closing braces or " +
+                        "empty text.]",
+                      taskId = taskId,
+                      onFirstToken = onFirstToken,
+                      onDone = onDone,
+                      onError = onError,
+                      allowThinking = allowThinking,
+                      recoveryDepth = recoveryDepth + 1,
+                    )
+                  } else {
+                  // Persist the completed agent response and track tokens.
+                  if (taskId.isNotEmpty()) {
+                    val agentMsg = getLastMessage(model = model)
+                    if (agentMsg is ChatMessageText && agentMsg.side == ChatSide.AGENT) {
+                      monitor.trackMessage(agentMsg.content)
+                      persistMessage(
+                        taskId = taskId,
+                        model = model,
+                        side = ChatSide.AGENT,
+                        content = agentMsg.content,
+                      )
+                    }
+                  }
 
-                setInProgress(false)
-                onDone()
+                  setInProgress(false)
+                  onDone()
+                  drainCommandQueue()
+                  }
               }
             }
           }
+        }
 
         val cleanUpListener: () -> Unit = {
           setInProgress(false)
           setPreparing(false)
+          drainCommandQueue()
         }
 
         val errorListener: (String) -> Unit = { message ->
@@ -887,6 +1202,7 @@ open class LlmChatViewModelBase(
           setInProgress(false)
           setPreparing(false)
           onError(message)
+          drainCommandQueue()
         }
 
         val enableThinking =
@@ -932,9 +1248,26 @@ open class LlmChatViewModelBase(
           monitor.trackMessage(augmentedInput)
         }
 
+        // ── Pre-flight token clamp ──────────────────────────────────────
+        // Truncate the payload string BEFORE it reaches sendMessageAsync.
+        // This prevents oversized context-injection payloads (RAG + compression
+        // + long user input) from crashing the native C++ layer when the
+        // combined token count exceeds the model's physical context window.
+        val maxPayloadChars = ((monitor.criticalLimit) * APPROX_CHARS_PER_TOKEN).toInt()  // criticalLimit is already 80% of context window (in tokens); convert to chars
+        val clampedInput = if (augmentedInput.length > maxPayloadChars) {
+          Log.w(
+            TAG,
+            "Pre-flight clamp: truncating input from ${augmentedInput.length} to $maxPayloadChars chars"
+          )
+          augmentedInput.take(maxPayloadChars) +
+            "\n\n[System: Input was truncated to fit within the context window.]"
+        } else {
+          augmentedInput
+        }
+
         model.runtimeHelper.runInference(
           model = model,
-          input = augmentedInput,
+          input = clampedInput,
           images = images,
           audioClips = audioClips,
           resultListener = resultListener,
@@ -952,6 +1285,7 @@ open class LlmChatViewModelBase(
         setInProgress(false)
         setPreparing(false)
         onError(e.message ?: "")
+        drainCommandQueue()
       }
     }
   }
@@ -964,6 +1298,7 @@ open class LlmChatViewModelBase(
     setInProgress(false)
     model.runtimeHelper.stopResponse(model)
     Log.d(TAG, "Done stopping response")
+    drainCommandQueue()
   }
 
   fun resetSession(
@@ -978,10 +1313,14 @@ open class LlmChatViewModelBase(
   ) {
     viewModelScope.launch(Dispatchers.Default) {
       setIsResettingSession(true)
+      // Clear any pending commands — they belong to the old session.
+      _commandQueue.update { emptyList() }
       clearAllMessages(model = model)
       stopResponse(model = model)
 
-      while (true) {
+      var resetAttempts = 0
+      val maxResetAttempts = 10
+      while (resetAttempts < maxResetAttempts) {
         try {
           model.runtimeHelper.resetConversation(
             model = model,
@@ -993,7 +1332,11 @@ open class LlmChatViewModelBase(
           )
           break
         } catch (e: Exception) {
-          Log.d(TAG, "Failed to reset session. Trying again")
+          resetAttempts++
+          Log.d(TAG, "Failed to reset session (attempt $resetAttempts/$maxResetAttempts). Trying again")
+          if (resetAttempts >= maxResetAttempts) {
+            Log.e(TAG, "Reset session failed after $maxResetAttempts attempts — giving up", e)
+          }
         }
         delay(200)
       }
@@ -1010,9 +1353,17 @@ open class LlmChatViewModelBase(
     allowThinking: Boolean = false,
   ) {
     viewModelScope.launch(Dispatchers.Default) {
-      // Wait for model to be initialized.
+      // Wait for model to be initialized (timeout after 30 seconds).
+      var waitMs = 0L
+      val maxWaitMs = 30_000L
       while (model.instance == null) {
         delay(100)
+        waitMs += 100
+        if (waitMs >= maxWaitMs) {
+          Log.e(TAG, "runAgain: model instance not initialized after ${maxWaitMs}ms — aborting")
+          onError("Model failed to initialize. Please try resetting the session.")
+          return@launch
+        }
       }
 
       // Clone the clicked message and add it.
@@ -1065,8 +1416,8 @@ open class LlmChatViewModelBase(
 }
 
 @HiltViewModel
-class LlmChatViewModel @Inject constructor(chatHistoryDao: ChatHistoryDao, brainBoxDao: BrainBoxDao) :
-  LlmChatViewModelBase(chatHistoryDao, brainBoxDao)
+class LlmChatViewModel @Inject constructor(chatHistoryDao: ChatHistoryDao, brainBoxDao: BrainBoxDao, vectorEngine: VectorEngine) :
+  LlmChatViewModelBase(chatHistoryDao, brainBoxDao, vectorEngine)
 
 @HiltViewModel class LlmAskImageViewModel @Inject constructor() : LlmChatViewModelBase()
 

@@ -25,9 +25,10 @@ import dagger.multibindings.IntoSet
 @Module
 @InstallIn(SingletonComponent::class)
 internal object MobileActionsModule {
-  @Provides
-  @IntoSet
-  fun provideTask(): CustomTask {
-    return MobileActionsTask()
-  }
+  // Boilerplate task stripped — not used in CLU/BOX.
+  // @Provides
+  // @IntoSet
+  // fun provideTask(): CustomTask {
+  //   return MobileActionsTask()
+  // }
 }

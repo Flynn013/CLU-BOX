@@ -20,6 +20,7 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
@@ -30,9 +31,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  */
 @Database(
   entities = [NeuronEntity::class, ChatMessageEntity::class],
-  version = 4,
+  version = 5,
   exportSchema = false,
 )
+@TypeConverters(Converters::class)
 abstract class GraphDatabase : RoomDatabase() {
 
   abstract fun brainBoxDao(): BrainBoxDao
@@ -58,6 +60,15 @@ abstract class GraphDatabase : RoomDatabase() {
         }
       }
 
+    /** Migration from v4 → v5: add falsePaths and embedding columns for vector search. */
+    private val MIGRATION_4_5 =
+      object : Migration(4, 5) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+          db.execSQL("ALTER TABLE neurons ADD COLUMN falsePaths TEXT NOT NULL DEFAULT ''")
+          db.execSQL("ALTER TABLE neurons ADD COLUMN embedding TEXT NOT NULL DEFAULT ''")
+        }
+      }
+
     fun getInstance(context: Context): GraphDatabase {
       return INSTANCE
         ?: synchronized(this) {
@@ -66,7 +77,7 @@ abstract class GraphDatabase : RoomDatabase() {
               GraphDatabase::class.java,
               "brainbox.db",
             )
-            .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
+            .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
             .fallbackToDestructiveMigration() // TODO: replace with proper migrations before release
             .build()
             .also { INSTANCE = it }

@@ -50,6 +50,7 @@ import com.google.ai.edge.gallery.GalleryEvent
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.EMPTY_MODEL
+import com.google.ai.edge.gallery.data.LogBoxManager
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.RuntimeType
 import com.google.ai.edge.gallery.data.Task
@@ -74,6 +75,7 @@ fun LlmChatScreen(
   taskId: String = BuiltInTaskId.LLM_CHAT,
   onFirstToken: (Model) -> Unit = {},
   onGenerateResponseDone: (Model) -> Unit = {},
+  onInferenceError: (Model) -> Unit = {},
   onSkillClicked: () -> Unit = {},
   onResetSessionClickedOverride: ((Task, Model) -> Unit)? = null,
   composableBelowMessageList: @Composable (Model) -> Unit = {},
@@ -96,6 +98,7 @@ fun LlmChatScreen(
     onSkillClicked = onSkillClicked,
     onFirstToken = onFirstToken,
     onGenerateResponseDone = onGenerateResponseDone,
+    onInferenceError = onInferenceError,
     onResetSessionClickedOverride = onResetSessionClickedOverride,
     composableBelowMessageList = composableBelowMessageList,
     allowEditingSystemPrompt = allowEditingSystemPrompt,
@@ -195,6 +198,7 @@ fun ChatViewWrapper(
   onSkillClicked: () -> Unit = {},
   onFirstToken: (Model) -> Unit = {},
   onGenerateResponseDone: (Model) -> Unit = {},
+  onInferenceError: (Model) -> Unit = {},
   onResetSessionClickedOverride: ((Task, Model) -> Unit)? = null,
   composableBelowMessageList: @Composable (Model) -> Unit = {},
   emptyStateComposable: @Composable (Model) -> Unit = {},
@@ -215,6 +219,9 @@ fun ChatViewWrapper(
   val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
   val selectedModel = modelManagerUiState.selectedModel
   var showWipeConfirmDialog by remember { mutableStateOf(false) }
+
+  // LOG_BOX manager — created once per ChatViewWrapper lifecycle.
+  val logBoxManager = remember { LogBoxManager(context.applicationContext) }
 
   // Load persisted chat history whenever the selected model changes,
   // but only when a real model is selected (not the EMPTY_MODEL sentinel).
@@ -275,8 +282,24 @@ fun ChatViewWrapper(
     viewModel = viewModel,
     modelManagerViewModel = modelManagerViewModel,
     onSendMessage = { model, messages ->
+      // Check if inference is currently running — if so, mark text
+      // messages as "queued" so they render with the muted style.
+      val isCurrentlyProcessing = viewModel.uiState.value.inProgress
       for (message in messages) {
-        viewModel.addMessage(model = model, message = message)
+        val messageToAdd = if (isCurrentlyProcessing && message is ChatMessageText) {
+          ChatMessageText(
+            content = message.content,
+            side = message.side,
+            latencyMs = message.latencyMs,
+            isMarkdown = message.isMarkdown,
+            accelerator = message.accelerator,
+            hideSenderLabel = message.hideSenderLabel,
+            isQueued = true,
+          )
+        } else {
+          message
+        }
+        viewModel.addMessage(model = model, message = messageToAdd)
       }
 
       var text = ""
@@ -313,6 +336,7 @@ fun ChatViewWrapper(
               errorMessage = errorMessage,
               modelManagerViewModel = modelManagerViewModel,
             )
+            onInferenceError(model)
           },
           allowThinking = allowThinking,
         )
@@ -370,5 +394,6 @@ fun ChatViewWrapper(
     showAudioPicker = showAudioPicker,
     onForgeNeuronClicked = { viewModel.forgeNeuron(selectedModel) },
     onChatHistoryClicked = onChatHistoryClicked,
+    logBoxManager = logBoxManager,
   )
 }

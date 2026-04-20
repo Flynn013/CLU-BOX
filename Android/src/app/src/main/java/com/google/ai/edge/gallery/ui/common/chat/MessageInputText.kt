@@ -646,12 +646,14 @@ fun MessageInputText(
                     }
                   }
                 }
-                // Send button.
-                else {
+                // Send button — always visible.  When inference is running
+                // and the user taps Send, the message is enqueued in the
+                // ViewModel's command buffer and rendered in the chat with
+                // a "queued" style until inference completes.
+                if (!inProgress || !showStopButtonWhenInProgress || (curMessage.isNotEmpty() || pickedAudioClips.isNotEmpty())) {
                   IconButton(
                     enabled =
-                      !inProgress &&
-                        !isResettingSession &&
+                      !isResettingSession &&
                         (curMessage.isNotEmpty() || pickedAudioClips.isNotEmpty()),
                     onClick = {
                       var message = curMessage.trim()
@@ -936,11 +938,13 @@ private fun handleImagesSelected(
           }
         if (inputStream != null) {
           // Read the EXIF metadata from the picture and rotate it correctly.
-          val exif = ExifInterface(inputStream)
-          val orientation =
+          val orientation = try {
+            val exif = ExifInterface(inputStream)
             exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
-          // You MUST close the first input stream before opening another one on the same URI.
-          inputStream.close()
+          } finally {
+            // You MUST close the first input stream before opening another one on the same URI.
+            inputStream.close()
+          }
 
           // The let block will now return the rotated bitmap
           decodeSampledBitmapFromUri(context, uri, 1024, 1024)?.let { originalBitmap ->

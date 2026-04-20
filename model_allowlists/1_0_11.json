@@ -87,8 +87,16 @@
         "maxTokens": 4096,
         "accelerators": "cpu,gpu"
       },
-      "taskTypes": ["llm_chat", "llm_prompt_lab", "llm_ask_image", "llm_ask_audio"],
-      "bestForTaskTypes": ["llm_ask_image", "llm_ask_audio"]
+      "taskTypes": [
+        "llm_chat",
+        "llm_prompt_lab",
+        "llm_ask_image",
+        "llm_ask_audio"
+      ],
+      "bestForTaskTypes": [
+        "llm_ask_image",
+        "llm_ask_audio"
+      ]
     },
     {
       "name": "Gemma-3n-E4B-it",
@@ -107,7 +115,12 @@
         "maxTokens": 4096,
         "accelerators": "cpu,gpu"
       },
-      "taskTypes": ["llm_chat", "llm_prompt_lab", "llm_ask_image", "llm_ask_audio"]
+      "taskTypes": [
+        "llm_chat",
+        "llm_prompt_lab",
+        "llm_ask_image",
+        "llm_ask_audio"
+      ]
     },
     {
       "name": "Gemma3-1B-IT",
@@ -121,11 +134,17 @@
         "topK": 64,
         "topP": 0.95,
         "temperature": 1.0,
-        "maxTokens": 1024,
+        "maxTokens": 2048,
         "accelerators": "gpu,cpu"
       },
-      "taskTypes": ["llm_chat", "llm_prompt_lab"],
-      "bestForTaskTypes": ["llm_chat", "llm_prompt_lab"]
+      "taskTypes": [
+        "llm_chat",
+        "llm_prompt_lab"
+      ],
+      "bestForTaskTypes": [
+        "llm_chat",
+        "llm_prompt_lab"
+      ]
     },
     {
       "name": "Qwen2.5-1.5B-Instruct",
@@ -142,7 +161,10 @@
         "maxTokens": 4096,
         "accelerators": "gpu,cpu"
       },
-      "taskTypes": ["llm_chat", "llm_prompt_lab"]
+      "taskTypes": [
+        "llm_chat",
+        "llm_prompt_lab"
+      ]
     },
     {
       "name": "DeepSeek-R1-Distill-Qwen-1.5B",
@@ -159,7 +181,10 @@
         "maxTokens": 4096,
         "accelerators": "gpu,cpu"
       },
-      "taskTypes": ["llm_chat", "llm_prompt_lab"]
+      "taskTypes": [
+        "llm_chat",
+        "llm_prompt_lab"
+      ]
     },
     {
       "name": "TinyGarden-270M",
@@ -173,7 +198,7 @@
         "topK": 64,
         "topP": 0.95,
         "temperature": 0.0,
-        "maxTokens": 1024,
+        "maxTokens": 2048,
         "accelerators": "cpu"
       },
       "taskTypes": [
@@ -195,7 +220,7 @@
         "topK": 64,
         "topP": 0.95,
         "temperature": 0.0,
-        "maxTokens": 1024,
+        "maxTokens": 2048,
         "accelerators": "cpu"
       },
       "taskTypes": [

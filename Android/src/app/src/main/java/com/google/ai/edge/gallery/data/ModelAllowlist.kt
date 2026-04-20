@@ -74,6 +74,12 @@ data class AllowedModel(
       url ?: "https://huggingface.co/$modelId/resolve/$commitHash/$modelFile?download=true"
     var sizeInBytes = sizeInBytes
 
+    // Cloud models don't need a download URL or file.
+    if (runtimeType == RuntimeType.GEMINI_CLOUD) {
+      downloadUrl = ""
+      downloadedFileName = ""
+    }
+
     // Handle per-soc model files.
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
       if (socToModelFiles?.isNotEmpty() == true) {
@@ -163,11 +169,16 @@ data class AllowedModel(
           .toMutableList()
     }
 
-    var learnMoreUrl = "https://huggingface.co/${modelId}"
+    var learnMoreUrl = ""
 
     if (runtimeType == RuntimeType.AICORE) {
       downloadUrl = ""
       learnMoreUrl = "https://developers.google.com/ml-kit/terms"
+    }
+
+    if (runtimeType == RuntimeType.GEMINI_CLOUD) {
+      downloadUrl = ""
+      learnMoreUrl = "https://aistudio.google.com/app/apikey"
     }
 
     // Misc.

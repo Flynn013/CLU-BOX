@@ -105,7 +105,7 @@ fun ModelNameAndStatus(
     )
 
     // Status icon + size + download progress details.
-    if (model.runtimeType != RuntimeType.AICORE) {
+    if (model.runtimeType != RuntimeType.AICORE && model.runtimeType != RuntimeType.GEMINI_CLOUD) {
       Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
         // Status icon.
         StatusIcon(

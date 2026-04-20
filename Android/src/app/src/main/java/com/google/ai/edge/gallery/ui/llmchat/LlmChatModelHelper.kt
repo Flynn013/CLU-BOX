@@ -51,7 +51,14 @@ import kotlinx.coroutines.CoroutineScope
 
 private const val TAG = "AGLlmChatModelHelper"
 
-data class LlmModelInstance(val engine: Engine, var conversation: Conversation)
+data class LlmModelInstance(
+  val engine: Engine,
+  var conversation: Conversation,
+  /** Cached system instruction for conversation reset during pruning. */
+  var systemInstruction: Contents? = null,
+  /** Cached tool providers for conversation reset during pruning. */
+  var tools: List<ToolProvider> = listOf(),
+)
 
 object LlmChatModelHelper : LlmModelHelper {
   // Indexed by model name.
@@ -156,7 +163,12 @@ object LlmChatModelHelper : LlmModelHelper {
           )
         )
       ExperimentalFlags.enableConversationConstrainedDecoding = false
-      model.instance = LlmModelInstance(engine = engine, conversation = conversation)
+      model.instance = LlmModelInstance(
+        engine = engine,
+        conversation = conversation,
+        systemInstruction = systemInstruction,
+        tools = tools,
+      )
     } catch (e: Throwable) {
       val errorMsg = e.stackTraceToString()
       Log.e("CLU_CRASH_REPORT", "Engine initialization failed: $errorMsg")
@@ -226,6 +238,8 @@ object LlmChatModelHelper : LlmModelHelper {
         )
       ExperimentalFlags.enableConversationConstrainedDecoding = false
       instance.conversation = newConversation
+      instance.systemInstruction = systemInstruction
+      instance.tools = tools
 
       Log.d(TAG, "Resetting done")
     } catch (e: Exception) {
@@ -291,6 +305,20 @@ object LlmChatModelHelper : LlmModelHelper {
 
     val conversation = instance.conversation
 
+    // ── Defensive input size clamp ──────────────────────────────────
+    // Hard-cap text input to prevent oversized payloads from crashing
+    // the native C++ layer. The ViewModel pre-flight clamp handles most
+    // cases, but this serves as a last-resort JNI boundary guard.
+    val maxTokens =
+      model.getIntConfigValue(key = ConfigKeys.MAX_TOKENS, defaultValue = DEFAULT_MAX_TOKEN)
+    val maxInputChars = (maxTokens * 3.2).toInt()  // conservative chars-per-token
+    val safeInput = if (input.length > maxInputChars) {
+      Log.w(TAG, "runInference: input (${input.length} chars) exceeds safety limit ($maxInputChars chars) — truncating")
+      input.take(maxInputChars) + "\n[System: Input truncated for memory safety.]"
+    } else {
+      input
+    }
+
     val contents = mutableListOf<Content>()
     for (image in images) {
       contents.add(Content.ImageBytes(image.toPngByteArray()))
@@ -299,8 +327,8 @@ object LlmChatModelHelper : LlmModelHelper {
       contents.add(Content.AudioBytes(audioClip))
     }
     // add the text after image and audio for the accurate last token
-    if (input.trim().isNotEmpty()) {
-      contents.add(Content.Text(input))
+    if (safeInput.trim().isNotEmpty()) {
+      contents.add(Content.Text(safeInput))
     }
 
     try {
@@ -320,8 +348,54 @@ object LlmChatModelHelper : LlmModelHelper {
               Log.i(TAG, "The inference is cancelled.")
               resultListener("", true, null)
             } else {
-              Log.e("CLU_CRASH_REPORT", "Inference callback error: ${throwable.stackTraceToString()}")
-              onError("Error: ${throwable.message}")
+              // ── Sliding context window: auto-prune on token overflow ──
+              // When the native engine reports "token ids are too long"
+              // (MediaPipe error code 3), the accumulated KV-cache has
+              // exceeded the model's physical context window. Reset the
+              // Conversation (clearing the native KV-cache) and retry
+              // with just the current user input. The system prompt and
+              // tool catalog are re-injected from cached values.
+              val msg = throwable.message ?: ""
+              if (msg.contains("token ids are too long", ignoreCase = true) ||
+                  msg.contains("Exceeding the maximum number of tokens", ignoreCase = true)) {
+                Log.w(TAG, "Token overflow detected — pruning context and retrying")
+                try {
+                  instance.conversation.close()
+                  val topK = model.getIntConfigValue(key = ConfigKeys.TOPK, defaultValue = DEFAULT_TOPK)
+                  val topP = model.getFloatConfigValue(key = ConfigKeys.TOPP, defaultValue = DEFAULT_TOPP)
+                  val temperature = model.getFloatConfigValue(key = ConfigKeys.TEMPERATURE, defaultValue = DEFAULT_TEMPERATURE)
+                  val accel = model.getStringConfigValue(key = ConfigKeys.ACCELERATOR, defaultValue = "")
+                  instance.conversation = instance.engine.createConversation(
+                    ConversationConfig(
+                      samplerConfig = if (accel == Accelerator.NPU.label) null else
+                        SamplerConfig(topK = topK, topP = topP.toDouble(), temperature = temperature.toDouble()),
+                      systemInstruction = instance.systemInstruction,
+                      tools = instance.tools,
+                    )
+                  )
+                  // Retry with the fresh (pruned) conversation.
+                  instance.conversation.sendMessageAsync(
+                    Contents.of(contents),
+                    object : MessageCallback {
+                      override fun onMessage(m: Message) {
+                        resultListener(m.toString(), false, m.channels["thought"])
+                      }
+                      override fun onDone() { resultListener("", true, null) }
+                      override fun onError(t: Throwable) {
+                        Log.e(TAG, "Retry after context prune also failed", t)
+                        onError("Error: ${t.message}")
+                      }
+                    },
+                    extraContext ?: emptyMap(),
+                  )
+                } catch (resetErr: Exception) {
+                  Log.e(TAG, "Failed to prune context after token overflow", resetErr)
+                  onError("Error: $msg")
+                }
+              } else {
+                Log.e("CLU_CRASH_REPORT", "Inference callback error: ${throwable.stackTraceToString()}")
+                onError("Error: ${throwable.message}")
+              }
             }
           }
         },

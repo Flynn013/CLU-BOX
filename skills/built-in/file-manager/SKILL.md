@@ -34,7 +34,7 @@ Python (`.py`) and JavaScript (`.js`) files are **automatically syntax-checked**
 Call the `fileBoxRead` tool with:
 - **file_path**: Relative path of the file to read (e.g. `my_app/src/main.kt`).
 
-Returns the file content as a string (capped at 4096 characters).
+Returns the file content as a string. If the file is too large, the output is truncated and the full content is saved to a spill file — use the **context-pager** skill (`fileBoxReadLines` / `brainBoxGrep`) to page through it.
 
 #### 3. Scan the Workspace
 Call the `workspaceMap` tool (no parameters).

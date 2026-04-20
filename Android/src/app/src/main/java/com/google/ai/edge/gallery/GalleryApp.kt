@@ -19,6 +19,7 @@ package com.google.ai.edge.gallery
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -40,11 +41,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.DashboardCustomize
-import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.ShoppingCart
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
@@ -67,6 +66,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
@@ -94,7 +94,6 @@ import com.google.ai.edge.gallery.data.TerminalSessionManager
 import com.google.ai.edge.gallery.ui.osmodules.BrainBoxModuleScreen
 import com.google.ai.edge.gallery.ui.osmodules.FileBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.MstrCtrlScreen
-import com.google.ai.edge.gallery.ui.osmodules.TheGridScreen
 import com.google.ai.edge.gallery.ui.theme.absoluteBlack
 import com.google.ai.edge.gallery.ui.theme.neonGreen
 import com.google.ai.edge.gallery.ui.theme.terminalMidGrey
@@ -106,9 +105,8 @@ private enum class OsModule(val label: String, val icon: ImageVector) {
   BRAIN_BOX("BRAIN_BOX", Icons.Outlined.Hub),
   FILE_BOX("FILE_BOX", Icons.Outlined.Code),
   MSTR_CTRL("MSTR_CTRL", Icons.Outlined.Terminal),
-  THE_GRID("THE_GRID", Icons.Outlined.GridView),
   SKILL_BOX("SKILL_BOX", Icons.Outlined.Psychology),
-  VENDING_MACHINE("MODELS", Icons.Outlined.ShoppingCart),
+  VENDING_MACHINE("VENDING_MACHINE", Icons.Outlined.DashboardCustomize),
   SYS_SETTINGS("SETTINGS", Icons.Outlined.Settings),
 }
 
@@ -125,8 +123,6 @@ fun GalleryApp(
   var showSysSettingsDialog by remember { mutableStateOf(false) }
   // True when the SKILL_BOX drawer item is tapped — shows the SkillManagerBottomSheet overlay.
   var showSkillBoxSheet by remember { mutableStateOf(false) }
-  // Grid prompt override: when a Grid game is initialized, this holds the injected system prompt.
-  var gridPromptOverride by remember { mutableStateOf<String?>(null) }
   val db = remember { GraphDatabase.getInstance(context) }
   val fileBoxManager = remember { FileBoxManager(context) }
   val terminalSessionManager = remember { TerminalSessionManager(context) }
@@ -139,6 +135,7 @@ fun GalleryApp(
   }
   agentTools.context = context
   agentTools.brainBoxDao = remember(context) { GraphDatabase.getInstance(context).brainBoxDao() }
+  agentTools.vectorEngine = remember(context) { com.google.ai.edge.gallery.data.brainbox.VectorEngine(context) }
   agentTools.terminalSessionManager = terminalSessionManager
 
   // Separate nav controllers so each module retains its own back stack.
@@ -209,7 +206,17 @@ fun GalleryApp(
     // Content area — wrapped in a Box so we can overlay the
     // right-edge tab button that opens the navigation drawer.
     // ============================================================
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier
+      .fillMaxSize()
+      .pointerInput(Unit) {
+        detectHorizontalDragGestures { _, dragAmount ->
+          // Right-to-left swipe (finger moving left) → return to CHAT_BOX
+          if (dragAmount < -50f && activeModule != OsModule.CHAT_BOX) {
+            activeModule = OsModule.CHAT_BOX
+          }
+        }
+      }
+    ) {
       // ── CHAT_BOX: ALWAYS in composition ────────────────────────
       // The chat NavHost stays mounted so that LLM inference,
       // conversation state, scroll position, and streaming continue
@@ -232,7 +239,7 @@ fun GalleryApp(
       // ── Other modules: rendered on top when active ─────────────
       if (!chatBoxVisible) {
         when (activeModule) {
-          // VENDING_MACHINE (MODELS): full-screen, manages own Scaffold.
+          // VENDING_MACHINE: full-screen, manages own Scaffold.
           OsModule.VENDING_MACHINE -> GlobalModelManager(
             viewModel = modelManagerViewModel,
             navigateUp = { activeModule = OsModule.CHAT_BOX },
@@ -271,15 +278,12 @@ fun GalleryApp(
             ) { innerPadding ->
               Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
                 when (activeModule) {
-                  OsModule.BRAIN_BOX -> BrainBoxModuleScreen(dao = db.brainBoxDao())
+                  OsModule.BRAIN_BOX -> BrainBoxModuleScreen(
+                    dao = db.brainBoxDao(),
+                    vectorEngine = remember(context) { com.google.ai.edge.gallery.data.brainbox.VectorEngine(context) },
+                  )
                   OsModule.FILE_BOX -> FileBoxScreen(fileBoxManager = fileBoxManager)
                   OsModule.MSTR_CTRL -> MstrCtrlScreen(sessionManager = terminalSessionManager)
-                  OsModule.THE_GRID -> TheGridScreen(
-                    onInitializeMatch = { systemPrompt ->
-                      gridPromptOverride = systemPrompt
-                      activeModule = OsModule.CHAT_BOX
-                    },
-                  )
                   else -> {} // all modules covered above
                 }
               }

@@ -79,6 +79,7 @@ import com.google.ai.edge.gallery.common.CallJsAgentAction
 import com.google.ai.edge.gallery.common.SkillProgressAgentAction
 import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.Model
+import com.google.ai.edge.gallery.data.RuntimeType
 import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.firebaseAnalytics
 import com.google.ai.edge.gallery.ui.common.BaseGalleryWebViewClient
@@ -100,6 +101,8 @@ import com.google.ai.edge.gallery.ui.llmchat.LlmChatViewModel
 import com.google.ai.edge.gallery.ui.modelmanager.ModelInitializationStatusType
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import com.google.ai.edge.gallery.data.brainbox.GraphDatabase
+import com.google.ai.edge.gallery.runtime.geminicloud.GeminiApiKeyDialog
+import com.google.ai.edge.gallery.runtime.geminicloud.GeminiApiKeyStore
 import com.google.ai.edge.gallery.ui.theme.neonGreen
 import com.google.ai.edge.litertlm.tool
 import java.lang.Exception
@@ -110,6 +113,22 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import org.json.JSONObject
 
 private const val TAG = "AGAgentChatScreen"
+
+/**
+ * Maximum number of consecutive autonomous loop iterations allowed before the
+ * loop is forcibly halted.  This prevents a runaway agentic loop from
+ * crashing the app through memory exhaustion, context overflow, or native
+ * layer errors.  The counter resets whenever the **user** sends a new message.
+ */
+private const val MAX_AUTONOMOUS_ITERATIONS = 25
+
+/**
+ * Cooldown delay (ms) inserted between consecutive autonomous loop iterations.
+ * Gives the system breathing room (GC, UI, OS memory management) and prevents
+ * CPU starvation / ANR on the main thread.
+ */
+private const val AUTONOMOUS_LOOP_COOLDOWN_MS = 1500L
+
 private val chatViewJavascriptInterface = ChatWebViewJavascriptInterface()
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -126,6 +145,7 @@ fun AgentChatScreen(
   agentTools.context = context
   agentTools.skillManagerViewModel = skillManagerViewModel
   agentTools.brainBoxDao = remember(context) { GraphDatabase.getInstance(context).brainBoxDao() }
+  agentTools.vectorEngine = remember(context) { com.google.ai.edge.gallery.data.brainbox.VectorEngine(context) }
   agentTools.terminalSessionManager = remember(context) {
     com.google.ai.edge.gallery.data.TerminalSessionManager(context)
   }
@@ -144,12 +164,27 @@ fun AgentChatScreen(
   var curSystemPrompt by remember { mutableStateOf(task.defaultSystemPrompt) }
   val systemPromptUpdatedMessage = stringResource(R.string.system_prompt_updated)
   var sendMessageTrigger by remember { mutableStateOf<SendMessageTrigger?>(null) }
+  /** Tracks how many consecutive autonomous re-triggers have fired without user input. */
+  var autonomousIterationCount by remember { mutableStateOf(0) }
   var showAlertForDisabledSkill by remember { mutableStateOf(false) }
   var disabledSkillName by remember { mutableStateOf("") }
   var showChatHistorySheet by remember { mutableStateOf(false) }
   var chatHistoryRefreshKey by remember { mutableStateOf(0) }
   val chatHistoryDao = remember(context) { GraphDatabase.getInstance(context).chatHistoryDao() }
   val chatHistoryScope = rememberCoroutineScope()
+  val autonomousLoopScope = rememberCoroutineScope()
+  var showGeminiApiKeyDialog by remember { mutableStateOf(false) }
+
+  // Monitor selected model — prompt for API key when Cloud Node is selected without one.
+  val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
+  val selectedModel = modelManagerUiState.selectedModel
+  LaunchedEffect(selectedModel) {
+    if (selectedModel.runtimeType == RuntimeType.GEMINI_CLOUD &&
+      !GeminiApiKeyStore.hasApiKey(context)
+    ) {
+      showGeminiApiKeyDialog = true
+    }
+  }
 
   LlmChatScreen(
     modelManagerViewModel = modelManagerViewModel,
@@ -157,6 +192,15 @@ fun AgentChatScreen(
     navigateUp = navigateUp,
     onFirstToken = { model ->
       updateProgressPanel(viewModel = viewModel, model = model, agentTools = agentTools)
+    },
+    onInferenceError = { _ ->
+      // ── Error cleanup: break the autonomous loop on crash ──────────
+      // When inference fails (OOM, native crash, context overflow), clear
+      // any pending autonomous task so the loop doesn't try to fire again
+      // after the model is re-initialized.
+      Log.w(TAG, "Inference error — clearing pending autonomous task and resetting loop counter")
+      agentTools.pendingTaskDescription = null
+      autonomousIterationCount = 0
     },
     onGenerateResponseDone = { model ->
       // Show any image produced by tools.
@@ -206,17 +250,43 @@ fun AgentChatScreen(
       // silently re-trigger inference with the next task description.
       val pendingTask = agentTools.pendingTaskDescription
       if (pendingTask != null) {
-        agentTools.pendingTaskDescription = null
-        Log.d(TAG, "Autonomous loop: re-triggering inference with task='$pendingTask'")
-        sendMessageTrigger = SendMessageTrigger(
-          model = model,
-          messages = listOf(
-            ChatMessageText(
-              content = "[AUTO-TASK] $pendingTask",
-              side = ChatSide.USER,
+        // ── Circuit Breaker: hard cap on consecutive autonomous iterations ──
+        if (autonomousIterationCount >= MAX_AUTONOMOUS_ITERATIONS) {
+          Log.w(
+            TAG,
+            "Autonomous loop HALTED: reached $MAX_AUTONOMOUS_ITERATIONS iterations. " +
+              "Clearing pending task to prevent crash."
+          )
+          agentTools.pendingTaskDescription = null
+          viewModel.addMessage(
+            model = model,
+            message = ChatMessageText(
+              content = "[System: Autonomous loop halted after $MAX_AUTONOMOUS_ITERATIONS " +
+                "iterations to protect device stability. Send a new message to continue.]",
+              side = ChatSide.AGENT,
             ),
-          ),
-        )
+          )
+        } else {
+          autonomousIterationCount++
+          agentTools.pendingTaskDescription = null
+          Log.d(TAG, "Autonomous loop: iteration $autonomousIterationCount — re-triggering inference with task='$pendingTask'")
+          // Cooldown: brief delay between iterations to give the system breathing room.
+          autonomousLoopScope.launch {
+            delay(AUTONOMOUS_LOOP_COOLDOWN_MS)
+            sendMessageTrigger = SendMessageTrigger(
+              model = model,
+              messages = listOf(
+                ChatMessageText(
+                  content = "[CONTINUE] $pendingTask",
+                  side = ChatSide.USER,
+                ),
+              ),
+            )
+          }
+        }
+      } else {
+        // No pending task — the loop concluded naturally. Reset the counter.
+        autonomousIterationCount = 0
       }
     },
     onResetSessionClickedOverride = { task, model ->
@@ -374,96 +444,9 @@ fun AgentChatScreen(
         },
       )
     },
-    emptyStateComposable = { model ->
-      val uiState by viewModel.uiState.collectAsState()
-      val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
-      val modelInitializationStatus = modelManagerUiState.modelInitializationStatus[model.name]
-      Box(modifier = Modifier.fillMaxSize()) {
-        AnimatedVisibility(
-          !WindowInsets.isImeVisible,
-          enter = fadeIn(animationSpec = tween(200)),
-          exit = fadeOut(animationSpec = tween(200)),
-        ) {
-          Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Column(
-              modifier =
-                Modifier.align(Alignment.Center)
-                  .padding(horizontal = 48.dp)
-                  .padding(bottom = 48.dp),
-              horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-              Text(
-                stringResource(R.string.introducing),
-                style = MaterialTheme.typography.headlineSmall,
-              )
-              Text(
-                stringResource(R.string.agent_skills),
-                style =
-                  MaterialTheme.typography.headlineLarge.copy(
-                    fontWeight = FontWeight.Medium,
-                    color = neonGreen,
-                  ),
-                modifier = Modifier.padding(top = 12.dp, bottom = 16.dp),
-              )
-              Text(
-                buildAnnotatedString {
-                  append("Your on-device AI assistant with skills, BrainBox memory, and offline reasoning.")
-                  append("\n\nTap a sample prompt below or start chatting!")
-                },
-                style =
-                  MaterialTheme.typography.headlineSmall.copy(fontSize = 16.sp, lineHeight = 22.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-              )
-            }
-          }
-        }
-
-        Row(
-          modifier =
-            Modifier.align(Alignment.BottomCenter)
-              .horizontalScroll(rememberScrollState())
-              .padding(horizontal = 12.dp),
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-          for (promptChip in TRYOUT_CHIPS) {
-            FilledTonalButton(
-              enabled =
-                modelInitializationStatus?.status == ModelInitializationStatusType.INITIALIZED &&
-                  !uiState.isResettingSession,
-              onClick = {
-                // Skill is selected, trigger sending the message.
-                if (skillManagerViewModel.isSkillSelected(promptChip.skillName)) {
-                  sendMessageTrigger =
-                    SendMessageTrigger(
-                      model = model,
-                      messages =
-                        listOf(ChatMessageText(content = promptChip.prompt, side = ChatSide.USER)),
-                    )
-                  firebaseAnalytics?.logEvent(
-                    GalleryEvent.BUTTON_CLICKED.id,
-                    Bundle().apply {
-                      putString("event_type", "agent_skills_prompt_chip")
-                      putString("button_id", promptChip.label)
-                    },
-                  )
-                }
-                // Skill is not selected, show alert dialog.
-                else {
-                  disabledSkillName = promptChip.skillName
-                  showAlertForDisabledSkill = true
-                }
-              },
-              contentPadding = PaddingValues(horizontal = 12.dp),
-            ) {
-              Icon(promptChip.icon, contentDescription = null, modifier = Modifier.size(20.dp))
-              Spacer(modifier = Modifier.width(4.dp))
-              Text(promptChip.label)
-            }
-          }
-        }
-      }
+    emptyStateComposable = { _ ->
+      // Blank initial state — minimalist aesthetic.
+      Box(modifier = Modifier.fillMaxSize())
     },
     sendMessageTrigger = sendMessageTrigger,
     onChatHistoryClicked = { showChatHistorySheet = true },
@@ -559,6 +542,17 @@ fun AgentChatScreen(
       )
     }
   }
+
+  // ── Gemini Cloud Node: API key dialog ─────────────────────────────────
+  if (showGeminiApiKeyDialog) {
+    GeminiApiKeyDialog(
+      onDismiss = { showGeminiApiKeyDialog = false },
+      onApiKeySaved = { key ->
+        GeminiApiKeyStore.setApiKey(context, key)
+        showGeminiApiKeyDialog = false
+      },
+    )
+  }
 }
 
 private fun updateProgressPanel(viewModel: LlmChatViewModel, model: Model, agentTools: AgentTools) {
@@ -607,18 +601,19 @@ private fun resetSessionWithCurrentSkills(
   onDone: (Model) -> Unit = {},
 ) {
   val model = modelManagerViewModel.uiState.value.selectedModel
-  val newSelectedSkills = skillManagerViewModel.getSelectedSkills()
   viewModel.resetSession(
     task = task,
     model = model,
     systemInstruction =
-      if (newSelectedSkills.isEmpty()) null
-      else skillManagerViewModel.getSystemPrompt(curSystemPrompt),
+      skillManagerViewModel.getSystemPrompt(
+        curSystemPrompt,
+      ),
     tools = listOf(tool(agentTools)),
     supportImage = true,
     supportAudio = true,
     onDone = { onDone(model) },
-    enableConversationConstrainedDecoding = true,
+    // Constrained decoding disabled — see AgentChatTaskModule for rationale.
+    enableConversationConstrainedDecoding = false,
   )
 }
 

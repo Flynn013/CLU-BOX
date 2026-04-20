@@ -17,6 +17,7 @@
 package com.google.ai.edge.gallery.data
 
 import android.util.Log
+import java.util.concurrent.atomic.AtomicInteger
 
 private const val TAG = "TokenMonitor"
 
@@ -53,13 +54,18 @@ private const val DEFAULT_CONTEXT_WINDOW = 8192
 class TokenMonitor(
   private val contextWindowSize: Int = DEFAULT_CONTEXT_WINDOW,
 ) {
-  /** Accumulated estimated token count for the current session. */
-  @Volatile
-  private var currentTokens: Int = 0
+  /**
+   * Accumulated estimated token count for the current session.
+   * Uses [AtomicInteger] so concurrent `trackMessage` calls from
+   * multiple coroutines/threads never lose increments.
+   */
+  private val currentTokens = AtomicInteger(0)
 
-  /** Number of messages tracked since last reset. */
-  @Volatile
-  private var messageCount: Int = 0
+  /**
+   * Number of messages tracked since last reset.
+   * Uses [AtomicInteger] for the same thread-safety guarantee.
+   */
+  private val messageCount = AtomicInteger(0)
 
   /** The hard token limit at which compression must fire (80% of window). */
   val criticalLimit: Int
@@ -67,11 +73,11 @@ class TokenMonitor(
 
   /** Current estimated token usage. Thread-safe read. */
   val estimatedTokens: Int
-    get() = currentTokens
+    get() = currentTokens.get()
 
   /** Current context window utilisation as a percentage (0.0–1.0). */
   val utilisation: Double
-    get() = if (contextWindowSize > 0) currentTokens.toDouble() / contextWindowSize else 0.0
+    get() = if (contextWindowSize > 0) currentTokens.get().toDouble() / contextWindowSize else 0.0
 
   /**
    * Estimates the SentencePiece token count for [text] using the Gemma
@@ -85,15 +91,21 @@ class TokenMonitor(
   /**
    * Tracks a new message being added to the conversation context.
    * Call this for every user message, system injection, and agent response.
+   *
+   * Uses [AtomicInteger.addAndGet] so concurrent calls are safe and no
+   * increments are lost.  The total is clamped to [contextWindowSize] to
+   * prevent overflow — once the window is saturated, compression must fire.
    */
   fun trackMessage(text: String) {
     val tokens = estimateTokens(text)
-    currentTokens += tokens
-    messageCount++
+    val newTotal = currentTokens.updateAndGet { current ->
+      (current + tokens).coerceAtMost(contextWindowSize)
+    }
+    val msgs = messageCount.incrementAndGet()
     Log.d(
       TAG,
-      "trackMessage: +$tokens tokens (total=$currentTokens/$contextWindowSize, " +
-        "${(utilisation * 100).toInt()}% used, messages=$messageCount)"
+      "trackMessage: +$tokens tokens (total=$newTotal/$contextWindowSize, " +
+        "${(utilisation * 100).toInt()}% used, messages=$msgs)"
     )
   }
 
@@ -102,11 +114,12 @@ class TokenMonitor(
    * critical threshold and context compression must fire.
    */
   fun shouldCompress(): Boolean {
-    val shouldFire = currentTokens >= criticalLimit
+    val current = currentTokens.get()
+    val shouldFire = current >= criticalLimit
     if (shouldFire) {
       Log.w(
         TAG,
-        "CRITICAL: Token threshold breached ($currentTokens >= $criticalLimit). " +
+        "CRITICAL: Token threshold breached ($current >= $criticalLimit). " +
           "Compression interceptor must fire."
       )
     }
@@ -118,23 +131,31 @@ class TokenMonitor(
    * Call this after the conversation history has been wiped and the
    * Genesis Message has been re-injected.
    *
+   * Both fields are written atomically — a concurrent reader will see
+   * either the old state or the fully-reset state, never a partial one.
+   *
    * @param genesisTokens The estimated tokens in the re-injected resume block.
    */
+  @Synchronized
   fun reset(genesisTokens: Int = 0) {
+    val prevTokens = currentTokens.get()
+    val prevMsgs = messageCount.get()
     Log.d(
       TAG,
-      "reset: clearing $currentTokens tokens ($messageCount messages). " +
+      "reset: clearing $prevTokens tokens ($prevMsgs messages). " +
         "Re-seeding with $genesisTokens genesis tokens."
     )
-    currentTokens = genesisTokens
-    messageCount = if (genesisTokens > 0) 1 else 0
+    currentTokens.set(genesisTokens)
+    messageCount.set(if (genesisTokens > 0) 1 else 0)
   }
 
   /**
    * Returns a diagnostic summary suitable for logging or BrainBox storage.
    */
   fun diagnosticSummary(): String {
-    return "TokenMonitor[tokens=$currentTokens, window=$contextWindowSize, " +
-      "limit=$criticalLimit, util=${(utilisation * 100).toInt()}%, msgs=$messageCount]"
+    val tokens = currentTokens.get()
+    val msgs = messageCount.get()
+    return "TokenMonitor[tokens=$tokens, window=$contextWindowSize, " +
+      "limit=$criticalLimit, util=${(utilisation * 100).toInt()}%, msgs=$msgs]"
   }
 }

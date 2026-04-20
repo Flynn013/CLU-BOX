@@ -36,6 +36,8 @@ enum class RuntimeType {
   @SerializedName("unknown") UNKNOWN,
   @SerializedName("litert_lm") LITERT_LM,
   @SerializedName("aicore") AICORE,
+  @SerializedName("gemini_cloud") GEMINI_CLOUD,
+  @SerializedName("manual_api") MANUAL_API,
 }
 
 enum class AICoreModelReleaseStage {
@@ -259,6 +261,19 @@ data class Model(
 
   /** Whether the model is imported or not. */
   val imported: Boolean = false,
+
+  /**
+   * (optional) For MANUAL_API models: the remote API endpoint URL.
+   * For example, "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash"
+   * or an OpenAI-compatible endpoint.
+   */
+  val apiEndpoint: String = "",
+
+  /**
+   * (optional) For MANUAL_API models: the context window size in tokens.
+   * Defaults to 32768 (32k).
+   */
+  val contextWindowSize: Int = 32768,
 
   // The following fields are managed by the app. Don't need to set manually.
   //

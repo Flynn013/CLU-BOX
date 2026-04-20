@@ -90,7 +90,7 @@
   <string name="downloaded_size" translatable="false">%1$s downloaded</string>
   <string name="drawer_settings_label" translatable="false">Settings</string>
   <string name="drawer_settings_description" translatable="false">Manage application settings</string>
-  <string name="drawer_models_label" translatable="false">Models</string>
+  <string name="drawer_models_label" translatable="false">VENDING_MACHINE</string>
   <string name="drawer_models_description" translatable="false">Browse, try, and benchmark models</string>
   <string name="edit" translatable="false">Edit</string>
   <string name="edit_secret" translatable="false">Edit secret</string>
@@ -126,7 +126,7 @@
     <item quantity="other">%d models available</item>
   </plurals>
   <string name="model_list_recommended_models_title" translatable="false">Recommended models</string>
-  <string name="model_manager" translatable="false">Model Manager</string>
+  <string name="model_manager" translatable="false">VENDING_MACHINE</string>
   <string name="model_manager_select_task_title" translatable="false">Select a use case to try</string>
   <string name="model_not_downloaded_msg" translatable="false">Model not downloaded yet</string>
   <string name="name" translatable="false">Name</string>

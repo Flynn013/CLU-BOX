@@ -18,6 +18,7 @@ package com.google.ai.edge.gallery.ui.osmodules
 
 import android.content.Context
 import android.graphics.Typeface
+import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.inputmethod.InputMethodManager
@@ -28,6 +29,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.BasicTextField
@@ -40,6 +42,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -51,9 +54,11 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.google.ai.edge.gallery.data.EnvironmentInstaller
 import com.google.ai.edge.gallery.data.TerminalSessionManager
 import com.google.ai.edge.gallery.data.TermuxSessionBridge
 import com.google.ai.edge.gallery.ui.theme.absoluteBlack
@@ -88,6 +93,24 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
   val scope = rememberCoroutineScope()
   var inputText by remember { mutableStateOf("") }
 
+  // ── Bootstrap state observation ──────────────────────────────
+  // Trigger the EnvironmentInstaller on first composition.
+  val bootstrapState by EnvironmentInstaller.state.collectAsState()
+
+  LaunchedEffect(Unit) {
+    EnvironmentInstaller.ensureInstalled(context)
+  }
+
+  // If the bootstrap is not yet ready (and hasn't failed), show a progress
+  // overlay instead of the terminal. On failure, fall through to the
+  // terminal with the limited /system/bin/sh shell.
+  if (bootstrapState !is EnvironmentInstaller.State.Ready &&
+    bootstrapState !is EnvironmentInstaller.State.Failed
+  ) {
+    BootstrapProgressOverlay(bootstrapState)
+    return
+  }
+
   // Hold a reference to the TerminalView so we can invalidate it
   // when new output arrives from the PTY.
   var terminalViewRef by remember { mutableStateOf<TerminalView?>(null) }
@@ -96,9 +119,17 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
   // is ready before the AndroidView factory runs.  Previously this was
   // in a LaunchedEffect which ran *after* the first composition,
   // causing the TerminalView factory to see a null session.
+  //
+  // The createSession call is wrapped inside TermuxSessionBridge with a
+  // blast-shield try-catch, so even if PTY init fails due to W^X or
+  // native-lib errors the bridge object is still valid (sessionInitFailed
+  // will be true and terminalSession will be null).
   val bridge = remember {
     TermuxSessionBridge(context).also { b ->
       b.createSession(sessionManager.sandboxRoot)
+      if (b.sessionInitFailed) {
+        Log.e("MstrCtrlScreen", "PTY init failed: ${b.sessionInitError}")
+      }
     }
   }
 
@@ -133,7 +164,8 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
   Column(
     modifier = Modifier
       .fillMaxSize()
-      .background(absoluteBlack),
+      .background(absoluteBlack)
+      .imePadding(),
   ) {
     // ── Termux TerminalView (main content area) ────────────────
     Box(
@@ -149,7 +181,7 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
             setTerminalViewClient(CluTerminalViewClient(this))
 
             // Style: monospace font, neon-green on black.
-            setTextSize(16)
+            setTextSize(20)
             setTypeface(Typeface.MONOSPACE)
 
             // Black background to match CLU/BOX aesthetic.
@@ -195,7 +227,7 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
         "$",
         color = neonGreen,
         fontFamily = FontFamily.Monospace,
-        fontSize = 16.sp,
+        fontSize = 18.sp,
         modifier = Modifier.padding(end = 6.dp),
       )
 
@@ -207,7 +239,7 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
           .padding(vertical = 4.dp),
         textStyle = TextStyle(
           fontFamily = FontFamily.Monospace,
-          fontSize = 16.sp,
+          fontSize = 18.sp,
           color = neonGreen,
         ),
         cursorBrush = SolidColor(neonGreen),
@@ -249,6 +281,40 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
         )
       }
     }
+  }
+}
+
+// ── Bootstrap progress overlay ───────────────────────────────────────────
+//
+// Shown while EnvironmentInstaller is downloading/extracting the sysroot.
+
+@Composable
+private fun BootstrapProgressOverlay(state: EnvironmentInstaller.State) {
+  Box(
+    modifier = Modifier
+      .fillMaxSize()
+      .background(absoluteBlack),
+    contentAlignment = Alignment.Center,
+  ) {
+    val message = when (state) {
+      is EnvironmentInstaller.State.Idle -> "Preparing Linux environment…"
+      is EnvironmentInstaller.State.Downloading ->
+        "Downloading bootstrap… ${state.percent}%"
+      is EnvironmentInstaller.State.Extracting -> "Extracting sysroot…"
+      is EnvironmentInstaller.State.FixingPermissions -> "Setting up environment…"
+      is EnvironmentInstaller.State.Failed ->
+        "Bootstrap failed: ${state.message}\n\nTerminal will use limited Android shell."
+      is EnvironmentInstaller.State.Ready -> "Ready!"
+    }
+
+    Text(
+      text = message,
+      color = neonGreen,
+      fontFamily = FontFamily.Monospace,
+      fontSize = 16.sp,
+      textAlign = TextAlign.Center,
+      modifier = Modifier.padding(32.dp),
+    )
   }
 }
 

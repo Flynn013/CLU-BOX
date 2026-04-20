@@ -21,7 +21,6 @@ import android.util.Log
 import androidx.core.net.toUri
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
-import java.lang.Exception
 
 @JsonClass(generateAdapter = true)
 data class SendEmailParams(

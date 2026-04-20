@@ -94,11 +94,15 @@ private fun exportViaDirectFile(sourceDir: File, zipFileName: String): String? {
 
 // ── Shared helper ───────────────────────────────────────────────
 
-private fun addDirToZip(zos: ZipOutputStream, fileToZip: File, root: File) {
+private fun addDirToZip(zos: ZipOutputStream, fileToZip: File, root: File, depth: Int = 0) {
+  if (depth > 50) {
+    Log.w("ZipExporter", "addDirToZip: depth limit (50) reached at '${fileToZip.path}' — skipping")
+    return
+  }
   if (fileToZip.isDirectory) {
     val children = fileToZip.listFiles() ?: return
     for (child in children) {
-      addDirToZip(zos, child, root)
+      addDirToZip(zos, child, root, depth + 1)
     }
   } else {
     val entryName = fileToZip.relativeTo(root).path

@@ -25,6 +25,9 @@ private const val TAG = "ShellManager"
 /** Timeout in seconds before a shell process is forcibly killed. */
 private const val TIMEOUT_SECONDS = 10L
 
+/** Maximum time (ms) to wait for reader threads to finish after the process exits. */
+private const val READER_THREAD_JOIN_TIMEOUT_MS = 5_000L
+
 /**
  * Executes a shell command via `sh -c` and returns the combined stdout + stderr output.
  *
@@ -68,8 +71,9 @@ fun executeCommand(command: String): String {
 
     // Block until reader threads complete (no timeout — process already exited so
     // streams will close and readText() will return).
-    stdoutThread.join()
-    stderrThread.join()
+    // Bounded join prevents indefinite hangs if a reader thread gets stuck.
+    stdoutThread.join(READER_THREAD_JOIN_TIMEOUT_MS)
+    stderrThread.join(READER_THREAD_JOIN_TIMEOUT_MS)
 
     val stdout = stdoutRef.get()
     val stderr = stderrRef.get()
@@ -84,6 +88,12 @@ fun executeCommand(command: String): String {
 
     Log.d(TAG, "executeCommand: exit=${process.exitValue()}, output=${combined.length} chars")
     combined.ifEmpty { "(no output)" }
+  } catch (e: SecurityException) {
+    Log.e(TAG, "executeCommand: blocked by Android security (W^X / SELinux)", e)
+    "ERROR: [System: Terminal execution blocked by Android OS Security (W^X). Fallback required.]"
+  } catch (e: UnsatisfiedLinkError) {
+    Log.e(TAG, "executeCommand: native library load failed", e)
+    "ERROR: [System: Terminal native library unavailable. Shell execution disabled.]"
   } catch (e: Exception) {
     Log.e(TAG, "executeCommand: exception", e)
     "ERROR: ${e.message}"

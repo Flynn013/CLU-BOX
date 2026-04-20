@@ -147,54 +147,106 @@ class TermuxSessionBridge(private val context: Context) {
     }
   }
 
+  /** `true` when the last [createSession] attempt failed due to a native/security error. */
+  @Volatile
+  var sessionInitFailed: Boolean = false
+    private set
+
+  /** Human-readable reason when [sessionInitFailed] is `true`. */
+  @Volatile
+  var sessionInitError: String? = null
+    private set
+
   /**
    * Creates and starts a new PTY-backed shell session.
    *
    * The shell process is not started until the [com.termux.view.TerminalView]
    * calls [TerminalSession.updateSize] during layout.
    *
+   * All native/JNI work is wrapped in a blast-shield `try-catch` so that
+   * a W^X security denial, missing native lib, or SELinux block cannot
+   * crash the entire application. On failure, [sessionInitFailed] is set
+   * and a diagnostic message is stored in [sessionInitError].
+   *
    * @param sandboxRoot The directory to use as `$HOME` and initial cwd.
    * @param shell       Path to the shell binary (default: `/system/bin/sh`).
    */
-  fun createSession(sandboxRoot: File, shell: String = "/system/bin/sh") {
-    if (terminalSession != null) {
-      Log.w(TAG, "Session already exists — destroying old one first")
-      destroySession()
+  fun createSession(sandboxRoot: File, shell: String = EnvironmentInstaller.shellPath(context)) {
+    sessionInitFailed = false
+    sessionInitError = null
+
+    try {
+      Log.d(TAG, "Checkpoint 1: Preparing session (shell=$shell)")
+
+      if (terminalSession != null) {
+        Log.w(TAG, "Session already exists — destroying old one first")
+        destroySession()
+      }
+
+      val cwd = sandboxRoot.absolutePath
+      val home = sandboxRoot.absolutePath
+
+      Log.d(TAG, "Checkpoint 2: Building environment")
+
+      // Build the environment for the shell using the internal sysroot.
+      val binDir = EnvironmentInstaller.binDir(context)
+      val prefix = EnvironmentInstaller.prefixDir(context)
+      val basePath = "/system/bin:/system/xbin"
+      val effectivePath = if (binDir.isDirectory) "${binDir.absolutePath}:$basePath" else basePath
+
+      val env = mutableListOf(
+        "HOME=$home",
+        "TERM=xterm-256color",
+        "PATH=$effectivePath",
+        "COLORTERM=truecolor",
+        "LANG=en_US.UTF-8",
+        "TMPDIR=${context.cacheDir.absolutePath}",
+        // Visible prompt so the user gets immediate boot feedback.
+        "PS1=CLU/BOX \$ ",
+      )
+      // Inject sysroot environment variables when the bootstrap prefix exists,
+      // giving the PTY shell access to bash, python, node, pkg, git, and native
+      // shared libraries.
+      if (prefix.isDirectory) {
+        env.add("PREFIX=${prefix.absolutePath}")
+        env.add("LD_LIBRARY_PATH=${EnvironmentInstaller.libDir(context).absolutePath}")
+      }
+
+      val args = arrayOf(shell)
+
+      Log.d(TAG, "Checkpoint 3: Allocating PTY via TerminalSession")
+
+      terminalSession = TerminalSession(
+        shell,    // executable
+        cwd,      // working directory
+        args,     // arguments
+        env.toTypedArray(),  // environment
+        // Use the Termux library's default transcript size (typically 2000 rows).
+        // This provides a reasonable scrollback buffer for CLU-BOX workflows.
+        TerminalEmulator.DEFAULT_TERMINAL_TRANSCRIPT_ROWS,
+        sessionClient,
+      )
+
+      Log.i(TAG, "Checkpoint 4: PTY session created — waiting for TerminalView layout to start shell")
+    } catch (e: SecurityException) {
+      // W^X policy or SELinux denial — the OS blocked PTY allocation.
+      val msg = "Terminal blocked by Android security (W^X / SELinux): ${e.message}"
+      Log.e(TAG, msg, e)
+      sessionInitFailed = true
+      sessionInitError = msg
+    } catch (e: UnsatisfiedLinkError) {
+      // Missing or incompatible native library (JNI crash).
+      val msg = "Terminal native library load failed: ${e.message}"
+      Log.e(TAG, msg, e)
+      sessionInitFailed = true
+      sessionInitError = msg
+    } catch (e: Throwable) {
+      // Catch-all blast shield — prevents ANY native crash from killing the app.
+      val msg = "Terminal init failed (${e.javaClass.simpleName}): ${e.message}"
+      Log.e(TAG, msg, e)
+      sessionInitFailed = true
+      sessionInitError = msg
     }
-
-    val cwd = sandboxRoot.absolutePath
-    val home = sandboxRoot.absolutePath
-
-    // Build the environment for the shell.
-    val termuxBin = "/data/data/com.termux/files/usr/bin"
-    val basePath = "/system/bin:/system/xbin"
-    val effectivePath = if (File(termuxBin).isDirectory) "$termuxBin:$basePath" else basePath
-
-    val env = arrayOf(
-      "HOME=$home",
-      "TERM=xterm-256color",
-      "PATH=$effectivePath",
-      "COLORTERM=truecolor",
-      "LANG=en_US.UTF-8",
-      // Visible prompt so the user gets immediate boot feedback.
-      "PS1=CLU/BOX \$ ",
-    )
-
-    val args = arrayOf(shell)
-
-    Log.d(TAG, "Creating PTY session — shell=$shell, cwd=$cwd")
-    terminalSession = TerminalSession(
-      shell,    // executable
-      cwd,      // working directory
-      args,     // arguments
-      env,      // environment
-      // Use the Termux library's default transcript size (typically 2000 rows).
-      // This provides a reasonable scrollback buffer for CLU-BOX workflows.
-      TerminalEmulator.DEFAULT_TERMINAL_TRANSCRIPT_ROWS,
-      sessionClient,
-    )
-
-    Log.i(TAG, "PTY session created — waiting for TerminalView layout to start shell")
   }
 
   /**

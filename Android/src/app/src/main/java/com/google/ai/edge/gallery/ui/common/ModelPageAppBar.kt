@@ -29,6 +29,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.MapsUgc
+import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
@@ -86,6 +87,8 @@ fun ModelPageAppBar(
   onSystemPromptChanged: (String) -> Unit = {},
   onForgeNeuronClicked: (() -> Unit)? = null,
   onChatHistoryClicked: (() -> Unit)? = null,
+  onLogBoxToggled: (() -> Unit)? = null,
+  isLogBoxVisible: Boolean = false,
 ) {
   var showConfigDialog by remember { mutableStateOf(false) }
   val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
@@ -157,6 +160,19 @@ fun ModelPageAppBar(
             imageVector = Icons.Rounded.History,
             contentDescription = "Chat history",
             tint = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.size(20.dp),
+          )
+        }
+      }
+
+      // 📟 LOG_BOX toggle — flip between chat and telemetry viewer
+      if (onLogBoxToggled != null && downloadSucceeded) {
+        IconButton(onClick = onLogBoxToggled) {
+          Icon(
+            imageVector = Icons.Rounded.Terminal,
+            contentDescription = if (isLogBoxVisible) "Hide LOG_BOX" else "Show LOG_BOX",
+            tint = if (isLogBoxVisible) com.google.ai.edge.gallery.ui.theme.neonGreen
+                   else MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.size(20.dp),
           )
         }
