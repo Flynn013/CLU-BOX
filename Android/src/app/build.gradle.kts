@@ -34,8 +34,8 @@ android {
 
   defaultConfig {
     applicationId = "com.google.aiedge.gallery"
-    minSdk = 31
-    targetSdk = 35
+    minSdk = 28
+    targetSdk = 28
     versionCode = 23
     versionName = "1.0.11"
 
