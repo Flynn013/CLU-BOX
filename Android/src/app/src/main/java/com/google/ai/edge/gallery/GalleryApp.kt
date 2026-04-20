@@ -19,6 +19,7 @@ package com.google.ai.edge.gallery
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -65,6 +66,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
@@ -204,7 +206,17 @@ fun GalleryApp(
     // Content area — wrapped in a Box so we can overlay the
     // right-edge tab button that opens the navigation drawer.
     // ============================================================
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier
+      .fillMaxSize()
+      .pointerInput(Unit) {
+        detectHorizontalDragGestures { _, dragAmount ->
+          // Right-to-left swipe (finger moving left) → return to CHAT_BOX
+          if (dragAmount < -50f && activeModule != OsModule.CHAT_BOX) {
+            activeModule = OsModule.CHAT_BOX
+          }
+        }
+      }
+    ) {
       // ── CHAT_BOX: ALWAYS in composition ────────────────────────
       // The chat NavHost stays mounted so that LLM inference,
       // conversation state, scroll position, and streaming continue
