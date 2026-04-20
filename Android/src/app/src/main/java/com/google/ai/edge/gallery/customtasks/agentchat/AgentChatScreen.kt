@@ -277,7 +277,7 @@ fun AgentChatScreen(
               model = model,
               messages = listOf(
                 ChatMessageText(
-                  content = "[AUTO-TASK] $pendingTask",
+                  content = "[CONTINUE] $pendingTask",
                   side = ChatSide.USER,
                 ),
               ),

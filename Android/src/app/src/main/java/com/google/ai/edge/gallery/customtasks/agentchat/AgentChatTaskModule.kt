@@ -67,7 +67,6 @@ class AgentChatTask @Inject constructor() : CustomTask {
 
         FILES: Only fileBoxWrite creates files. Never shell echo/cat/nano.
         RUN: fileBoxWrite first, then shellExecute.
-        MULTI-FILE: architectInit once, then workerExecute per file.
         """
           .trimIndent(),
     )
