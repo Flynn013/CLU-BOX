@@ -227,13 +227,16 @@ class TerminalSessionManager(private val context: Context) {
         EnvironmentInstaller.state.first {
           it is EnvironmentInstaller.State.Ready || it is EnvironmentInstaller.State.Failed
         }
-        if (!ptyBridge.isAlive) {
-          ptyBridge.createSession(sandboxRoot)
-          if (ptyBridge.sessionInitFailed) {
-            Log.w(TAG, "PTY bridge init failed: ${ptyBridge.sessionInitError} — falling back to ProcessBuilder for sendCommand")
-            appendSystemLine("[MSTR_CTRL] PTY bridge unavailable — using process-based fallback.")
-          } else {
-            appendSystemLine("[MSTR_CTRL] PTY bridge active — xterm-256color")
+        // Use sessionLock to prevent concurrent session creation with sendCommand().
+        sessionLock.withLock {
+          if (!ptyBridge.isAlive) {
+            ptyBridge.createSession(sandboxRoot)
+            if (ptyBridge.sessionInitFailed) {
+              Log.w(TAG, "PTY bridge init failed: ${ptyBridge.sessionInitError} — falling back to ProcessBuilder for sendCommand")
+              appendSystemLine("[MSTR_CTRL] PTY bridge unavailable — using process-based fallback.")
+            } else {
+              appendSystemLine("[MSTR_CTRL] PTY bridge active — xterm-256color")
+            }
           }
         }
       }
@@ -293,8 +296,14 @@ class TerminalSessionManager(private val context: Context) {
       }
       // Bootstrap just completed — if the deferred PTY coroutine hasn't run yet,
       // start the session with the correct bash shell immediately.
+      // Double-checked locking with sessionLock prevents concurrent creation
+      // with the deferred coroutine in startSession().
       if (!ptyBridge.isAlive && EnvironmentInstaller.state.value is EnvironmentInstaller.State.Ready) {
-        ptyBridge.createSession(sandboxRoot)
+        sessionLock.withLock {
+          if (!ptyBridge.isAlive) {
+            ptyBridge.createSession(sandboxRoot)
+          }
+        }
       }
     }
 
