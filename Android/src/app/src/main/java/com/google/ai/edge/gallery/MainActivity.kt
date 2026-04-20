@@ -52,6 +52,7 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import com.google.ai.edge.gallery.ui.theme.GalleryTheme
+import com.google.ai.edge.gallery.data.EnvironmentInstaller
 import com.google.ai.edge.litertlm.ExperimentalApi
 import com.google.ai.edge.litertlm.ExperimentalFlags
 import com.google.firebase.analytics.FirebaseAnalytics
@@ -122,6 +123,12 @@ class MainActivity : ComponentActivity() {
     }
 
     modelManagerViewModel.loadModelAllowlist()
+
+    // Eagerly bootstrap the embedded Termux sysroot so the terminal
+    // is ready by the time the user opens MSTR_CTRL or Agent Chat.
+    lifecycleScope.launch {
+      EnvironmentInstaller.ensureInstalled(this@MainActivity)
+    }
 
     // Show splash screen.
     val splashScreen = installSplashScreen()

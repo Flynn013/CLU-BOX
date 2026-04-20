@@ -209,13 +209,17 @@ object EnvironmentInstaller {
     // Manually follow redirects to handle cross-host HTTPS→HTTPS hops
     // (e.g. github.com → objects.githubusercontent.com).
     while (true) {
+      Log.d("CLU_BOOTSTRAP", "Downloading from: $currentUrl")
       connection = currentUrl.openConnection() as HttpURLConnection
       connection.instanceFollowRedirects = false
       connection.connectTimeout = 30_000
       connection.readTimeout = 60_000
       connection.connect()
 
-      when (connection.responseCode) {
+      val responseCode = connection.responseCode
+      Log.d("CLU_BOOTSTRAP", "Response code: $responseCode from $currentUrl")
+
+      when (responseCode) {
         HttpURLConnection.HTTP_MOVED_TEMP,
         HttpURLConnection.HTTP_MOVED_PERM,
         HttpURLConnection.HTTP_SEE_OTHER,
@@ -224,16 +228,19 @@ object EnvironmentInstaller {
           val location = connection.getHeaderField("Location")
             ?: throw RuntimeException("Redirect without Location header")
           connection.disconnect()
+          Log.d("CLU_BOOTSTRAP", "Redirect #$redirectCount → $location")
           currentUrl = URL(location)
           redirectCount++
           if (redirectCount > 5) throw RuntimeException("Too many redirects")
         }
 
-        HttpURLConnection.HTTP_OK -> break
+        HttpURLConnection.HTTP_OK -> {
+          Log.d("CLU_BOOTSTRAP", "Download stream ready (${connection.contentLengthLong} bytes)")
+          break
+        }
         else -> {
-          val code = connection.responseCode
           connection.disconnect()
-          throw RuntimeException("Download failed: HTTP $code")
+          throw RuntimeException("Download failed: HTTP $responseCode")
         }
       }
     }
