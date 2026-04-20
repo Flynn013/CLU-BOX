@@ -63,12 +63,17 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.TabRowDefaults
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -86,6 +91,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.data.Model
@@ -94,6 +100,7 @@ import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.proto.ImportedModel
 import com.google.ai.edge.gallery.ui.common.TaskIcon
 import com.google.ai.edge.gallery.ui.common.modelitem.ModelItem
+import com.google.ai.edge.gallery.ui.theme.neonGreen
 import kotlin.text.endsWith
 import kotlin.text.lowercase
 import kotlinx.coroutines.delay
@@ -112,12 +119,15 @@ fun GlobalModelManager(
   openDrawer: (() -> Unit)? = null,
 ) {
   val uiState by viewModel.uiState.collectAsState()
-  val builtInModels = remember { mutableStateListOf<Model>() }
+  val localModels = remember { mutableStateListOf<Model>() }
+  val cloudModels = remember { mutableStateListOf<Model>() }
+  val bespokeModels = remember { mutableStateListOf<Model>() }
   val importedModels = remember { mutableStateListOf<Model>() }
   val taskCandidates = remember { mutableStateListOf<Task>() }
   var modelForTaskCandidate by remember { mutableStateOf<Model?>(null) }
   var showTaskSelectorBottomSheet by remember { mutableStateOf(false) }
   var showImportModelSheet by remember { mutableStateOf(false) }
+  var showAddApiModelDialog by remember { mutableStateOf(false) }
   var showUnsupportedFileTypeDialog by remember { mutableStateOf(false) }
   var showUnsupportedWebModelDialog by remember { mutableStateOf(false) }
   val selectedLocalModelFileUri = remember { mutableStateOf<Uri?>(null) }
@@ -129,6 +139,10 @@ fun GlobalModelManager(
   val context = LocalContext.current
   val snackbarHostState = remember { SnackbarHostState() }
   val modelItemExpandedStates = remember { mutableStateMapOf<String, Boolean>() }
+
+  // VENDING_MACHINE tab state: 0=LOCAL, 1=CLOUD, 2=BESPOKE
+  var selectedTab by remember { mutableIntStateOf(0) }
+  val tabTitles = listOf("LOCAL", "CLOUD", "BESPOKE")
 
   val promoId = "gm4_banner"
   var showPromo by remember { mutableStateOf(false) }
@@ -169,10 +183,24 @@ fun GlobalModelManager(
       }
     }
     val sortedModels = allModelsSet.toList().sortedBy { it.displayName.ifEmpty { it.name } }
-    builtInModels.clear()
-    builtInModels.addAll(sortedModels.filter { !it.imported })
+
+    // Split into VENDING_MACHINE tabs:
+    // LOCAL: LiteRT-LM models (on-device) + imported
+    // CLOUD: AICore / Gemini Cloud (system-level)
+    // BESPOKE: Manually-added API models
+    localModels.clear()
+    cloudModels.clear()
+    bespokeModels.clear()
     importedModels.clear()
-    importedModels.addAll(sortedModels.filter { it.imported })
+    for (model in sortedModels) {
+      when {
+        model.runtimeType == RuntimeType.MANUAL_API -> bespokeModels.add(model)
+        model.runtimeType == RuntimeType.AICORE ||
+          model.runtimeType == RuntimeType.GEMINI_CLOUD -> cloudModels.add(model)
+        model.imported -> importedModels.add(model)
+        else -> localModels.add(model)
+      }
+    }
   }
 
   val handleClickModel: (Model) -> Unit = { model ->
@@ -213,9 +241,10 @@ fun GlobalModelManager(
               )
               Text(
                 text =
-                  "${stringResource(R.string.drawer_models_label)} (${builtInModels.size + importedModels.size})",
+                  "${stringResource(R.string.drawer_models_label)} (${localModels.size + cloudModels.size + bespokeModels.size + importedModels.size})",
                 color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.titleMedium,
+                fontFamily = FontFamily.Monospace,
               )
             }
           }
@@ -246,79 +275,192 @@ fun GlobalModelManager(
       )
     },
     floatingActionButton = {
-      // A floating action button to show "import model" bottom sheet.
-      val cdImportModelFab = stringResource(R.string.cd_import_model_button)
-      SmallFloatingActionButton(
-        onClick = { showImportModelSheet = true },
-        containerColor = MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = MaterialTheme.colorScheme.secondary,
-        modifier = Modifier.semantics { contentDescription = cdImportModelFab },
-      ) {
-        Icon(Icons.Filled.Add, contentDescription = null)
+      // Context-sensitive FAB: import local model on LOCAL tab, add API model on BESPOKE tab.
+      if (selectedTab == 0) {
+        val cdImportModelFab = stringResource(R.string.cd_import_model_button)
+        SmallFloatingActionButton(
+          onClick = { showImportModelSheet = true },
+          containerColor = MaterialTheme.colorScheme.secondaryContainer,
+          contentColor = MaterialTheme.colorScheme.secondary,
+          modifier = Modifier.semantics { contentDescription = cdImportModelFab },
+        ) {
+          Icon(Icons.Filled.Add, contentDescription = null)
+        }
+      } else if (selectedTab == 2) {
+        SmallFloatingActionButton(
+          onClick = { showAddApiModelDialog = true },
+          containerColor = MaterialTheme.colorScheme.secondaryContainer,
+          contentColor = MaterialTheme.colorScheme.secondary,
+          modifier = Modifier.semantics { contentDescription = "Add API Model" },
+        ) {
+          Icon(Icons.Filled.Add, contentDescription = null)
+        }
       }
     },
   ) { innerPadding ->
     Box() {
-      LazyColumn(
-        modifier =
-          Modifier.background(MaterialTheme.colorScheme.surfaceContainer)
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .padding(top = innerPadding.calculateTopPadding()),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        contentPadding =
-          PaddingValues(top = 16.dp, bottom = innerPadding.calculateBottomPadding() + 80.dp),
+      Column(
+        modifier = Modifier
+          .background(MaterialTheme.colorScheme.surfaceContainer)
+          .fillMaxWidth()
+          .padding(top = innerPadding.calculateTopPadding()),
       ) {
-        item(key = "promo") {
-          AnimatedVisibility(
-            visible = showPromo,
-            enter = fadeIn() + slideInVertically(initialOffsetY = { -it / 2 }) + expandVertically(),
-            exit = fadeOut() + shrinkVertically(),
-          ) {
-            PromoBannerGm4(
-              onDismiss = {
-                showPromo = false
-                viewModel.dataStoreRepository.addViewedPromoId(promoId = promoId)
+        // ── VENDING_MACHINE Tabs ─────────────────────────────────
+        TabRow(
+          selectedTabIndex = selectedTab,
+          containerColor = MaterialTheme.colorScheme.surfaceContainer,
+          contentColor = neonGreen,
+          indicator = { tabPositions ->
+            if (selectedTab < tabPositions.size) {
+              TabRowDefaults.SecondaryIndicator(
+                modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
+                color = neonGreen,
+              )
+            }
+          },
+        ) {
+          tabTitles.forEachIndexed { index, title ->
+            Tab(
+              selected = selectedTab == index,
+              onClick = { selectedTab = index },
+              text = {
+                Text(
+                  title,
+                  fontFamily = FontFamily.Monospace,
+                  color = if (selectedTab == index)
+                    neonGreen
+                  else
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                )
+              },
+            )
+          }
+        }
+
+        // ── Tab content ──────────────────────────────────────────
+        LazyColumn(
+          modifier = Modifier
+            .fillMaxWidth()
+            .weight(1f)
+            .padding(horizontal = 16.dp),
+          verticalArrangement = Arrangement.spacedBy(8.dp),
+          contentPadding =
+            PaddingValues(top = 16.dp, bottom = innerPadding.calculateBottomPadding() + 80.dp),
+        ) {
+          when (selectedTab) {
+            // ── Tab 0: LOCAL ─────────────────────────────────────
+            0 -> {
+              item(key = "promo") {
+                AnimatedVisibility(
+                  visible = showPromo,
+                  enter = fadeIn() + slideInVertically(initialOffsetY = { -it / 2 }) + expandVertically(),
+                  exit = fadeOut() + shrinkVertically(),
+                ) {
+                  PromoBannerGm4(
+                    onDismiss = {
+                      showPromo = false
+                      viewModel.dataStoreRepository.addViewedPromoId(promoId = promoId)
+                    }
+                  )
+                }
               }
-            )
-          }
-        }
 
-        items(builtInModels) { model ->
-          val expanded = modelItemExpandedStates.getOrDefault(model.name, true)
-          ModelItem(
-            model = model,
-            task = null,
-            modelManagerViewModel = viewModel,
-            onModelClicked = handleClickModel,
-            onBenchmarkClicked = onBenchmarkClicked,
-            expanded = expanded,
-            showBenchmarkButton = model.runtimeType == RuntimeType.LITERT_LM,
-            onExpanded = { modelItemExpandedStates[model.name] = it },
-          )
-        }
+              items(localModels) { model ->
+                val expanded = modelItemExpandedStates.getOrDefault(model.name, true)
+                ModelItem(
+                  model = model,
+                  task = null,
+                  modelManagerViewModel = viewModel,
+                  onModelClicked = handleClickModel,
+                  onBenchmarkClicked = onBenchmarkClicked,
+                  expanded = expanded,
+                  showBenchmarkButton = model.runtimeType == RuntimeType.LITERT_LM,
+                  onExpanded = { modelItemExpandedStates[model.name] = it },
+                )
+              }
 
-        // Imported models.
-        if (importedModels.isNotEmpty()) {
-          item(key = "imported_models_label") {
-            Text(
-              stringResource(R.string.model_list_imported_models_title),
-              color = MaterialTheme.colorScheme.onSurface,
-              style = MaterialTheme.typography.labelLarge,
-              modifier = Modifier.padding(horizontal = 16.dp).padding(top = 32.dp, bottom = 8.dp),
-            )
+              // Imported models in the LOCAL tab.
+              if (importedModels.isNotEmpty()) {
+                item(key = "imported_models_label") {
+                  Text(
+                    stringResource(R.string.model_list_imported_models_title),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier
+                      .padding(horizontal = 16.dp)
+                      .padding(top = 32.dp, bottom = 8.dp),
+                  )
+                }
+              }
+              items(importedModels) { model ->
+                ModelItem(
+                  model = model,
+                  task = null,
+                  modelManagerViewModel = viewModel,
+                  onModelClicked = handleClickModel,
+                  onBenchmarkClicked = onBenchmarkClicked,
+                  expanded = true,
+                  showBenchmarkButton = model.runtimeType == RuntimeType.LITERT_LM,
+                )
+              }
+            }
+
+            // ── Tab 1: CLOUD ─────────────────────────────────────
+            1 -> {
+              if (cloudModels.isEmpty()) {
+                item(key = "cloud_empty") {
+                  Text(
+                    "No cloud models available.\nCloud models (AICore / System Gemini) require a compatible Pixel device.",
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(32.dp),
+                  )
+                }
+              }
+              items(cloudModels) { model ->
+                val expanded = modelItemExpandedStates.getOrDefault(model.name, true)
+                ModelItem(
+                  model = model,
+                  task = null,
+                  modelManagerViewModel = viewModel,
+                  onModelClicked = handleClickModel,
+                  onBenchmarkClicked = onBenchmarkClicked,
+                  expanded = expanded,
+                  showBenchmarkButton = false,
+                  onExpanded = { modelItemExpandedStates[model.name] = it },
+                )
+              }
+            }
+
+            // ── Tab 2: BESPOKE ───────────────────────────────────
+            2 -> {
+              if (bespokeModels.isEmpty()) {
+                item(key = "bespoke_empty") {
+                  Text(
+                    "No bespoke models added yet.\nTap + to add an API model (Google Gemini, OpenAI-compatible, etc.)",
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(32.dp),
+                  )
+                }
+              }
+              items(bespokeModels) { model ->
+                val expanded = modelItemExpandedStates.getOrDefault(model.name, true)
+                ModelItem(
+                  model = model,
+                  task = null,
+                  modelManagerViewModel = viewModel,
+                  onModelClicked = handleClickModel,
+                  onBenchmarkClicked = onBenchmarkClicked,
+                  expanded = expanded,
+                  showBenchmarkButton = false,
+                  onExpanded = { modelItemExpandedStates[model.name] = it },
+                )
+              }
+            }
           }
-        }
-        items(importedModels) { model ->
-          ModelItem(
-            model = model,
-            task = null,
-            modelManagerViewModel = viewModel,
-            onModelClicked = handleClickModel,
-            onBenchmarkClicked = onBenchmarkClicked,
-            expanded = true,
-            showBenchmarkButton = model.runtimeType == RuntimeType.LITERT_LM,
-          )
         }
       }
 
@@ -505,6 +647,23 @@ fun GlobalModelManager(
         Button(onClick = { showUnsupportedWebModelDialog = false }) {
           Text(stringResource(R.string.ok))
         }
+      },
+    )
+  }
+
+  // Add API Model dialog (BESPOKE tab).
+  if (showAddApiModelDialog) {
+    AddApiModelDialog(
+      onDismiss = { showAddApiModelDialog = false },
+      onModelAdded = { name, endpoint, apiKey, contextWindowSize ->
+        viewModel.addBespokeApiModel(
+          modelName = name,
+          apiEndpoint = endpoint,
+          apiKey = apiKey,
+          contextWindowSize = contextWindowSize,
+        )
+        showAddApiModelDialog = false
+        scope.launch { snackbarHostState.showSnackbar("API model '$name' added") }
       },
     )
   }
