@@ -191,8 +191,17 @@ class TermuxSessionBridge(private val context: Context) {
       // Build the environment for the shell using the internal sysroot.
       val binDir = EnvironmentInstaller.binDir(context)
       val prefix = EnvironmentInstaller.prefixDir(context)
-      val basePath = "/system/bin:/system/xbin"
-      val effectivePath = if (binDir.isDirectory) "${binDir.absolutePath}:$basePath" else basePath
+      // Include $PREFIX/bin/applets so Termux busybox applets (env, sed, awk …)
+      // are visible alongside the main bin directory.
+      val appletsDir = File(binDir, "applets")
+      val effectivePath = buildString {
+        if (binDir.isDirectory) {
+          append(binDir.absolutePath)
+          if (appletsDir.isDirectory) append(":${appletsDir.absolutePath}")
+          append(":")
+        }
+        append("/system/bin:/system/xbin")
+      }
 
       val env = mutableListOf(
         "HOME=$home",

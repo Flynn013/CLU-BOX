@@ -24,7 +24,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
@@ -141,10 +143,18 @@ class TerminalSessionManager(private val context: Context) {
       val libDir = EnvironmentInstaller.libDir(context)
       val shell = EnvironmentInstaller.shellPath(context)
 
-      // Build PATH: include internal bin dir only if the bootstrap is installed.
+      // Build PATH: include internal bin and applets dirs only if the bootstrap is installed.
+      // $PREFIX/bin/applets contains Termux busybox applets required by pkg and other scripts.
       Log.d(TAG, "Checkpoint 2: Building environment (PREFIX=${prefix.absolutePath})")
-      val basePath = "/system/bin:/system/xbin:" + (System.getenv("PATH") ?: "")
-      val effectivePath = if (binDir.isDirectory) "${binDir.absolutePath}:$basePath" else basePath
+      val appletsDir = File(binDir, "applets")
+      val effectivePath = buildString {
+        if (binDir.isDirectory) {
+          append(binDir.absolutePath)
+          if (appletsDir.isDirectory) append(":${appletsDir.absolutePath}")
+          append(":")
+        }
+        append("/system/bin:/system/xbin")
+      }
 
       val env = mutableMapOf(
         "HOME" to sandboxRoot.absolutePath,
@@ -207,15 +217,24 @@ class TerminalSessionManager(private val context: Context) {
       // Pre-flight firmware bootstrap.
       runPreFlightCheck()
 
-      // Initialize the PTY bridge session for interactive/agent command piping.
-      Log.d(TAG, "Checkpoint 7: Starting PTY bridge session")
-      if (!ptyBridge.isAlive) {
-        ptyBridge.createSession(sandboxRoot)
-        if (ptyBridge.sessionInitFailed) {
-          Log.w(TAG, "PTY bridge init failed: ${ptyBridge.sessionInitError} — falling back to ProcessBuilder for sendCommand")
-          appendSystemLine("[MSTR_CTRL] PTY bridge unavailable — using process-based fallback.")
-        } else {
-          appendSystemLine("[MSTR_CTRL] PTY bridge active — xterm-256color")
+      // Defer PTY bridge creation until the bootstrap reaches a terminal state
+      // (Ready or Failed).  Creating the session immediately after startSession()
+      // would race the bootstrap download and cause the PTY to launch with
+      // /system/bin/sh (no pkg, no apt) instead of $PREFIX/bin/bash.
+      Log.d(TAG, "Checkpoint 7: Deferring PTY bridge start until bootstrap is settled")
+      scope.launch {
+        // Wait for the installer coroutine (launched by runPreFlightCheck) to finish.
+        EnvironmentInstaller.state.first {
+          it is EnvironmentInstaller.State.Ready || it is EnvironmentInstaller.State.Failed
+        }
+        if (!ptyBridge.isAlive) {
+          ptyBridge.createSession(sandboxRoot)
+          if (ptyBridge.sessionInitFailed) {
+            Log.w(TAG, "PTY bridge init failed: ${ptyBridge.sessionInitError} — falling back to ProcessBuilder for sendCommand")
+            appendSystemLine("[MSTR_CTRL] PTY bridge unavailable — using process-based fallback.")
+          } else {
+            appendSystemLine("[MSTR_CTRL] PTY bridge active — xterm-256color")
+          }
         }
       }
     } catch (e: SecurityException) {
@@ -258,6 +277,25 @@ class TerminalSessionManager(private val context: Context) {
   fun sendCommand(command: String, visible: Boolean = true): String {
     if (!isSessionAlive) {
       startSession()
+    }
+
+    // If the bootstrap installer is actively running, block until it reaches
+    // a terminal state before dispatching the command.  This prevents commands
+    // from landing in /system/bin/sh while the Termux sysroot is downloading.
+    val installerState = EnvironmentInstaller.state.value
+    if (installerState is EnvironmentInstaller.State.Downloading ||
+        installerState is EnvironmentInstaller.State.Extracting ||
+        installerState is EnvironmentInstaller.State.FixingPermissions) {
+      runBlocking(Dispatchers.IO) {
+        EnvironmentInstaller.state.first {
+          it is EnvironmentInstaller.State.Ready || it is EnvironmentInstaller.State.Failed
+        }
+      }
+      // Bootstrap just completed — if the deferred PTY coroutine hasn't run yet,
+      // start the session with the correct bash shell immediately.
+      if (!ptyBridge.isAlive && EnvironmentInstaller.state.value is EnvironmentInstaller.State.Ready) {
+        ptyBridge.createSession(sandboxRoot)
+      }
     }
 
     if (visible) {
@@ -380,8 +418,14 @@ class TerminalSessionManager(private val context: Context) {
       val prefix = EnvironmentInstaller.prefixDir(context)
       val libDir = EnvironmentInstaller.libDir(context)
       if (binDir.isDirectory) {
+        val appletsDir = File(binDir, "applets")
         val basePath = pb.environment()["PATH"] ?: "/system/bin:/system/xbin"
-        pb.environment()["PATH"] = "${binDir.absolutePath}:$basePath"
+        val fullPath = buildString {
+          append(binDir.absolutePath)
+          if (appletsDir.isDirectory) append(":${appletsDir.absolutePath}")
+          append(":$basePath")
+        }
+        pb.environment()["PATH"] = fullPath
         pb.environment()["PREFIX"] = prefix.absolutePath
         pb.environment()["LD_LIBRARY_PATH"] = libDir.absolutePath
       }
@@ -457,8 +501,14 @@ class TerminalSessionManager(private val context: Context) {
       val prefix = EnvironmentInstaller.prefixDir(context)
       val libDir = EnvironmentInstaller.libDir(context)
       if (binDir.isDirectory) {
+        val appletsDir = File(binDir, "applets")
         val basePath = pb.environment()["PATH"] ?: "/system/bin:/system/xbin"
-        pb.environment()["PATH"] = "${binDir.absolutePath}:$basePath"
+        val fullPath = buildString {
+          append(binDir.absolutePath)
+          if (appletsDir.isDirectory) append(":${appletsDir.absolutePath}")
+          append(":$basePath")
+        }
+        pb.environment()["PATH"] = fullPath
         pb.environment()["PREFIX"] = prefix.absolutePath
         pb.environment()["LD_LIBRARY_PATH"] = libDir.absolutePath
       }
