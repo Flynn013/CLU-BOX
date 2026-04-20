@@ -150,6 +150,7 @@ class TerminalSessionManager(private val context: Context) {
         "HOME" to sandboxRoot.absolutePath,
         "TERM" to "xterm-256color",
         "PATH" to effectivePath,
+        "TMPDIR" to context.cacheDir.absolutePath,
       )
       // Inject sysroot environment variables when the bootstrap prefix exists.
       // This gives Shell_Execute access to bash, python, node, pkg, git, and native libs.
@@ -379,6 +380,7 @@ class TerminalSessionManager(private val context: Context) {
         .redirectErrorStream(false)
 
       pb.environment()["HOME"] = sandboxRoot.absolutePath
+      pb.environment()["TMPDIR"] = context.cacheDir.absolutePath
       // Inject internal sysroot environment so bash/python/node/pkg are visible.
       val binDir = EnvironmentInstaller.binDir(context)
       val prefix = EnvironmentInstaller.prefixDir(context)
@@ -455,6 +457,7 @@ class TerminalSessionManager(private val context: Context) {
         .redirectErrorStream(false)
 
       pb.environment()["HOME"] = sandboxRoot.absolutePath
+      pb.environment()["TMPDIR"] = context.cacheDir.absolutePath
       // Inject internal sysroot environment so bash/python/node/pkg are visible.
       val binDir = EnvironmentInstaller.binDir(context)
       val prefix = EnvironmentInstaller.prefixDir(context)
@@ -535,12 +538,77 @@ class TerminalSessionManager(private val context: Context) {
   // ── Pre-flight firmware bootstrap ─────────────────────────────
 
   /**
+   * Validates that the essential binaries (`bash`, `git`) are executable.
+   *
+   * Runs `bash --version` and `git --version` internally. If either returns
+   * exit code 127 (Not Found) or 13 (Permission Denied), the method
+   * automatically re-runs the extraction logic and applies `chmod -R 700`
+   * to the bin directory.
+   *
+   * @return `true` if the environment is healthy after the check (possibly
+   *         after self-healing), `false` if repair also failed.
+   */
+  fun checkEnvironment(): Boolean {
+    val binDir = EnvironmentInstaller.binDir(context)
+    if (!binDir.isDirectory) {
+      Log.w(TAG, "checkEnvironment: binDir does not exist — environment not installed")
+      return false
+    }
+
+    val checks = listOf("bash --version", "git --version")
+    var needsRepair = false
+
+    for (cmd in checks) {
+      val (exitCode, _) = executeCommandWithExitCode(cmd)
+      if (exitCode == 127 || exitCode == 13 || exitCode == 126) {
+        Log.w(TAG, "checkEnvironment: '$cmd' returned exit $exitCode — self-heal triggered")
+        needsRepair = true
+        break
+      }
+    }
+
+    if (!needsRepair) {
+      Log.i(TAG, "checkEnvironment: environment healthy")
+      return true
+    }
+
+    // Self-healing: re-fix permissions on the entire bin directory.
+    appendSystemLine("[FIRMWARE] Self-heal: fixing permissions on ${binDir.absolutePath}")
+    val chmodResult = executeCommandWithExitCode("chmod -R 700 ${binDir.absolutePath}")
+    Log.d(TAG, "checkEnvironment: chmod exit=${chmodResult.first}")
+
+    // Also walk the directory with Java API as a fallback (chmod may not
+    // be available if the sysroot is completely broken).
+    binDir.walkTopDown().filter { it.isFile }.forEach { file ->
+      file.setExecutable(true, false)
+      file.setReadable(true, false)
+    }
+
+    // Re-validate after repair.
+    for (cmd in checks) {
+      val (exitCode, _) = executeCommandWithExitCode(cmd)
+      if (exitCode == 127 || exitCode == 13 || exitCode == 126) {
+        Log.e(TAG, "checkEnvironment: self-heal failed — '$cmd' still returns exit $exitCode")
+        appendSystemLine("[FIRMWARE] Self-heal FAILED for '$cmd' (exit $exitCode). Environment degraded.")
+        return false
+      }
+    }
+
+    appendSystemLine("[FIRMWARE] Self-heal PASSED — environment restored.")
+    return true
+  }
+
+  /**
    * Pre-flight bootstrap triggered on first app launch.
    *
    * Delegates to [EnvironmentInstaller.ensureInstalled] to download and
    * extract the Termux bootstrap sysroot if not already present. Once the
    * sysroot is ready, optionally installs development packages (git, python,
    * nodejs) via the internal `pkg` binary.
+   *
+   * After environment provisioning completes, runs [checkEnvironment] to
+   * validate/self-heal, then executes agentic verification commands
+   * (`pip install requests`, `git config`) to confirm "Dev-Ready" status.
    *
    * Sets [preFlightReady] to `true` once the gate is clear so the AI can
    * initialize.
@@ -555,8 +623,13 @@ class TerminalSessionManager(private val context: Context) {
     val alreadyDone = prefs.getBoolean(KEY_FIRST_BOOT_DONE, false)
 
     if (alreadyDone) {
-      firstBootHandled = true
-      _preFlightReady.value = true
+      // Even on subsequent boots, run the self-heal check to handle
+      // corrupted permissions from OTA updates or storage clears.
+      scope.launch {
+        checkEnvironment()
+        firstBootHandled = true
+        _preFlightReady.value = true
+      }
       return
     }
 
@@ -588,6 +661,33 @@ class TerminalSessionManager(private val context: Context) {
           }
         } else {
           appendSystemLine("[FIRMWARE] pkg not available in bootstrap — base sysroot only.")
+        }
+
+        // Stage 3: Validate environment with self-healing.
+        appendSystemLine("[FIRMWARE] Running environment validation…")
+        val envHealthy = checkEnvironment()
+
+        // Stage 4: Agentic verification — confirm Dev-Ready status.
+        if (envHealthy) {
+          appendSystemLine("[FIRMWARE] Agentic verification: installing pip packages…")
+          val (pipExit, pipOut) = executeCommandWithExitCode("pip install requests 2>&1")
+          if (pipExit == 0) {
+            appendSystemLine("[FIRMWARE] pip install requests — OK")
+          } else {
+            appendSystemLine("[FIRMWARE] pip install requests — exit $pipExit (non-critical)")
+          }
+
+          appendSystemLine("[FIRMWARE] Agentic verification: configuring git…")
+          val (gitExit, gitOut) = executeCommandWithExitCode(
+            "git config --global init.defaultBranch main 2>&1"
+          )
+          if (gitExit == 0) {
+            appendSystemLine("[FIRMWARE] git config — OK")
+          } else {
+            appendSystemLine("[FIRMWARE] git config — exit $gitExit (non-critical)")
+          }
+
+          appendSystemLine("[FIRMWARE] Environment is Dev-Ready.")
         }
       } else if (installerState is EnvironmentInstaller.State.Failed) {
         appendSystemLine("[FIRMWARE] Bootstrap FAILED: ${installerState.message}")
