@@ -345,18 +345,36 @@ object EnvironmentInstaller {
   }
 
   /**
-   * Makes all files under `usr/bin/` and `usr/libexec/` executable.
+   * Makes all files under `bin/` and `libexec/` executable.
    *
-   * The zip format does not preserve Unix permissions, so every binary
-   * needs an explicit `chmod +x` after extraction.
+   * The bootstrap zip extracts to a flat structure (`filesDir/bin/`,
+   * `filesDir/libexec/`), **not** under a `usr/` prefix. The zip format
+   * does not preserve Unix permissions, so every binary needs an explicit
+   * `chmod 0755` after extraction.
+   *
+   * Uses [Os.chmod] for aggressive, world-executable permission setting
+   * to avoid Exit 126 ("Permission Denied") errors at runtime.
    */
   private fun fixPermissions(context: Context) {
-    val dirs = listOf(binDir(context), File(prefixDir(context), "libexec"))
+    // Target the flat extraction layout: filesDir/bin/ and filesDir/libexec/.
+    val dirs = listOf(
+      File(context.filesDir, "bin"),
+      File(context.filesDir, "libexec"),
+      // Also cover the usr/-prefixed paths in case the zip contains both layouts.
+      binDir(context),
+      File(prefixDir(context), "libexec"),
+    )
     var count = 0
     for (dir in dirs) {
       if (!dir.isDirectory) continue
       dir.walkTopDown().filter { it.isFile }.forEach { file ->
-        if (file.setExecutable(true, false)) count++
+        try {
+          Os.chmod(file.absolutePath, 0b111_101_101) // 0755
+          count++
+        } catch (e: Exception) {
+          // Fallback to Java API if Os.chmod fails (e.g. on older API levels).
+          if (file.setExecutable(true, false)) count++
+        }
       }
     }
     Log.d(TAG, "Made $count files executable")
