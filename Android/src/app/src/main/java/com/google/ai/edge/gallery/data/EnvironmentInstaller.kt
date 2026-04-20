@@ -209,6 +209,7 @@ object EnvironmentInstaller {
     // Manually follow redirects to handle cross-host HTTPS→HTTPS hops
     // (e.g. github.com → objects.githubusercontent.com).
     while (true) {
+      if (redirectCount > 5) throw RuntimeException("Too many redirects")
       Log.d("CLU_BOOTSTRAP", "Downloading from: $currentUrl")
       connection = currentUrl.openConnection() as HttpURLConnection
       connection.instanceFollowRedirects = false
@@ -231,7 +232,6 @@ object EnvironmentInstaller {
           Log.d("CLU_BOOTSTRAP", "Redirect #$redirectCount → $location")
           currentUrl = URL(location)
           redirectCount++
-          if (redirectCount > 5) throw RuntimeException("Too many redirects")
         }
 
         HttpURLConnection.HTTP_OK -> {
