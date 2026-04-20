@@ -49,6 +49,12 @@ private const val READER_THREAD_JOIN_TIMEOUT_MS = 5_000L
 /** Maximum number of lines retained in the visible output buffer to limit GC pressure. */
 private const val MAX_OUTPUT_LINES = 2000
 
+/** Polling interval (ms) when waiting for command output from the PTY. */
+private const val PTY_POLL_INTERVAL_MS = 50L
+
+/** Maximum ms of silence before we consider a PTY command complete. */
+private const val PTY_SILENCE_THRESHOLD_MS = 300L
+
 /**
  * Represents a single line of terminal output, tagged by source.
  */
@@ -84,6 +90,17 @@ class TerminalSessionManager(private val context: Context) {
   val sandboxRoot: File by lazy {
     File(context.filesDir, "clu_file_box").also { it.mkdirs() }
   }
+
+  // ── PTY bridge (preferred execution path) ─────────────────────
+  /**
+   * The [TermuxSessionBridge] provides a PTY-backed shell session.
+   * When available, [sendCommand] pipes directly into the PTY and
+   * captures output by waiting for silence or the prompt delimiter.
+   */
+  val ptyBridge: TermuxSessionBridge by lazy { TermuxSessionBridge(context) }
+
+  /** True if the PTY bridge session is alive and usable. */
+  val isPtyAlive: Boolean get() = ptyBridge.isAlive
 
   // ── Observable terminal output buffer ────────────────────────
   private val _outputLines = MutableStateFlow<List<TerminalLine>>(emptyList())
@@ -131,7 +148,7 @@ class TerminalSessionManager(private val context: Context) {
 
       val env = mutableMapOf(
         "HOME" to sandboxRoot.absolutePath,
-        "TERM" to "dumb",
+        "TERM" to "xterm-256color",
         "PATH" to effectivePath,
       )
       // Inject sysroot environment variables when the bootstrap prefix exists.
@@ -188,6 +205,18 @@ class TerminalSessionManager(private val context: Context) {
       Log.d(TAG, "Checkpoint 6: Session fully started — running pre-flight check")
       // Pre-flight firmware bootstrap.
       runPreFlightCheck()
+
+      // Initialize the PTY bridge session for interactive/agent command piping.
+      Log.d(TAG, "Checkpoint 7: Starting PTY bridge session")
+      if (!ptyBridge.isAlive) {
+        ptyBridge.createSession(sandboxRoot)
+        if (ptyBridge.sessionInitFailed) {
+          Log.w(TAG, "PTY bridge init failed: ${ptyBridge.sessionInitError} — falling back to ProcessBuilder for sendCommand")
+          appendSystemLine("[MSTR_CTRL] PTY bridge unavailable — using process-based fallback.")
+        } else {
+          appendSystemLine("[MSTR_CTRL] PTY bridge active — xterm-256color")
+        }
+      }
     } catch (e: SecurityException) {
       Log.e(TAG, "startSession: blocked by Android security (W^X / SELinux)", e)
       appendSystemLine("[MSTR_CTRL] ERROR: Terminal execution blocked by Android OS Security (W^X). Shell unavailable.")
@@ -204,7 +233,16 @@ class TerminalSessionManager(private val context: Context) {
   }
 
   /**
-   * Sends a command into the persistent shell session.
+   * Sends a command into the terminal session.
+   *
+   * **Execution strategy (per the CLU/BOX Terminal Architecture):**
+   * 1. If the [ptyBridge] is alive, pipe the command directly into the PTY's
+   *    outputStream followed by `\n`. Wait for the PTY inputStream to go silent
+   *    (no new data for [PTY_SILENCE_THRESHOLD_MS]) or hit a prompt delimiter
+   *    (`$ `) before capturing the buffer and returning the output.
+   * 2. If the PTY is unavailable (e.g. W^X block), fall back to
+   *    [executeCommandInSandbox] which uses a one-shot process with strict timeout.
+   *
    * The command text and its output are recorded in [outputLines].
    *
    * @param command  Shell command string.
@@ -225,10 +263,13 @@ class TerminalSessionManager(private val context: Context) {
       appendLine(TerminalLine("$ $command", LineSource.STDIN))
     }
 
-    // Use the existing executeCommand for isolated, timeout-safe execution.
-    // This avoids the complexity of demuxing the persistent session's output
-    // per-command while still honouring the 10-second timeout contract.
-    val output = executeCommandInSandbox(command)
+    // Prefer the PTY bridge (true terminal piping) when available.
+    val output = if (ptyBridge.isAlive) {
+      sendCommandViaPty(command)
+    } else {
+      // Fallback: isolated, timeout-safe one-shot execution.
+      executeCommandInSandbox(command)
+    }
 
     if (visible) {
       output.lines().forEach { line ->
@@ -237,6 +278,91 @@ class TerminalSessionManager(private val context: Context) {
     }
 
     return output
+  }
+
+  /**
+   * Pipes [command] into the PTY session's stdin and waits for the output
+   * to settle (silence detection) or hit the prompt delimiter.
+   *
+   * The PTY bridge's [TerminalSession] emulator transcript is read to
+   * capture the response. We snapshot the transcript before writing, then
+   * poll until new lines stop appearing (silence) or total wall-time exceeds
+   * [CMD_TIMEOUT_SECONDS].
+   *
+   * This implements the `[ACTION: bash]` → wait-for-silence → `[OBSERVE]`
+   * state machine loop required by the CLU/BOX terminal architecture.
+   */
+  private fun sendCommandViaPty(command: String): String {
+    val session = ptyBridge.terminalSession ?: return executeCommandInSandbox(command)
+    val emulator = session.emulator ?: return executeCommandInSandbox(command)
+
+    // Snapshot current screen row count before injecting the command.
+    val preRows = emulator.screen.activeTranscriptRows + emulator.mRows
+
+    // Pipe the command directly into the PTY outputStream followed by \n.
+    ptyBridge.sendCommand(command)
+
+    // Wait for output to settle: poll the emulator transcript for new content.
+    val deadlineMs = System.currentTimeMillis() + (CMD_TIMEOUT_SECONDS * 1000)
+    var lastChangeMs = System.currentTimeMillis()
+    var lastRowCount = preRows
+
+    while (System.currentTimeMillis() < deadlineMs) {
+      Thread.sleep(PTY_POLL_INTERVAL_MS)
+
+      val currentRows = emulator.screen.activeTranscriptRows + emulator.mRows
+      if (currentRows != lastRowCount) {
+        lastRowCount = currentRows
+        lastChangeMs = System.currentTimeMillis()
+        continue
+      }
+
+      // Check if silence threshold exceeded — output has settled.
+      if (System.currentTimeMillis() - lastChangeMs >= PTY_SILENCE_THRESHOLD_MS) {
+        // Also check for prompt delimiter on the last visible line.
+        val lastLine = getLastVisibleLine(emulator)
+        if (lastLine.trimEnd().endsWith("$") || lastLine.contains("CLU/BOX $")) {
+          break
+        }
+        // Even without a prompt match, silence means command finished.
+        break
+      }
+    }
+
+    // Capture the new lines added after the command was sent.
+    val postRows = emulator.screen.activeTranscriptRows + emulator.mRows
+    val newLineCount = postRows - preRows
+    if (newLineCount <= 0) return "(no output)"
+
+    val sb = StringBuilder()
+    // Read from the transcript — lines are zero-indexed from the top.
+    // The visible rows are the last mRows of the transcript.
+    val screen = emulator.screen
+    val totalRows = screen.activeTranscriptRows + emulator.mRows
+    val startRow = preRows // row index where new output begins
+    for (i in startRow until totalRows) {
+      val line = screen.getTranscriptLineText(i - screen.activeTranscriptRows)
+      // Skip the prompt-only line at the end.
+      if (i == totalRows - 1 && (line.trimEnd().endsWith("$") || line.contains("CLU/BOX $"))) {
+        continue
+      }
+      if (sb.isNotEmpty()) sb.append("\n")
+      sb.append(line.trimEnd())
+    }
+
+    val result = sb.toString()
+    return if (result.isBlank()) "(no output)" else result
+  }
+
+  /**
+   * Returns the text content of the last visible line in the emulator.
+   */
+  private fun getLastVisibleLine(emulator: com.termux.terminal.TerminalEmulator): String {
+    return try {
+      val screen = emulator.screen
+      val lastRowIndex = emulator.mRows - 1
+      screen.getTranscriptLineText(lastRowIndex)
+    } catch (_: Exception) { "" }
   }
 
   /**
@@ -390,13 +516,14 @@ class TerminalSessionManager(private val context: Context) {
     }
   }
 
-  /** Destroys the persistent session. */
+  /** Destroys the persistent session and the PTY bridge. */
   fun destroySession() = sessionLock.withLock {
     try { stdinWriter?.close() } catch (_: Exception) {}
     process?.destroyForcibly()
     process = null
     stdinWriter = null
     isSessionAlive = false
+    ptyBridge.destroySession()
     appendSystemLine("[MSTR_CTRL] Session destroyed.")
   }
 
