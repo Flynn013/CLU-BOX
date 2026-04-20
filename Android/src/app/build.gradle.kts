@@ -67,6 +67,10 @@ android {
     compose = true
     buildConfig = true
   }
+  lint {
+    // targetSdk 28 is intentional (Termux W^X bypass); suppress the Play Store lint error.
+    disable += "ExpiredTargetSdkVersion"
+  }
 }
 
 kapt {
