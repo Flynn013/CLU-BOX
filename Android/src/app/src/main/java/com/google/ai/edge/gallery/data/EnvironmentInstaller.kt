@@ -275,7 +275,8 @@ object EnvironmentInstaller {
       while (entry != null) {
         val outFile = File(targetDir, entry.name)
         // Guard against zip-slip path traversal attacks.
-        if (!outFile.canonicalPath.startsWith(targetDir.canonicalPath)) {
+        val targetCanonical = targetDir.canonicalPath + File.separator
+        if (!outFile.canonicalPath.startsWith(targetCanonical)) {
           throw SecurityException("Zip entry outside target dir: ${entry.name}")
         }
         if (entry.isDirectory) {
