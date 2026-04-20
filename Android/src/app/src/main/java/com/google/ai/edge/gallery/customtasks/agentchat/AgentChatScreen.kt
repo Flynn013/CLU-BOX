@@ -694,7 +694,6 @@ private fun resetSessionWithCurrentSkills(
     systemInstruction =
       skillManagerViewModel.getSystemPrompt(
         curSystemPrompt,
-        toolsSummary = agentTools.getToolsSummary(),
       ),
     tools = listOf(tool(agentTools)),
     supportImage = true,

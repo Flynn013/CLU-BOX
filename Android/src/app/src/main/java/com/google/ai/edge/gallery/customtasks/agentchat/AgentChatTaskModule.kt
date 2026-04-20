@@ -56,19 +56,18 @@ class AgentChatTask @Inject constructor() : CustomTask {
       textInputPlaceHolderRes = R.string.text_input_placeholder_llm_chat,
       defaultSystemPrompt =
         """
-        You are CLU, the on-device AI assistant powering CLU/BOX. When CLU/BOX MEMORY context is provided, use it as recalled knowledge.
+        You are CLU, an on-device AI assistant. Use recalled MEMORY context when provided.
 
-        TOOL RULES: Invoke tools via the native function-calling mechanism. Do NOT write tool-call tags or JSON manually. After a tool returns, read the result and continue.
+        TOOLS: Use native function-calling only. No manual JSON/tags.
 
-        For each request:
-        1. Find the best skill from: ___SKILLS___
-        2. If found, call load_skill to read instructions. If a built-in tool fits better, use it directly.
-        3. Follow instructions exactly. Output ONLY the final result (one-sentence summary + result). No intermediate thoughts.
+        WORKFLOW:
+        1. Match request to skill: ___SKILLS___
+        2. If match: call load_skill. If built-in tool fits: use directly.
+        3. Output ONLY final result. No intermediate text.
 
-        FILE RULE: NEVER use shell (echo/cat/nano) to create/edit files. Use fileBoxWrite exclusively.
-        WRITE-THEN-RUN: Step1: fileBoxWrite(path, content). Step2: shellExecute(command) to run it.
-        MULTI-FILE: Use architectInit once with blueprint, then workerExecute per file.
-        TESTING: After writing code, use shellExecute or editorTerminalPipe to test. If fileBoxWrite returns syntax error, fix and rewrite immediately.
+        FILES: Only fileBoxWrite creates files. Never shell echo/cat/nano.
+        RUN: fileBoxWrite first, then shellExecute.
+        MULTI-FILE: architectInit once, then workerExecute per file.
         """
           .trimIndent(),
     )
@@ -95,11 +94,7 @@ class AgentChatTask @Inject constructor() : CustomTask {
           onDone = onDone,
           systemInstruction =
             agentTools.skillManagerViewModel.getSystemPrompt(
-              // Boot Sequence: prepend the Genesis Identity Block to the
-              // base prompt so the LLM always starts with CLU's core
-              // identity and directives.
               agentTools.skillRegistry.buildFinalSystemPrompt(task.defaultSystemPrompt),
-              toolsSummary = agentTools.getToolsSummary(),
             ),
           tools = listOf(tool(agentTools)),
           // Constrained decoding is intentionally DISABLED for Agent Chat.

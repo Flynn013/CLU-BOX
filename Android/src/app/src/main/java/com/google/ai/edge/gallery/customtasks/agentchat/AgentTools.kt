@@ -265,13 +265,6 @@ class AgentTools() : ToolSet {
   val skillRegistry: SkillRegistry by lazy { SkillRegistry(this) }
 
   /**
-   * Returns a formatted multi-line string listing every native tool with its
-   * description. Intended for injection into the system prompt via the
-   * `___TOOLS___` placeholder. Delegates to [SkillRegistry.getToolsSummary].
-   */
-  fun getToolsSummary(): String = skillRegistry.getToolsSummary()
-
-  /**
    * Returns metadata-only [CluSkill] instances for all `@Tool` methods that
    * do NOT have a dedicated [CluSkill] class (i.e. everything except
    * [ShellExecuteSkill] and [FileBoxWriteSkill]).
@@ -323,9 +316,9 @@ class AgentTools() : ToolSet {
   }
 
   /** Loads skill. */
-  @Tool(description = "Loads a skill.")
+  @Tool(description = "Load skill instructions by name.")
   fun loadSkill(
-    @ToolParam(description = "The name of the skill to load.") skillName: String
+    @ToolParam(description = "Skill name.") skillName: String
   ): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
       try {
@@ -366,13 +359,13 @@ class AgentTools() : ToolSet {
   }
 
   /** Call JS skill */
-  @Tool(description = "Runs JS script")
+  @Tool(description = "Run JS skill script.")
   fun runJs(
-    @ToolParam(description = "The name of skill") skillName: String,
-    @ToolParam(description = "The script name to run. Use 'index.html' if not provided by user")
+    @ToolParam(description = "Skill name.") skillName: String,
+    @ToolParam(description = "Script name (default: index.html).")
     scriptName: String,
     @ToolParam(
-      description = "The data to pass to the script. Use empty string if not provided by user"
+      description = "Data to pass. Empty string if none."
     )
     data: String,
   ): Map<String, Any> {
@@ -504,15 +497,10 @@ class AgentTools() : ToolSet {
     })
   }
 
-  @Tool(
-    description =
-      "Run an Android intent. It is used to interact with the app to perform certain actions."
-  )
+  @Tool(description = "Fire Android intent.")
   fun runIntent(
-    @ToolParam(description = "The intent to run.") intent: String,
-    @ToolParam(
-      description = "A JSON string containing the parameter values required for the intent."
-    )
+    @ToolParam(description = "Intent name.") intent: String,
+    @ToolParam(description = "JSON parameters.")
     parameters: String,
   ): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
@@ -552,9 +540,9 @@ class AgentTools() : ToolSet {
    * Returns all neurons whose label or content contains [query] (case-insensitive). If [query] is
    * empty, all neurons are returned.
    */
-  @Tool(description = "Searches the CLU/BOX BrainBox knowledge graph for neurons matching a query. Returns label, type, and content for each matching neuron.")
+  @Tool(description = "Search BrainBox neurons by keyword.")
   fun queryBrain(
-    @ToolParam(description = "The search term. Pass an empty string to retrieve all neurons.") query: String,
+    @ToolParam(description = "Search term. Empty=all.") query: String,
   ): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
       try {
@@ -585,11 +573,11 @@ class AgentTools() : ToolSet {
    *
    * If a neuron with the same [label] already exists it is overwritten.
    */
-  @Tool(description = "Saves a neuron to the CLU/BOX BrainBox knowledge graph. Use this to remember facts, preferences, context, or any information the user wants stored persistently.")
+  @Tool(description = "Save neuron to BrainBox.")
   fun saveBrainNeuron(
-    @ToolParam(description = "A short, unique label identifying this memory (e.g. 'User preference: dark mode').") label: String,
-    @ToolParam(description = "The category or type of memory (e.g. 'preference', 'fact', 'context', 'task').") type: String,
-    @ToolParam(description = "The full content to store.") content: String,
+    @ToolParam(description = "Unique label.") label: String,
+    @ToolParam(description = "Category (preference/fact/context/task).") type: String,
+    @ToolParam(description = "Content to store.") content: String,
   ): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
       try {
@@ -624,13 +612,9 @@ class AgentTools() : ToolSet {
    * Embeds the [search_query], runs cosine similarity against all stored
    * neuron embeddings, and returns the top-3 most relevant neurons.
    */
-  @Tool(
-    description = "Semantic search: embed a query and find the top-3 most relevant neurons " +
-      "in the BrainBox knowledge graph via cosine similarity. Returns the title, type, " +
-      "ground_truth (content), synapses, and similarity score for each match."
-  )
+  @Tool(description = "Semantic vector search: top-3 BrainBox neurons by similarity.")
   fun vectorRecall(
-    @ToolParam(description = "The natural-language search query to embed and match against stored memories.")
+    @ToolParam(description = "Search query.")
     search_query: String,
   ): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
@@ -718,19 +702,15 @@ class AgentTools() : ToolSet {
    * Allows the AI to autonomously write a new memory to BrainBox.
    * The text is automatically embedded for future vector recall.
    */
-  @Tool(
-    description = "Autonomously write a memory to BrainBox. Kotlin intercepts the data, " +
-      "generates a vector embedding, saves it to the database, and returns a success " +
-      "resolution token. Use this to remember facts, decisions, or context."
-  )
+  @Tool(description = "Write vectorised memory to BrainBox. Auto-embeds.")
   fun commitMemory(
-    @ToolParam(description = "Short, unique title for this memory (e.g. 'User prefers Python').")
+    @ToolParam(description = "Unique title.")
     title: String,
-    @ToolParam(description = "Comma-separated [[Wiki-Links]] connecting this memory to related neurons (e.g. '[[Python]],[[User_Prefs]]'). Pass empty string if none.")
+    @ToolParam(description = "Comma-separated [[Wiki-Links]]. Empty if none.")
     synapses: String,
-    @ToolParam(description = "The verified ground truth content to store — the actual knowledge.")
+    @ToolParam(description = "Ground truth content.")
     ground_truth: String,
-    @ToolParam(description = "Incorrect assumptions or dead-end paths to avoid. Pass empty string if none.")
+    @ToolParam(description = "False paths to avoid. Empty if none.")
     false_paths: String,
   ): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
@@ -804,10 +784,7 @@ class AgentTools() : ToolSet {
    * of the current file/folder tree. Used by the AI to orient itself before
    * reading, writing, or navigating the workspace.
    */
-  @Tool(
-    description = "Scans the clu_file_box workspace and returns a JSON tree of all files " +
-      "and folders. Use this to orient yourself before reading or writing files."
-  )
+  @Tool(description = "JSON tree of clu_file_box workspace.")
   fun workspaceMap(): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
       try {
@@ -844,18 +821,11 @@ class AgentTools() : ToolSet {
    * Nested folders are created automatically — include them in the file_path
    * (e.g. "new_project/backend/src/api.js").
    */
-  @Tool(
-    description = "The ONLY permitted tool for creating, writing, or overwriting files on disk. " +
-      "Pass the relative path and the raw file content. " +
-      "You can create nested folders automatically by including them in the file_path " +
-      "(e.g. 'new_project/folder/file.txt'). Only text-based extensions are allowed " +
-      "(e.g. .txt, .kt, .js, .json, .md, .html, .py, .ts, .css, .xml, .yaml). " +
-      "NEVER use shell commands (echo, cat, nano) to write files — always use this tool."
-  )
+  @Tool(description = "Write/overwrite file in FILE_BOX. ONLY way to create files.")
   fun fileBoxWrite(
-    @ToolParam(description = "Relative path inside FILE_BOX (e.g. 'my_app/src/main.kt'). Nested directories are auto-created.")
+    @ToolParam(description = "Relative path. Nested dirs auto-created.")
     file_path: String,
-    @ToolParam(description = "The full text/code content to write to the file.")
+    @ToolParam(description = "File content.")
     content: String,
   ): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
@@ -973,12 +943,9 @@ class AgentTools() : ToolSet {
   /**
    * Read a file from the CLU/BOX FILE_BOX workspace.
    */
-  @Tool(
-    description = "Reads a text or code file from the CLU/BOX FILE_BOX workspace. " +
-      "Returns the file content as a string."
-  )
+  @Tool(description = "Read file from FILE_BOX.")
   fun fileBoxRead(
-    @ToolParam(description = "Relative path of the file to read inside FILE_BOX (e.g. 'my_app/src/main.kt').")
+    @ToolParam(description = "Relative path in FILE_BOX.")
     file_path: String,
   ): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
@@ -1030,16 +997,13 @@ class AgentTools() : ToolSet {
    * Reads a specific range of lines from a file, allowing the LLM to paginate
    * through large outputs without consuming the entire context window.
    */
-  @Tool(
-    description = "Reads a specific chunk of a file by line numbers to save memory. " +
-      "Use this if a file or log output was truncated."
-  )
+  @Tool(description = "Read line range from file. Use for truncated output.")
   fun fileBoxReadLines(
-    @ToolParam(description = "Relative path inside FILE_BOX (e.g. 'BrainBox/temp_out/spill_123.txt').")
+    @ToolParam(description = "Relative path in FILE_BOX.")
     file_path: String,
-    @ToolParam(description = "0-based start line number (inclusive).")
+    @ToolParam(description = "Start line (0-based, inclusive).")
     start_line: Int,
-    @ToolParam(description = "0-based end line number (exclusive).")
+    @ToolParam(description = "End line (0-based, exclusive).")
     end_line: Int,
   ): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
@@ -1095,14 +1059,11 @@ class AgentTools() : ToolSet {
    * Scans a file for a keyword and returns matching lines with ±2 lines of
    * surrounding context, similar to `grep -C 2`.
    */
-  @Tool(
-    description = "Searches a file for a keyword or error code and returns the matching lines " +
-      "plus 2 lines of context above and below each match."
-  )
+  @Tool(description = "Grep file for keyword with ±2 lines context.")
   fun brainBoxGrep(
-    @ToolParam(description = "Relative path inside FILE_BOX (e.g. 'BrainBox/temp_out/spill_123.txt').")
+    @ToolParam(description = "Relative path in FILE_BOX.")
     file_path: String,
-    @ToolParam(description = "The keyword or error string to search for (case-insensitive).")
+    @ToolParam(description = "Search keyword (case-insensitive).")
     keyword: String,
   ): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
@@ -1203,15 +1164,11 @@ class AgentTools() : ToolSet {
    * as a system-level instruction, creating a continuous work loop until the task queue
    * is empty (status = "complete").
    */
-  @Tool(
-    description = "Updates the autonomous task queue. Use status='pending' and provide " +
-      "a next_task_description to continue working on a multi-step project without user " +
-      "prompting. Use status='complete' when all tasks are finished."
-  )
+  @Tool(description = "Update task queue: pending+next_task or complete.")
   fun taskQueueUpdate(
-    @ToolParam(description = "Description of the next task to perform. Only used when status is 'pending'.")
+    @ToolParam(description = "Next task description (for pending).")
     next_task_description: String,
-    @ToolParam(description = "Either 'pending' (more work to do) or 'complete' (all tasks finished).")
+    @ToolParam(description = "pending or complete.")
     status: String,
   ): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
@@ -1270,18 +1227,11 @@ class AgentTools() : ToolSet {
    * 2. Queues a pending task that instructs the worker to begin executing
    *    the first pending file from the blueprint.
    */
-  @Tool(
-    description = "Architect phase: commits a project blueprint. Call this ONCE at the start of " +
-      "a multi-file project. Provide the full project goal and a markdown blueprint that lists " +
-      "every file to create with its path and status (PENDING/DONE). After this call the worker " +
-      "phase begins automatically."
-  )
+  @Tool(description = "Planner: commit project blueprint once. Starts worker phase.")
   fun architectInit(
-    @ToolParam(description = "High-level description of the project goal.")
+    @ToolParam(description = "Project goal.")
     project_goal: String,
-    @ToolParam(description = "Full markdown blueprint listing every file to generate. " +
-      "Each file entry should be on its own line in the format: '- [ ] path/to/file.ext' " +
-      "(PENDING) or '- [x] path/to/file.ext' (DONE).")
+    @ToolParam(description = "Markdown blueprint: '- [ ] path' per file.")
     blueprint_markdown: String,
   ): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
@@ -1348,17 +1298,13 @@ class AgentTools() : ToolSet {
    * 2. Reads blueprint.md, marks the target file as DONE.
    * 3. If [is_project_finished] is false, queues the next pending file.
    */
-  @Tool(
-    description = "Worker phase: writes a single file and updates the blueprint. Call this for " +
-      "each file in the project. Set is_project_finished to true only when every file in the " +
-      "blueprint is DONE."
-  )
+  @Tool(description = "Worker: write one file, mark DONE in blueprint.")
   fun workerExecute(
-    @ToolParam(description = "Relative file path to write (e.g. 'my_app/src/main.kt').")
+    @ToolParam(description = "File path to write.")
     target_file_path: String,
-    @ToolParam(description = "The full text/code content for the file.")
+    @ToolParam(description = "File content.")
     code_content: String,
-    @ToolParam(description = "Set to 'true' when ALL files in the blueprint are complete, 'false' otherwise.")
+    @ToolParam(description = "true when all files done, else false.")
     is_project_finished: String,
   ): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
@@ -1455,13 +1401,9 @@ class AgentTools() : ToolSet {
    *
    * A strict 10-second timeout is enforced.
    */
-  @Tool(
-    description = "Executes bash commands in the Termux environment. STRICTLY PROHIBITED FOR FILE CREATION OR EDITING. " +
-      "Use only to run test scripts, check directory listings, execute programs, or debug stack traces. " +
-      "You will receive the raw terminal output. To create or modify files, you MUST use fileBoxWrite instead."
-  )
+  @Tool(description = "Run bash in Termux. NO file creation — use fileBoxWrite.")
   fun shellExecute(
-    @ToolParam(description = "The shell command to execute (e.g. 'ls -la', 'python3 test.py', 'git status'). NEVER use echo/cat/nano/tee/sed to write files.")
+    @ToolParam(description = "Shell command. No echo/cat/nano for files.")
     command: String,
   ): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
@@ -1537,13 +1479,9 @@ class AgentTools() : ToolSet {
    * visibly onto the MstrCtrlScreen so the user can watch the AI work in
    * real time.
    */
-  @Tool(
-    description = "Execute a terminal command and display both input and output visibly on the " +
-      "MSTR_CTRL terminal screen so the user can watch in real time. STRICTLY PROHIBITED FOR FILE CREATION OR EDITING. " +
-      "Use this when you want the user to see what you are doing. You will also receive the raw output."
-  )
+  @Tool(description = "Run command visibly on MSTR_CTRL. No file creation.")
   fun commandOverride(
-    @ToolParam(description = "The shell command to execute visibly (e.g. 'git status', 'npm test'). NEVER use echo/cat/nano/tee/sed to write files.")
+    @ToolParam(description = "Shell command.")
     command: String,
   ): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
@@ -1621,13 +1559,9 @@ class AgentTools() : ToolSet {
    * major milestone or hits a wall and requires the Operator (Flynn) to
    * review the codebase or issue the next directive.
    */
-  @Tool(
-    description = "Immediately stops the autonomous work loop and presents the reason " +
-      "to the user. Use this when you complete a major milestone, need clarification, " +
-      "or hit a wall that requires human review."
-  )
+  @Tool(description = "Stop autonomous loop, present reason to user.")
   fun operatorHalt(
-    @ToolParam(description = "A clear explanation of why you are stopping (milestone reached, blocker, need user decision, etc.).")
+    @ToolParam(description = "Why stopping.")
     reason: String,
   ): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
@@ -1666,13 +1600,9 @@ class AgentTools() : ToolSet {
    * token-optimized Markdown results. Capped to ~1500 tokens to keep
    * the LLM context lean.
    */
-  @Tool(
-    description = "Search offline documentation archives (.zim) for answers to technical " +
-      "questions. Returns token-optimized Markdown results. Use this to look up APIs, " +
-      "error messages, or programming concepts without internet access."
-  )
+  @Tool(description = "Search offline .zim docs for technical answers.")
   fun oracleSearch(
-    @ToolParam(description = "The search query (e.g. 'Python list comprehension', 'Kotlin coroutines', 'git rebase').")
+    @ToolParam(description = "Search query.")
     query: String,
   ): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
@@ -1720,12 +1650,9 @@ class AgentTools() : ToolSet {
    * (or the entire workspace if path is empty). Uses minimal context to
    * save token space.
    */
-  @Tool(
-    description = "Returns the git diff for a file or the entire workspace. Uses " +
-      "--unified=0 to minimize context and save tokens. Use this to review code changes."
-  )
+  @Tool(description = "Git diff for file or workspace.")
   fun gitDiffRead(
-    @ToolParam(description = "Relative file path to diff (e.g. 'src/main.py'). Pass empty string for full workspace diff.")
+    @ToolParam(description = "File path. Empty=full workspace.")
     path: String,
   ): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
@@ -1803,11 +1730,7 @@ class AgentTools() : ToolSet {
    * MSTR_CTRL terminal state, allowing the AI to correlate terminal errors
    * with the exact file and line it is looking at.
    */
-  @Tool(
-    description = "Returns a unified snapshot of the FILE_BOX editor and MSTR_CTRL terminal " +
-      "state. Use this to correlate terminal errors with the file/line currently open in the " +
-      "editor. Returns current_file, cursor_line, terminal_cwd, and terminal_last_output."
-  )
+  @Tool(description = "Unified FILE_BOX+MSTR_CTRL state snapshot.")
   fun workspaceSyncSnapshot(): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
       try {
@@ -1859,14 +1782,9 @@ class AgentTools() : ToolSet {
    * editor directly into the MSTR_CTRL shell. Captures stdout/stderr and, if
    * an error occurs, extracts the offending line number so the AI can refocus.
    */
-  @Tool(
-    description = "Pipes the file currently open in FILE_BOX into the MSTR_CTRL terminal " +
-      "for execution. Automatically detects the runtime (python3, node, sh) from the file " +
-      "extension. Returns stdout/stderr output and, on error, the error_line number so you " +
-      "can refocus the editor."
-  )
+  @Tool(description = "Pipe FILE_BOX file to MSTR_CTRL for execution.")
   fun editorTerminalPipe(
-    @ToolParam(description = "Optional override file path. If empty, uses the file currently open in the editor.")
+    @ToolParam(description = "File path override. Empty=current editor file.")
     file_path: String,
   ): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {
@@ -1985,19 +1903,13 @@ class AgentTools() : ToolSet {
    * (name, description, instructions) through the existing skill manager.
    * The new skill is immediately persisted and available for future sessions.
    */
-  @Tool(
-    description = "Create a new custom skill for CLU/BOX. Write a SKILL.md with a name, " +
-      "description, and freeform instructions that teach the AI how to perform a task. " +
-      "The skill is saved permanently and can be loaded with load_skill in future sessions."
-  )
+  @Tool(description = "Create custom SKILL.md. Saved permanently.")
   fun createSkill(
-    @ToolParam(description = "Short, kebab-case skill name (e.g. 'code-reviewer', 'daily-planner').")
+    @ToolParam(description = "Kebab-case skill name.")
     skill_name: String,
-    @ToolParam(description = "One-line description of what the skill does.")
+    @ToolParam(description = "One-line description.")
     skill_description: String,
-    @ToolParam(description = "Full freeform instructions (markdown). Describe examples, steps, " +
-      "which native tools to call, constraints, and output format. This is what the AI reads " +
-      "when the skill is loaded.")
+    @ToolParam(description = "Full instructions (markdown).")
     skill_instructions: String,
   ): Map<String, String> {
     return withResolution(runBlocking(Dispatchers.IO) {

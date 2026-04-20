@@ -26,7 +26,6 @@ private const val TAG = "SkillRegistry"
  *
  * Responsibilities:
  * - Holds the canonical list of skills available to the LLM.
- * - Generates a compact tool summary via [getToolsSummary].
  * - Provides an execution router via [dispatch] that looks up a
  *   skill by name and calls its [CluSkill.execute] method.
  * - Builds the final composite system prompt via [buildFinalSystemPrompt],
@@ -61,14 +60,6 @@ class SkillRegistry(agentTools: AgentTools) {
   }
 
   /**
-   * Returns a compact tool summary (one line per tool) for the system
-   * prompt. This is the shorter format used by [AgentTools.getToolsSummary].
-   */
-  fun getToolsSummary(): String {
-    return skills.values.joinToString("\n") { "• ${it.name} — ${it.description}" }
-  }
-
-  /**
    * Execution router: looks up a skill by [name] and invokes its
    * [CluSkill.execute] method with the provided [args].
    *
@@ -98,10 +89,6 @@ class SkillRegistry(agentTools: AgentTools) {
    * This avoids duplicating identity text and keeps the total prompt
    * within the tight token budget of small models like Gemma-4-E2B
    * (4 000-token input limit).
-   *
-   * The [basePrompt] should contain `___TOOLS___` placeholder which
-   * will be left intact for [SkillManagerViewModel.getSystemPrompt]
-   * to replace.
    */
   fun buildFinalSystemPrompt(basePrompt: String): String {
     // The defaultSystemPrompt starts with a one-paragraph CLU identity
