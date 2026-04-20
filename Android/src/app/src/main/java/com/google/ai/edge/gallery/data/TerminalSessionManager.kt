@@ -285,10 +285,10 @@ class TerminalSessionManager(private val context: Context) {
    * Pipes [command] into the PTY session's stdin and waits for the output
    * to settle (silence detection) or hit the prompt delimiter.
    *
-   * The PTY bridge's [TerminalSession] emulator transcript is read to
-   * capture the response. We snapshot the transcript before writing, then
-   * poll until new lines stop appearing (silence) or total wall-time exceeds
-   * [CMD_TIMEOUT_SECONDS].
+   * The PTY bridge's [TerminalSession] emulator transcript is read via
+   * [TerminalBuffer.getTranscriptText] — we snapshot the transcript text
+   * before writing, poll until it stops changing (silence), then diff the
+   * before/after strings to extract the command's output.
    *
    * This implements the `[ACTION: bash]` → wait-for-silence → `[OBSERVE]`
    * state machine loop required by the CLU/BOX terminal architecture.
@@ -297,72 +297,66 @@ class TerminalSessionManager(private val context: Context) {
     val session = ptyBridge.terminalSession ?: return executeCommandInSandbox(command)
     val emulator = session.emulator ?: return executeCommandInSandbox(command)
 
-    // Snapshot current screen row count before injecting the command.
-    val preRows = emulator.screen.activeTranscriptRows + emulator.mRows
+    // Snapshot transcript text before injecting the command.
+    val preText = emulator.screen.getTranscriptText()
 
-    // Pipe the command directly into the PTY outputStream followed by \n.
+    // Pipe the command directly into the PTY stdin followed by \n.
     ptyBridge.sendCommand(command)
 
-    // Wait for output to settle: poll the emulator transcript for new content.
+    // Wait for output to settle: poll the transcript text for changes.
     val deadlineMs = System.currentTimeMillis() + (CMD_TIMEOUT_SECONDS * 1000)
     var lastChangeMs = System.currentTimeMillis()
-    var lastRowCount = preRows
+    var lastText = preText
 
     while (System.currentTimeMillis() < deadlineMs) {
       Thread.sleep(PTY_POLL_INTERVAL_MS)
 
-      val currentRows = emulator.screen.activeTranscriptRows + emulator.mRows
-      if (currentRows != lastRowCount) {
-        lastRowCount = currentRows
+      val currentText = emulator.screen.getTranscriptText()
+      if (currentText != lastText) {
+        lastText = currentText
         lastChangeMs = System.currentTimeMillis()
         continue
       }
 
       // Check if silence threshold exceeded — output has settled.
       if (System.currentTimeMillis() - lastChangeMs >= PTY_SILENCE_THRESHOLD_MS) {
-        // Also check for prompt delimiter on the last visible line.
-        val lastLine = getLastVisibleLine(emulator)
-        if (lastLine.trimEnd().endsWith("$") || lastLine.contains("CLU/BOX $")) {
-          break
-        }
-        // Even without a prompt match, silence means command finished.
         break
       }
     }
 
-    // Capture the new lines added after the command was sent.
-    val postRows = emulator.screen.activeTranscriptRows + emulator.mRows
-    val newLineCount = postRows - preRows
-    if (newLineCount <= 0) return "(no output)"
-
-    val sb = StringBuilder()
-    // Read from the transcript — lines are zero-indexed from the top.
-    // The visible rows are the last mRows of the transcript.
-    val screen = emulator.screen
-    val totalRows = screen.activeTranscriptRows + emulator.mRows
-    val startRow = preRows // row index where new output begins
-    for (i in startRow until totalRows) {
-      val line = screen.getTranscriptLineText(i - screen.activeTranscriptRows)
-      // Skip the prompt-only line at the end.
-      if (i == totalRows - 1 && (line.trimEnd().endsWith("$") || line.contains("CLU/BOX $"))) {
-        continue
-      }
-      if (sb.isNotEmpty()) sb.append("\n")
-      sb.append(line.trimEnd())
+    // Extract new content added since the command was sent.
+    val postText = emulator.screen.getTranscriptText()
+    val trimmedPre = preText.trimEnd()
+    val newContent = if (postText.length > trimmedPre.length &&
+        postText.startsWith(trimmedPre)) {
+      postText.substring(trimmedPre.length).trimStart('\n')
+    } else {
+      // Fallback: return everything that's visible (transcript may have wrapped).
+      postText
     }
 
-    val result = sb.toString()
+    // Strip trailing prompt line.
+    val lines = newContent.lines().toMutableList()
+    if (lines.isNotEmpty()) {
+      val last = lines.last().trimEnd()
+      if (last.endsWith("$") || last.contains("CLU/BOX $")) {
+        lines.removeAt(lines.lastIndex)
+      }
+    }
+
+    val result = lines.joinToString("\n").trimEnd()
     return if (result.isBlank()) "(no output)" else result
   }
 
   /**
-   * Returns the text content of the last visible line in the emulator.
+   * Returns the text content of the last visible line in the emulator
+   * by reading the full transcript and taking the final non-empty line.
    */
   private fun getLastVisibleLine(emulator: com.termux.terminal.TerminalEmulator): String {
     return try {
-      val screen = emulator.screen
-      val lastRowIndex = emulator.mRows - 1
-      screen.getTranscriptLineText(lastRowIndex)
+      val text = emulator.screen.getTranscriptText()
+      val trimmed = text.trimEnd()
+      trimmed.substringAfterLast('\n').ifEmpty { trimmed }
     } catch (_: Exception) { "" }
   }
 
