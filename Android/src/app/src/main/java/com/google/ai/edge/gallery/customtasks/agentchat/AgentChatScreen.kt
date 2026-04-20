@@ -444,96 +444,9 @@ fun AgentChatScreen(
         },
       )
     },
-    emptyStateComposable = { model ->
-      val uiState by viewModel.uiState.collectAsState()
-      val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
-      val modelInitializationStatus = modelManagerUiState.modelInitializationStatus[model.name]
-      Box(modifier = Modifier.fillMaxSize()) {
-        AnimatedVisibility(
-          !WindowInsets.isImeVisible,
-          enter = fadeIn(animationSpec = tween(200)),
-          exit = fadeOut(animationSpec = tween(200)),
-        ) {
-          Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Column(
-              modifier =
-                Modifier.align(Alignment.Center)
-                  .padding(horizontal = 48.dp)
-                  .padding(bottom = 48.dp),
-              horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-              Text(
-                stringResource(R.string.introducing),
-                style = MaterialTheme.typography.headlineSmall,
-              )
-              Text(
-                stringResource(R.string.agent_skills),
-                style =
-                  MaterialTheme.typography.headlineLarge.copy(
-                    fontWeight = FontWeight.Medium,
-                    color = neonGreen,
-                  ),
-                modifier = Modifier.padding(top = 12.dp, bottom = 16.dp),
-              )
-              Text(
-                buildAnnotatedString {
-                  append("Your on-device AI assistant with skills, BrainBox memory, and offline reasoning.")
-                  append("\n\nTap a sample prompt below or start chatting!")
-                },
-                style =
-                  MaterialTheme.typography.headlineSmall.copy(fontSize = 16.sp, lineHeight = 22.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-              )
-            }
-          }
-        }
-
-        Row(
-          modifier =
-            Modifier.align(Alignment.BottomCenter)
-              .horizontalScroll(rememberScrollState())
-              .padding(horizontal = 12.dp),
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-          for (promptChip in TRYOUT_CHIPS) {
-            FilledTonalButton(
-              enabled =
-                modelInitializationStatus?.status == ModelInitializationStatusType.INITIALIZED &&
-                  !uiState.isResettingSession,
-              onClick = {
-                // Skill is selected, trigger sending the message.
-                if (skillManagerViewModel.isSkillSelected(promptChip.skillName)) {
-                  sendMessageTrigger =
-                    SendMessageTrigger(
-                      model = model,
-                      messages =
-                        listOf(ChatMessageText(content = promptChip.prompt, side = ChatSide.USER)),
-                    )
-                  firebaseAnalytics?.logEvent(
-                    GalleryEvent.BUTTON_CLICKED.id,
-                    Bundle().apply {
-                      putString("event_type", "agent_skills_prompt_chip")
-                      putString("button_id", promptChip.label)
-                    },
-                  )
-                }
-                // Skill is not selected, show alert dialog.
-                else {
-                  disabledSkillName = promptChip.skillName
-                  showAlertForDisabledSkill = true
-                }
-              },
-              contentPadding = PaddingValues(horizontal = 12.dp),
-            ) {
-              Icon(promptChip.icon, contentDescription = null, modifier = Modifier.size(20.dp))
-              Spacer(modifier = Modifier.width(4.dp))
-              Text(promptChip.label)
-            }
-          }
-        }
-      }
+    emptyStateComposable = { _ ->
+      // Blank initial state — minimalist aesthetic.
+      Box(modifier = Modifier.fillMaxSize())
     },
     sendMessageTrigger = sendMessageTrigger,
     onChatHistoryClicked = { showChatHistorySheet = true },
