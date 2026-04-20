@@ -655,15 +655,16 @@ fun GlobalModelManager(
   if (showAddApiModelDialog) {
     AddApiModelDialog(
       onDismiss = { showAddApiModelDialog = false },
-      onModelAdded = { name, endpoint, apiKey, contextWindowSize ->
+      onModelAdded = { label, baseUrl, apiKey, modelId, contextWindowSize ->
         viewModel.addBespokeApiModel(
-          modelName = name,
-          apiEndpoint = endpoint,
+          modelLabel = label,
+          baseUrl = baseUrl,
           apiKey = apiKey,
+          modelId = modelId,
           contextWindowSize = contextWindowSize,
         )
         showAddApiModelDialog = false
-        scope.launch { snackbarHostState.showSnackbar("API model '$name' added") }
+        scope.launch { snackbarHostState.showSnackbar("API model '$label' added") }
       },
     )
   }

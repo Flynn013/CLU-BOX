@@ -20,6 +20,7 @@ import androidx.datastore.core.DataStore
 import com.google.ai.edge.gallery.proto.AccessTokenData
 import com.google.ai.edge.gallery.proto.BenchmarkResult
 import com.google.ai.edge.gallery.proto.BenchmarkResults
+import com.google.ai.edge.gallery.proto.BespokeModel
 import com.google.ai.edge.gallery.proto.Cutout
 import com.google.ai.edge.gallery.proto.CutoutCollection
 import com.google.ai.edge.gallery.proto.ImportedModel
@@ -64,6 +65,10 @@ interface DataStoreRepository {
   fun saveImportedModels(importedModels: List<ImportedModel>)
 
   fun readImportedModels(): List<ImportedModel>
+
+  fun saveBespokeModels(bespokeModels: List<BespokeModel>)
+
+  fun readBespokeModels(): List<BespokeModel>
 
   fun isTosAccepted(): Boolean
 
@@ -231,6 +236,21 @@ class DefaultDataStoreRepository(
     return runBlocking {
       val settings = dataStore.data.first()
       settings.importedModelList
+    }
+  }
+
+  override fun saveBespokeModels(bespokeModels: List<BespokeModel>) {
+    runBlocking {
+      dataStore.updateData { settings ->
+        settings.toBuilder().clearBespokeModel().addAllBespokeModel(bespokeModels).build()
+      }
+    }
+  }
+
+  override fun readBespokeModels(): List<BespokeModel> {
+    return runBlocking {
+      val settings = dataStore.data.first()
+      settings.bespokeModelList
     }
   }
 

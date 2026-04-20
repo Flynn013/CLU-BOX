@@ -52,6 +52,7 @@ import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.data.ValueType
 import com.google.ai.edge.gallery.data.createLlmChatConfigs
 import com.google.ai.edge.gallery.proto.AccessTokenData
+import com.google.ai.edge.gallery.proto.BespokeModel
 import com.google.ai.edge.gallery.proto.ImportedModel
 import com.google.ai.edge.gallery.proto.Theme
 import com.google.ai.edge.gallery.runtime.aicore.AICoreModelHelper
@@ -729,24 +730,43 @@ constructor(
    * Adds a BESPOKE (manually-added API) model to all LLM tasks.
    *
    * The API key is stored separately in [ManualApiKeyStore] (encrypted).
+   * The model metadata is persisted in proto DataStore so it survives app restarts.
    */
   fun addBespokeApiModel(
-    modelName: String,
-    apiEndpoint: String,
+    modelLabel: String,
+    baseUrl: String,
     apiKey: String,
+    modelId: String,
     contextWindowSize: Int = 32768,
   ) {
-    Log.d(TAG, "Adding bespoke API model: $modelName (endpoint: $apiEndpoint)")
+    Log.d(TAG, "Adding bespoke API model: $modelLabel (baseUrl: $baseUrl, modelId: $modelId)")
+
+    // Construct full endpoint from baseUrl + modelId.
+    val normalizedBase = baseUrl.trimEnd('/')
+    val apiEndpoint = "$normalizedBase/v1beta/models/$modelId"
 
     // Persist the API key in encrypted storage.
     com.google.ai.edge.gallery.runtime.manualapi.ManualApiKeyStore.setApiKey(
-      context, modelName, apiKey,
+      context, modelLabel, apiKey,
     )
 
+    // Persist the model definition in proto DataStore.
+    val existingBespoke = dataStoreRepository.readBespokeModels().toMutableList()
+    existingBespoke.removeAll { it.modelLabel == modelLabel }
+    existingBespoke.add(
+      BespokeModel.newBuilder()
+        .setModelLabel(modelLabel)
+        .setBaseUrl(baseUrl)
+        .setModelId(modelId)
+        .setContextWindow(contextWindowSize)
+        .build()
+    )
+    dataStoreRepository.saveBespokeModels(existingBespoke)
+
     val model = Model(
-      name = modelName,
-      displayName = modelName,
-      info = "Bespoke API model — $apiEndpoint",
+      name = modelLabel,
+      displayName = modelLabel,
+      info = "Bespoke API model — $modelId @ $normalizedBase",
       url = "",
       sizeInBytes = 0L,
       downloadFileName = "_",
@@ -772,7 +792,7 @@ constructor(
     )
     for (task in getTasksByIds(ids = setOfTasks)) {
       // Remove a duplicate bespoke model if it already exists.
-      val existingIndex = task.models.indexOfFirst { it.name == modelName }
+      val existingIndex = task.models.indexOfFirst { it.name == modelLabel }
       if (existingIndex >= 0) {
         task.models.removeAt(existingIndex)
       }
@@ -793,6 +813,73 @@ constructor(
         tasks = uiState.value.tasks.toList(),
         modelDownloadStatus = modelDownloadStatus,
         modelInitializationStatus = modelInstances,
+        modelImportingUpdateTrigger = System.currentTimeMillis(),
+      )
+    }
+  }
+
+  /**
+   * Restores previously-persisted BESPOKE models from DataStore.
+   * Called during ViewModel initialization so models survive app restarts.
+   */
+  fun restoreBespokeModels() {
+    val persisted = dataStoreRepository.readBespokeModels()
+    if (persisted.isEmpty()) return
+    Log.d(TAG, "Restoring ${persisted.size} bespoke model(s) from DataStore")
+    for (bespoke in persisted) {
+      val normalizedBase = bespoke.baseUrl.trimEnd('/')
+      val apiEndpoint = "$normalizedBase/v1beta/models/${bespoke.modelId}"
+
+      val model = Model(
+        name = bespoke.modelLabel,
+        displayName = bespoke.modelLabel,
+        info = "Bespoke API model — ${bespoke.modelId} @ $normalizedBase",
+        url = "",
+        sizeInBytes = 0L,
+        downloadFileName = "_",
+        version = "_",
+        isLlm = true,
+        runtimeType = RuntimeType.MANUAL_API,
+        apiEndpoint = apiEndpoint,
+        contextWindowSize = bespoke.contextWindow,
+        configs = createLlmChatConfigs(
+          defaultMaxToken = bespoke.contextWindow,
+          defaultMaxContextLength = bespoke.contextWindow,
+        ),
+      )
+      model.preProcess()
+
+      val setOfTasks = mutableSetOf(
+        BuiltInTaskId.LLM_CHAT,
+        BuiltInTaskId.LLM_ASK_IMAGE,
+        BuiltInTaskId.LLM_ASK_AUDIO,
+        BuiltInTaskId.LLM_PROMPT_LAB,
+        BuiltInTaskId.LLM_AGENT_CHAT,
+      )
+      for (task in getTasksByIds(ids = setOfTasks)) {
+        val existingIndex = task.models.indexOfFirst { it.name == bespoke.modelLabel }
+        if (existingIndex >= 0) {
+          task.models.removeAt(existingIndex)
+        }
+        task.models.add(model)
+      }
+
+      val modelDownloadStatus = uiState.value.modelDownloadStatus.toMutableMap()
+      val modelInstances = uiState.value.modelInitializationStatus.toMutableMap()
+      modelDownloadStatus[model.name] =
+        ModelDownloadStatus(status = ModelDownloadStatusType.SUCCEEDED)
+      modelInstances[model.name] =
+        ModelInitializationStatus(status = ModelInitializationStatusType.NOT_INITIALIZED)
+      _uiState.update {
+        uiState.value.copy(
+          modelDownloadStatus = modelDownloadStatus,
+          modelInitializationStatus = modelInstances,
+        )
+      }
+    }
+    _uiState.update {
+      uiState.value.copy(
+        tasks = uiState.value.tasks.toList(),
         modelImportingUpdateTrigger = System.currentTimeMillis(),
       )
     }
@@ -1285,6 +1372,38 @@ constructor(
           receivedBytes = importedModel.fileSize,
           totalBytes = importedModel.fileSize,
         )
+    }
+
+    // Load persisted BESPOKE (manual API) models.
+    for (bespoke in dataStoreRepository.readBespokeModels()) {
+      Log.d(TAG, "Restoring bespoke model: ${bespoke.modelLabel}")
+      val normalizedBase = bespoke.baseUrl.trimEnd('/')
+      val apiEndpoint = "$normalizedBase/v1beta/models/${bespoke.modelId}"
+      val model = Model(
+        name = bespoke.modelLabel,
+        displayName = bespoke.modelLabel,
+        info = "Bespoke API model — ${bespoke.modelId} @ $normalizedBase",
+        url = "",
+        sizeInBytes = 0L,
+        downloadFileName = "_",
+        version = "_",
+        isLlm = true,
+        runtimeType = RuntimeType.MANUAL_API,
+        apiEndpoint = apiEndpoint,
+        contextWindowSize = bespoke.contextWindow,
+        configs = createLlmChatConfigs(
+          defaultMaxToken = bespoke.contextWindow,
+          defaultMaxContextLength = bespoke.contextWindow,
+        ),
+      )
+      model.preProcess()
+      tasks.get(key = BuiltInTaskId.LLM_CHAT)?.models?.add(model)
+      tasks.get(key = BuiltInTaskId.LLM_ASK_IMAGE)?.models?.add(model)
+      tasks.get(key = BuiltInTaskId.LLM_ASK_AUDIO)?.models?.add(model)
+      tasks.get(key = BuiltInTaskId.LLM_PROMPT_LAB)?.models?.add(model)
+      tasks.get(key = BuiltInTaskId.LLM_AGENT_CHAT)?.models?.add(model)
+      modelDownloadStatus[model.name] =
+        ModelDownloadStatus(status = ModelDownloadStatusType.SUCCEEDED)
     }
 
     val textInputHistory = dataStoreRepository.readTextInputHistory()

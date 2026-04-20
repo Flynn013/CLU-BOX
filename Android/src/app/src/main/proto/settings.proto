@@ -61,6 +61,18 @@ message LlmConfig {
   bool support_thinking = 10;
 }
 
+// A manually-added ("Bespoke") API model entry for the VENDING_MACHINE.
+message BespokeModel {
+  // User-visible label (e.g. "Gemini Pro 1.5").
+  string model_label = 1;
+  // Base URL of the API (e.g. "https://generativelanguage.googleapis.com/").
+  string base_url = 2;
+  // The specific model identifier for the endpoint (e.g. "gemini-1.5-pro").
+  string model_id = 3;
+  // Context window size in tokens.
+  int32 context_window = 4;
+}
+
 message Settings {
   Theme theme = 1;
   AccessTokenData access_token_data = 2;  // deprecated
@@ -84,6 +96,9 @@ message Settings {
   int32 custom_background_color = 12;
   int32 custom_text_color = 13;
   int32 custom_accent_color = 14;
+
+  // Manually-added API models (BESPOKE tab in VENDING_MACHINE).
+  repeated BespokeModel bespoke_model = 15;
 }
 
 message UserData {

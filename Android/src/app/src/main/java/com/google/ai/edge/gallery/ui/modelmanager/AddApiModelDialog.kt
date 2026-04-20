@@ -41,19 +41,21 @@ import androidx.compose.ui.unit.dp
  * Dialog for manually adding a BESPOKE API model to the VENDING_MACHINE.
  *
  * Fields:
- * - Model Name (custom label)
- * - API Endpoint (e.g. Google Gemini, OpenAI-compatible)
+ * - Model Label (custom display name)
+ * - Base URL (e.g. "https://generativelanguage.googleapis.com/")
  * - API Key (stored securely in EncryptedSharedPreferences)
- * - Context Window Size (default 32k)
+ * - Model ID (the specific string for the endpoint, e.g. "gemini-1.5-pro")
+ * - Context Window Size (default 32768)
  */
 @Composable
 fun AddApiModelDialog(
   onDismiss: () -> Unit,
-  onModelAdded: (name: String, endpoint: String, apiKey: String, contextWindowSize: Int) -> Unit,
+  onModelAdded: (label: String, baseUrl: String, apiKey: String, modelId: String, contextWindowSize: Int) -> Unit,
 ) {
-  var modelName by remember { mutableStateOf("") }
-  var apiEndpoint by remember { mutableStateOf("") }
+  var modelLabel by remember { mutableStateOf("") }
+  var baseUrl by remember { mutableStateOf("") }
   var apiKey by remember { mutableStateOf("") }
+  var modelId by remember { mutableStateOf("") }
   var contextWindowText by remember { mutableStateOf("32768") }
   var errorText by remember { mutableStateOf("") }
 
@@ -75,10 +77,10 @@ fun AddApiModelDialog(
         Spacer(modifier = Modifier.height(12.dp))
 
         OutlinedTextField(
-          value = modelName,
-          onValueChange = { modelName = it; errorText = "" },
-          label = { Text("Model Name") },
-          placeholder = { Text("My Custom Model") },
+          value = modelLabel,
+          onValueChange = { modelLabel = it; errorText = "" },
+          label = { Text("Model Label") },
+          placeholder = { Text("Gemini Pro 1.5") },
           singleLine = true,
           modifier = Modifier.fillMaxWidth(),
         )
@@ -86,10 +88,10 @@ fun AddApiModelDialog(
         Spacer(modifier = Modifier.height(8.dp))
 
         OutlinedTextField(
-          value = apiEndpoint,
-          onValueChange = { apiEndpoint = it; errorText = "" },
-          label = { Text("API Endpoint") },
-          placeholder = { Text("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash") },
+          value = baseUrl,
+          onValueChange = { baseUrl = it; errorText = "" },
+          label = { Text("Base URL") },
+          placeholder = { Text("https://generativelanguage.googleapis.com/") },
           singleLine = true,
           modifier = Modifier.fillMaxWidth(),
         )
@@ -110,9 +112,20 @@ fun AddApiModelDialog(
         Spacer(modifier = Modifier.height(8.dp))
 
         OutlinedTextField(
+          value = modelId,
+          onValueChange = { modelId = it; errorText = "" },
+          label = { Text("Model ID") },
+          placeholder = { Text("gemini-2.0-flash") },
+          singleLine = true,
+          modifier = Modifier.fillMaxWidth(),
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        OutlinedTextField(
           value = contextWindowText,
           onValueChange = { contextWindowText = it; errorText = "" },
-          label = { Text("Context Window Size") },
+          label = { Text("Context Window") },
           placeholder = { Text("32768") },
           singleLine = true,
           keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -132,18 +145,20 @@ fun AddApiModelDialog(
     confirmButton = {
       TextButton(
         onClick = {
-          val trimmedName = modelName.trim()
-          val trimmedEndpoint = apiEndpoint.trim()
+          val trimmedLabel = modelLabel.trim()
+          val trimmedBaseUrl = baseUrl.trim()
           val trimmedKey = apiKey.trim()
+          val trimmedModelId = modelId.trim()
           val contextWindow = contextWindowText.trim().toIntOrNull() ?: 32768
 
           when {
-            trimmedName.isBlank() -> errorText = "Model name cannot be empty"
-            trimmedName.contains("/") -> errorText = "Model name cannot contain '/'"
-            trimmedEndpoint.isBlank() -> errorText = "API endpoint cannot be empty"
+            trimmedLabel.isBlank() -> errorText = "Model label cannot be empty"
+            trimmedLabel.contains("/") -> errorText = "Model label cannot contain '/'"
+            trimmedBaseUrl.isBlank() -> errorText = "Base URL cannot be empty"
             trimmedKey.isBlank() -> errorText = "API key cannot be empty"
+            trimmedModelId.isBlank() -> errorText = "Model ID cannot be empty"
             contextWindow < 1024 -> errorText = "Context window must be at least 1024"
-            else -> onModelAdded(trimmedName, trimmedEndpoint, trimmedKey, contextWindow)
+            else -> onModelAdded(trimmedLabel, trimmedBaseUrl, trimmedKey, trimmedModelId, contextWindow)
           }
         },
       ) {
