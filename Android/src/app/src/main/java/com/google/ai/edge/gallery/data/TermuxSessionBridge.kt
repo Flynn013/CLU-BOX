@@ -27,12 +27,6 @@ import java.io.File
 
 private const val TAG = "TermuxSessionBridge"
 
-/** Termux filesystem prefix — the root of the Termux sysroot. */
-private const val TERMUX_PREFIX = "/data/data/com.termux/files/usr"
-
-/** Termux bin directory containing python, node, pkg, git, etc. */
-private const val TERMUX_BIN = "$TERMUX_PREFIX/bin"
-
 /**
  * Wraps the Termux [TerminalSession] to provide a PTY-backed shell inside
  * the CLU-BOX sandbox.
@@ -177,7 +171,7 @@ class TermuxSessionBridge(private val context: Context) {
    * @param sandboxRoot The directory to use as `$HOME` and initial cwd.
    * @param shell       Path to the shell binary (default: `/system/bin/sh`).
    */
-  fun createSession(sandboxRoot: File, shell: String = "/system/bin/sh") {
+  fun createSession(sandboxRoot: File, shell: String = EnvironmentInstaller.shellPath(context)) {
     sessionInitFailed = false
     sessionInitError = null
 
@@ -194,9 +188,11 @@ class TermuxSessionBridge(private val context: Context) {
 
       Log.d(TAG, "Checkpoint 2: Building environment")
 
-      // Build the environment for the shell.
+      // Build the environment for the shell using the internal sysroot.
+      val binDir = EnvironmentInstaller.binDir(context)
+      val prefix = EnvironmentInstaller.prefixDir(context)
       val basePath = "/system/bin:/system/xbin"
-      val effectivePath = if (File(TERMUX_BIN).isDirectory) "$TERMUX_BIN:$basePath" else basePath
+      val effectivePath = if (binDir.isDirectory) "${binDir.absolutePath}:$basePath" else basePath
 
       val env = mutableListOf(
         "HOME=$home",
@@ -207,11 +203,12 @@ class TermuxSessionBridge(private val context: Context) {
         // Visible prompt so the user gets immediate boot feedback.
         "PS1=CLU/BOX \$ ",
       )
-      // Inject Termux-specific variables when the prefix exists, giving the
-      // PTY shell access to python, node, pkg, git, and native shared libs.
-      if (File(TERMUX_BIN).isDirectory) {
-        env.add("PREFIX=$TERMUX_PREFIX")
-        env.add("LD_LIBRARY_PATH=$TERMUX_PREFIX/lib")
+      // Inject sysroot environment variables when the bootstrap prefix exists,
+      // giving the PTY shell access to bash, python, node, pkg, git, and native
+      // shared libraries.
+      if (prefix.isDirectory) {
+        env.add("PREFIX=${prefix.absolutePath}")
+        env.add("LD_LIBRARY_PATH=${EnvironmentInstaller.libDir(context).absolutePath}")
       }
 
       val args = arrayOf(shell)

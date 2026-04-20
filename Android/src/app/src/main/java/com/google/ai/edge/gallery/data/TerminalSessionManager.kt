@@ -46,15 +46,6 @@ private const val CMD_TIMEOUT_SECONDS = 10L
 /** Maximum time (ms) to wait for reader threads to finish after the process exits. */
 private const val READER_THREAD_JOIN_TIMEOUT_MS = 5_000L
 
-/** Termux filesystem prefix — the root of the Termux sysroot. */
-private const val TERMUX_PREFIX = "/data/data/com.termux/files/usr"
-
-/** Termux bin directory containing python, node, pkg, git, etc. */
-private const val TERMUX_BIN = "$TERMUX_PREFIX/bin"
-
-/** Termux shared library directory. */
-private const val TERMUX_LIB = "$TERMUX_PREFIX/lib"
-
 /** Maximum number of lines retained in the visible output buffer to limit GC pressure. */
 private const val MAX_OUTPUT_LINES = 2000
 
@@ -76,10 +67,10 @@ enum class LineSource { STDIN, STDOUT, STDERR, SYSTEM }
  * across screen rotations and navigation events as long as the hosting
  * [Context] (Application) is alive.
  *
- * On first boot, an initialization hook detects whether the Termux `pkg`
- * binary exists on disk. If found it runs
- * `pkg install git python nodejs -y` to arm the terminal. If absent (standard
- * Android without Termux) the step is cleanly skipped.
+ * On first boot, an initialization hook triggers [EnvironmentInstaller] to
+ * download and install the Termux bootstrap sysroot (bash, pkg, python, etc.)
+ * into the app's internal storage. Once installed, subsequent boots skip the
+ * download and use the sysroot directly.
  *
  * The Termux `terminal-emulator` / `terminal-view` libraries are included as
  * JitPack dependencies, providing PTY-based terminal sessions and a native
@@ -127,25 +118,31 @@ class TerminalSessionManager(private val context: Context) {
     Log.d(TAG, "Checkpoint 1: Preparing persistent shell session (HOME=${sandboxRoot.absolutePath})")
 
     try {
-      // Build PATH: include Termux bin dir only if it actually exists on this device.
-      Log.d(TAG, "Checkpoint 2: Building environment")
+      // Resolve internal sysroot paths via EnvironmentInstaller.
+      val prefix = EnvironmentInstaller.prefixDir(context)
+      val binDir = EnvironmentInstaller.binDir(context)
+      val libDir = EnvironmentInstaller.libDir(context)
+      val shell = EnvironmentInstaller.shellPath(context)
+
+      // Build PATH: include internal bin dir only if the bootstrap is installed.
+      Log.d(TAG, "Checkpoint 2: Building environment (PREFIX=${prefix.absolutePath})")
       val basePath = "/system/bin:/system/xbin:" + (System.getenv("PATH") ?: "")
-      val effectivePath = if (java.io.File(TERMUX_BIN).isDirectory) "$TERMUX_BIN:$basePath" else basePath
+      val effectivePath = if (binDir.isDirectory) "${binDir.absolutePath}:$basePath" else basePath
 
       val env = mutableMapOf(
         "HOME" to sandboxRoot.absolutePath,
         "TERM" to "dumb",
         "PATH" to effectivePath,
       )
-      // Inject Termux-specific environment variables when the Termux prefix exists.
-      // This gives Shell_Execute access to python, node, pkg, git, and native libs.
-      if (java.io.File(TERMUX_PREFIX).isDirectory) {
-        env["PREFIX"] = TERMUX_PREFIX
-        env["LD_LIBRARY_PATH"] = TERMUX_LIB
+      // Inject sysroot environment variables when the bootstrap prefix exists.
+      // This gives Shell_Execute access to bash, python, node, pkg, git, and native libs.
+      if (prefix.isDirectory) {
+        env["PREFIX"] = prefix.absolutePath
+        env["LD_LIBRARY_PATH"] = libDir.absolutePath
       }
 
-      Log.d(TAG, "Checkpoint 3: Starting ProcessBuilder")
-      val pb = ProcessBuilder("sh")
+      Log.d(TAG, "Checkpoint 3: Starting ProcessBuilder (shell=$shell)")
+      val pb = ProcessBuilder(shell)
         .directory(sandboxRoot)
         .redirectErrorStream(false)
 
@@ -243,24 +240,28 @@ class TerminalSessionManager(private val context: Context) {
   }
 
   /**
-   * Executes [command] via a one-shot `sh -c` process rooted in the sandbox.
+   * Executes [command] via a one-shot process using the internal shell.
    * Captures stdout + stderr with a strict [CMD_TIMEOUT_SECONDS] timeout.
    */
   private fun executeCommandInSandbox(command: String): String {
     return try {
       Log.d(TAG, "executeCommandInSandbox: $command")
 
-      val pb = ProcessBuilder("sh", "-c", command)
+      val shell = EnvironmentInstaller.shellPath(context)
+      val pb = ProcessBuilder(shell, "-c", command)
         .directory(sandboxRoot)
         .redirectErrorStream(false)
 
       pb.environment()["HOME"] = sandboxRoot.absolutePath
-      // Inject Termux environment so python/node/pkg are visible.
-      if (java.io.File(TERMUX_BIN).isDirectory) {
+      // Inject internal sysroot environment so bash/python/node/pkg are visible.
+      val binDir = EnvironmentInstaller.binDir(context)
+      val prefix = EnvironmentInstaller.prefixDir(context)
+      val libDir = EnvironmentInstaller.libDir(context)
+      if (binDir.isDirectory) {
         val basePath = pb.environment()["PATH"] ?: "/system/bin:/system/xbin"
-        pb.environment()["PATH"] = "$TERMUX_BIN:$basePath"
-        pb.environment()["PREFIX"] = TERMUX_PREFIX
-        pb.environment()["LD_LIBRARY_PATH"] = TERMUX_LIB
+        pb.environment()["PATH"] = "${binDir.absolutePath}:$basePath"
+        pb.environment()["PREFIX"] = prefix.absolutePath
+        pb.environment()["LD_LIBRARY_PATH"] = libDir.absolutePath
       }
 
       val proc = pb.start()
@@ -322,17 +323,21 @@ class TerminalSessionManager(private val context: Context) {
    */
   fun executeCommandWithExitCode(command: String): Pair<Int, String> {
     return try {
-      val pb = ProcessBuilder("sh", "-c", command)
+      val shell = EnvironmentInstaller.shellPath(context)
+      val pb = ProcessBuilder(shell, "-c", command)
         .directory(sandboxRoot)
         .redirectErrorStream(false)
 
       pb.environment()["HOME"] = sandboxRoot.absolutePath
-      // Inject Termux environment so python/node/pkg are visible.
-      if (java.io.File(TERMUX_BIN).isDirectory) {
+      // Inject internal sysroot environment so bash/python/node/pkg are visible.
+      val binDir = EnvironmentInstaller.binDir(context)
+      val prefix = EnvironmentInstaller.prefixDir(context)
+      val libDir = EnvironmentInstaller.libDir(context)
+      if (binDir.isDirectory) {
         val basePath = pb.environment()["PATH"] ?: "/system/bin:/system/xbin"
-        pb.environment()["PATH"] = "$TERMUX_BIN:$basePath"
-        pb.environment()["PREFIX"] = TERMUX_PREFIX
-        pb.environment()["LD_LIBRARY_PATH"] = TERMUX_LIB
+        pb.environment()["PATH"] = "${binDir.absolutePath}:$basePath"
+        pb.environment()["PREFIX"] = prefix.absolutePath
+        pb.environment()["LD_LIBRARY_PATH"] = libDir.absolutePath
       }
 
       val proc = pb.start()
@@ -405,10 +410,10 @@ class TerminalSessionManager(private val context: Context) {
   /**
    * Pre-flight bootstrap triggered on first app launch.
    *
-   * If a Termux-compatible `pkg` binary is found on `$PATH`, the check runs
-   * `pkg update && pkg upgrade -y && pkg install git python nodejs -y` to arm
-   * the sandbox.  On standard Android (no Termux) the step is cleanly skipped
-   * with an informational message — no shell errors leak to the user.
+   * Delegates to [EnvironmentInstaller.ensureInstalled] to download and
+   * extract the Termux bootstrap sysroot if not already present. Once the
+   * sysroot is ready, optionally installs development packages (git, python,
+   * nodejs) via the internal `pkg` binary.
    *
    * Sets [preFlightReady] to `true` once the gate is clear so the AI can
    * initialize.
@@ -428,30 +433,38 @@ class TerminalSessionManager(private val context: Context) {
       return
     }
 
-    appendSystemLine("[FIRMWARE] First boot detected — running pre-flight check…")
+    appendSystemLine("[FIRMWARE] First boot detected — bootstrapping Linux environment…")
     scope.launch {
-      // Check for Termux's `pkg` binary purely in Kotlin — no shell invocation,
-      // so zero chance of a "pkg: not found" error leaking to the terminal.
-      // Note: this is a best-effort probe for UI messaging only. The actual
-      // execution safety is handled by the shell command itself (|| fallback).
-      val pkgBinary = File("$TERMUX_BIN/pkg")
-      val hasPkg = pkgBinary.exists() && pkgBinary.canExecute()
+      // Stage 1: Install the Termux bootstrap sysroot.
+      EnvironmentInstaller.ensureInstalled(context)
 
-      if (hasPkg) {
-        appendSystemLine("[FIRMWARE] pkg detected — installing packages…")
-        val cmd = "pkg update -y && pkg upgrade -y && pkg install git python nodejs -y 2>&1"
-        val (exitCode, result) = executeCommandWithExitCode(cmd)
-        result.lines().forEach { line ->
-          appendLine(TerminalLine(line, LineSource.STDOUT))
-        }
+      val installerState = EnvironmentInstaller.state.value
+      if (installerState is EnvironmentInstaller.State.Ready) {
+        appendSystemLine("[FIRMWARE] Bootstrap sysroot installed — ${EnvironmentInstaller.prefixDir(context).absolutePath}")
 
-        if (exitCode == 0) {
-          appendSystemLine("[FIRMWARE] Pre-flight package install PASSED (exit 0).")
+        // Stage 2: Use the newly installed pkg to arm the environment.
+        val pkgBinary = File(EnvironmentInstaller.binDir(context), "pkg")
+        val hasPkg = pkgBinary.exists() && pkgBinary.canExecute()
+
+        if (hasPkg) {
+          appendSystemLine("[FIRMWARE] pkg detected — installing development packages…")
+          val cmd = "pkg update -y && pkg upgrade -y && pkg install git python nodejs -y 2>&1"
+          val (exitCode, result) = executeCommandWithExitCode(cmd)
+          result.lines().forEach { line ->
+            appendLine(TerminalLine(line, LineSource.STDOUT))
+          }
+
+          if (exitCode == 0) {
+            appendSystemLine("[FIRMWARE] Package install PASSED (exit 0).")
+          } else {
+            appendSystemLine("[FIRMWARE] Package install finished with exit code $exitCode — continuing.")
+          }
         } else {
-          appendSystemLine("[FIRMWARE] Pre-flight install finished with exit code $exitCode — continuing.")
+          appendSystemLine("[FIRMWARE] pkg not available in bootstrap — base sysroot only.")
         }
-      } else {
-        appendSystemLine("[FIRMWARE] pkg not available — running in standard Android mode.")
+      } else if (installerState is EnvironmentInstaller.State.Failed) {
+        appendSystemLine("[FIRMWARE] Bootstrap FAILED: ${installerState.message}")
+        appendSystemLine("[FIRMWARE] Running in standard Android mode — limited shell only.")
       }
 
       appendSystemLine("[FIRMWARE] Pre-flight check complete.")
