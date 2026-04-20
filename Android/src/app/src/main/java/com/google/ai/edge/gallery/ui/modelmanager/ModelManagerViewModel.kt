@@ -288,7 +288,7 @@ constructor(
     )
 
     // Cloud models require no download — mark them as succeeded immediately.
-    if (model.runtimeType == RuntimeType.GEMINI_CLOUD) {
+    if (model.runtimeType == RuntimeType.GEMINI_CLOUD || model.runtimeType == RuntimeType.MANUAL_API) {
       setDownloadStatus(
         curModel = model,
         status = ModelDownloadStatus(status = ModelDownloadStatusType.SUCCEEDED),
@@ -348,10 +348,8 @@ constructor(
   }
 
   fun cancelDownloadModel(model: Model) {
-    // TODO: b/494029782 - Both litertlm and aicore download and storage should be unified into a
-    // model repository.
-    // AICore and Cloud models cannot be deleted from the download repository within the app.
-    if (model.runtimeType == RuntimeType.AICORE || model.runtimeType == RuntimeType.GEMINI_CLOUD) {
+    // AICore, Cloud, and Manual API models cannot be deleted from the download repository within the app.
+    if (model.runtimeType == RuntimeType.AICORE || model.runtimeType == RuntimeType.GEMINI_CLOUD || model.runtimeType == RuntimeType.MANUAL_API) {
       return
     }
     downloadRepository.cancelDownloadModel(model)
@@ -725,6 +723,79 @@ constructor(
     }
     importedModels.add(info)
     dataStoreRepository.saveImportedModels(importedModels = importedModels)
+  }
+
+  /**
+   * Adds a BESPOKE (manually-added API) model to all LLM tasks.
+   *
+   * The API key is stored separately in [ManualApiKeyStore] (encrypted).
+   */
+  fun addBespokeApiModel(
+    modelName: String,
+    apiEndpoint: String,
+    apiKey: String,
+    contextWindowSize: Int = 32768,
+  ) {
+    Log.d(TAG, "Adding bespoke API model: $modelName (endpoint: $apiEndpoint)")
+
+    // Persist the API key in encrypted storage.
+    com.google.ai.edge.gallery.runtime.manualapi.ManualApiKeyStore.setApiKey(
+      context, modelName, apiKey,
+    )
+
+    val model = Model(
+      name = modelName,
+      displayName = modelName,
+      info = "Bespoke API model — $apiEndpoint",
+      url = "",
+      sizeInBytes = 0L,
+      downloadFileName = "_",
+      version = "_",
+      isLlm = true,
+      runtimeType = RuntimeType.MANUAL_API,
+      apiEndpoint = apiEndpoint,
+      contextWindowSize = contextWindowSize,
+      configs = createLlmChatConfigs(
+        defaultMaxToken = contextWindowSize,
+        defaultMaxContextLength = contextWindowSize,
+      ),
+    )
+    model.preProcess()
+
+    // Add to all LLM tasks.
+    val setOfTasks = mutableSetOf(
+      BuiltInTaskId.LLM_CHAT,
+      BuiltInTaskId.LLM_ASK_IMAGE,
+      BuiltInTaskId.LLM_ASK_AUDIO,
+      BuiltInTaskId.LLM_PROMPT_LAB,
+      BuiltInTaskId.LLM_AGENT_CHAT,
+    )
+    for (task in getTasksByIds(ids = setOfTasks)) {
+      // Remove a duplicate bespoke model if it already exists.
+      val existingIndex = task.models.indexOfFirst { it.name == modelName }
+      if (existingIndex >= 0) {
+        task.models.removeAt(existingIndex)
+      }
+      task.models.add(model)
+      task.updateTrigger.value = System.currentTimeMillis()
+    }
+
+    // Add initial status — bespoke models need no download.
+    val modelDownloadStatus = uiState.value.modelDownloadStatus.toMutableMap()
+    val modelInstances = uiState.value.modelInitializationStatus.toMutableMap()
+    modelDownloadStatus[model.name] =
+      ModelDownloadStatus(status = ModelDownloadStatusType.SUCCEEDED)
+    modelInstances[model.name] =
+      ModelInitializationStatus(status = ModelInitializationStatusType.NOT_INITIALIZED)
+
+    _uiState.update {
+      uiState.value.copy(
+        tasks = uiState.value.tasks.toList(),
+        modelDownloadStatus = modelDownloadStatus,
+        modelInitializationStatus = modelInstances,
+        modelImportingUpdateTrigger = System.currentTimeMillis(),
+      )
+    }
   }
 
   fun getTokenStatusAndData(): TokenStatusAndData {

@@ -106,7 +106,7 @@ private enum class OsModule(val label: String, val icon: ImageVector) {
   FILE_BOX("FILE_BOX", Icons.Outlined.Code),
   MSTR_CTRL("MSTR_CTRL", Icons.Outlined.Terminal),
   SKILL_BOX("SKILL_BOX", Icons.Outlined.Psychology),
-  MODEL_MANAGER("MODEL_MANAGER", Icons.Outlined.DashboardCustomize),
+  VENDING_MACHINE("VENDING_MACHINE", Icons.Outlined.DashboardCustomize),
   SYS_SETTINGS("SETTINGS", Icons.Outlined.Settings),
 }
 
@@ -239,8 +239,8 @@ fun GalleryApp(
       // ── Other modules: rendered on top when active ─────────────
       if (!chatBoxVisible) {
         when (activeModule) {
-          // MODEL_MANAGER: full-screen, manages own Scaffold.
-          OsModule.MODEL_MANAGER -> GlobalModelManager(
+          // VENDING_MACHINE: full-screen, manages own Scaffold.
+          OsModule.VENDING_MACHINE -> GlobalModelManager(
             viewModel = modelManagerViewModel,
             navigateUp = { activeModule = OsModule.CHAT_BOX },
             onModelSelected = { task, model ->
