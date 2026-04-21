@@ -291,7 +291,7 @@ class AgentTools() : ToolSet {
   internal fun capObserveOutput(text: String): String {
     val limit = governor.maxOutputBuffer
     return if (text.length > limit) {
-      text.take(limit) + "\n[SYSTEM WARNING: OUTPUT TRUNCATED. RESPONSE EXCEEDED SIZE LIMIT.]"
+      text.take(limit) + "\n[SYSTEM WARNING: OUTPUT TRUNCATED TO PREVENT BUFFER OVERFLOW. USE grep OR tail TO REFINE SEARCH.]"
     } else {
       text
     }
