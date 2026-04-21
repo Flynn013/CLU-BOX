@@ -45,12 +45,10 @@ fun executeCommand(context: Context, command: String): String {
   return try {
     Log.d(TAG, "executeCommand: $command")
 
-    // Use the best available shell via the fallback chain:
-    //   $PREFIX/bin/bash → $PREFIX/bin/sh → /system/bin/sh
-    // This ensures commands still run even before the Termux bootstrap has
-    // been installed (or when the download fails).
-    val shellPath = EnvironmentInstaller.shellPath(context)
-    val pb = ProcessBuilder(shellPath, "-c", command)
+    // Build the launch command: proot-wrapped when proot is available, otherwise
+    // a direct shell exec (fallback chain: bash → sh → /system/bin/sh).
+    val cmd = EnvironmentInstaller.buildShellCommand(context, arrayOf("-c", command))
+    val pb = ProcessBuilder(cmd)
       .redirectErrorStream(false)
 
     // $HOME uses the Termux-compatible home directory so pkg/apt config files work.
@@ -74,7 +72,7 @@ fun executeCommand(context: Context, command: String): String {
     pb.environment()["HOME"]           = homeDir.absolutePath
     pb.environment()["TMPDIR"]         = tmpDir.absolutePath
     pb.environment()["LANG"]           = "en_US.UTF-8"
-    pb.environment()["SHELL"]          = shellPath
+    pb.environment()["SHELL"]          = EnvironmentInstaller.shellPath(context)
     pb.environment()["PATH"]           = effectivePath
     if (prefix.isDirectory) {
       pb.environment()["PREFIX"]         = prefix.absolutePath

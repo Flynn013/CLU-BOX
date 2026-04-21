@@ -89,6 +89,16 @@ object EnvironmentInstaller {
   private val BOOTSTRAP_ASSET_NAME: String = "bootstrap-$bootstrapArch.zip"
 
   /**
+   * Name of the `proot` binary bundled in `app/src/main/assets/`.
+   *
+   * proot intercepts filesystem syscalls so the app's sysroot can be
+   * bind-mounted to the hardcoded Termux prefix expected by `apt`, `dpkg`,
+   * and every shell script with a `/data/data/com.termux/…` shebang — all
+   * without root privileges.
+   */
+  private const val PROOT_ASSET_NAME = "proot"
+
+  /**
    * Primary download URL — official Termux bootstrap for the device arch.
    * Uses the GitHub `latest` redirect so it always points to the newest release.
    */
@@ -215,6 +225,9 @@ object EnvironmentInstaller {
   /** Absolute path to the internal `sh` binary. */
   fun shPath(context: Context): File = File(binDir(context), "sh")
 
+  /** Absolute path to the internal `proot` binary. */
+  fun prootPath(context: Context): File = File(binDir(context), "proot")
+
   /**
    * Returns the best available shell path inside the bootstrapped sysroot.
    *
@@ -229,6 +242,46 @@ object EnvironmentInstaller {
     val sh = shPath(context)
     if (sh.exists() && sh.canExecute()) return sh.absolutePath
     return "/system/bin/sh"
+  }
+
+  /**
+   * Builds the command list used to launch a shell process.
+   *
+   * When [prootPath] exists and is executable **and** `bash` is also available,
+   * the returned list wraps bash with proot so that syscall interception binds
+   * `filesDir` to `/data/data/com.termux/files/usr`. This allows `apt`, `dpkg`,
+   * and every shell script with a Termux shebang to run natively without any
+   * string-replacement patching.
+   *
+   * When proot is absent (not bundled or not yet installed) the list falls back
+   * to `[shellPath, *shellArgs]`, preserving the existing direct-exec behaviour.
+   *
+   * @param shellArgs Extra arguments forwarded to the shell, e.g. `"--login"`,
+   *                  or `"-c"` followed by a command string for non-interactive use.
+   * @return A non-empty list whose first element is the executable to launch.
+   */
+  fun buildShellCommand(context: Context, shellArgs: Array<String> = emptyArray()): List<String> {
+    val proot = prootPath(context)
+    val bash  = bashPath(context)
+    if (proot.exists() && proot.canExecute() && bash.exists() && bash.canExecute()) {
+      return buildList {
+        add(proot.absolutePath)
+        add("-0")                     // fake root — bypasses UID checks in apt/dpkg
+        add("-b")
+        add("${prefixDir(context).absolutePath}:$TERMUX_HARDCODED_PREFIX")
+        add("-b"); add("/dev")        // device nodes required by PTY
+        add("-b"); add("/proc")       // process info required by various tools
+        add("-w"); add(homeDir(context).absolutePath) // initial working directory
+        add(bash.absolutePath)
+        addAll(shellArgs)
+      }
+    }
+    // proot not available — launch shell directly (shebang-patching is the fallback).
+    val shell = shellPath(context)
+    return buildList {
+      add(shell)
+      addAll(shellArgs)
+    }
   }
 
   /**
@@ -381,6 +434,11 @@ object EnvironmentInstaller {
               .putString(KEY_SHEBANGS_PATCHED_PREFIX, prefixDir(context).absolutePath)
               .apply()
           }
+
+          // ── Tier 4: proot installation ───────────────────────────────────
+          // Copy proot from assets into bin/ so syscall interception is
+          // available on the next shell launch. installProot is idempotent.
+          installProot(context)
 
           _state.value = State.Ready
           Log.i(TAG, "Bootstrap ready at ${prefixDir(context).absolutePath}")
@@ -713,5 +771,35 @@ object EnvironmentInstaller {
     }
 
     Log.d(TAG, "patchShebangPaths: rewrote $patched scripts (→ $newPrefix)")
+  }
+
+  /**
+   * Copies the bundled `proot` binary from `assets/` into `$PREFIX/bin/proot`
+   * and marks it world-executable.
+   *
+   * proot uses `ptrace`-based syscall interception to bind-mount `filesDir` to
+   * `/data/data/com.termux/files/usr` so that `apt`, `dpkg`, and shell scripts
+   * with Termux shebangs run natively — no root required.
+   *
+   * This is a best-effort operation: if the asset is absent (developer chose not
+   * to bundle proot) the function logs at debug level and returns silently.  The
+   * engine then falls back to direct bash execution + shebang-patching.
+   */
+  private fun installProot(context: Context) {
+    val dest = prootPath(context)
+    if (dest.exists() && dest.canExecute()) return // already installed — fast path
+
+    try {
+      context.assets.open(PROOT_ASSET_NAME).use { input ->
+        dest.parentFile?.mkdirs()
+        FileOutputStream(dest).use { output -> input.copyTo(output) }
+      }
+      dest.setExecutable(true, true)  // owner-only — no need for world-exec
+      Log.i(TAG, "installProot: proot installed at ${dest.absolutePath}")
+    } catch (e: IOException) {
+      // Asset not bundled — proot integration is disabled; shebang-patching is
+      // the active fallback.  Not an error condition.
+      Log.d(TAG, "installProot: '$PROOT_ASSET_NAME' asset not found — proot disabled")
+    }
   }
 }

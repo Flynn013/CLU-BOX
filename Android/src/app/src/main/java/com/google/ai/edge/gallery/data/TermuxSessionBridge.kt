@@ -186,18 +186,17 @@ class TermuxSessionBridge(private val context: Context) {
     sessionInitError = null
 
     try {
-      // Resolve the best available shell using the fallback chain:
-      //   $PREFIX/bin/bash  (Termux full bash — preferred)
-      //   $PREFIX/bin/sh    (POSIX sh from bootstrap)
-      //   /system/bin/sh    (stock Android sh — always present, last resort)
-      // This ensures the terminal degrades gracefully when the bootstrap
-      // has not yet been downloaded or the download failed.
+      // Resolve the best available shell. When proot is installed both proot and
+      // bash must be present; otherwise fall back directly to bash/sh/system-sh.
       val shellPath = EnvironmentInstaller.shellPath(context)
-      val isBash = shellPath.endsWith("bash")
+      val usingProot = EnvironmentInstaller.prootPath(context).let { it.exists() && it.canExecute() } &&
+                       EnvironmentInstaller.bashPath(context).let { it.exists() && it.canExecute() }
+      // isBash is true when proot wraps bash OR when bash is launched directly.
+      val isBash = usingProot || shellPath.endsWith("bash")
       // Track whether we fell back to the stock Android shell so the UI can
       // trigger an automatic restart once the bootstrap self-heals.
-      usedFallbackShell = shellPath == "/system/bin/sh"
-      Log.d(TAG, "Checkpoint 1: Preparing session (shell=$shellPath, isBash=$isBash)")
+      usedFallbackShell = !usingProot && shellPath == "/system/bin/sh"
+      Log.d(TAG, "Checkpoint 1: Preparing session (usingProot=$usingProot, isBash=$isBash)")
 
       if (terminalSession != null) {
         Log.w(TAG, "Session already exists — destroying old one first")
@@ -233,6 +232,7 @@ class TermuxSessionBridge(private val context: Context) {
         "COLORTERM=truecolor",
         "LANG=en_US.UTF-8",
         "TMPDIR=${tmpDir.absolutePath}",
+        // SHELL should point to the underlying interpreter, not to proot.
         "SHELL=$shellPath",
         // Visible prompt so the user gets immediate boot feedback.
         "PS1=CLU/BOX \$ ",
@@ -251,18 +251,19 @@ class TermuxSessionBridge(private val context: Context) {
         env.add("TERMUX_PREFIX=${prefix.absolutePath}")
       }
 
-      // Pass --login so bash reads /etc/profile and ~/.bash_profile, which sets
-      // up the Termux $PATH, aliases, and TERM correctly.
+      // Build proot-wrapped (or direct) command list.
+      // Pass --login so bash reads /etc/profile and ~/.bash_profile.
       // NOTE: --login is only valid for bash; sh and /system/bin/sh do not
       // support it and will crash with "unknown option".
-      val args = if (isBash) arrayOf(shellPath, "--login") else arrayOf(shellPath)
+      val shellArgs = if (isBash) arrayOf("--login") else emptyArray()
+      val cmd = EnvironmentInstaller.buildShellCommand(context, shellArgs)
 
-      Log.d(TAG, "Checkpoint 3: Allocating PTY via TerminalSession")
+      Log.d(TAG, "Checkpoint 3: Allocating PTY via TerminalSession (cmd[0]=${cmd.first()})")
 
       terminalSession = TerminalSession(
-        shellPath,          // executable (bash preferred, sh fallback)
+        cmd.first(),        // executable (proot when available, bash/sh otherwise)
         cwd.absolutePath,   // working directory
-        args,               // arguments
+        cmd.toTypedArray(), // full args array (cmd[0] = program name as convention)
         env.toTypedArray(), // environment
         // Use the Termux library's default transcript size (typically 2000 rows).
         // This provides a reasonable scrollback buffer for CLU-BOX workflows.

@@ -192,8 +192,15 @@ class TerminalSessionManager(private val context: Context) {
         env["TERMUX_PREFIX"] = prefix.absolutePath
       }
 
-      Log.d(TAG, "Checkpoint 3: Starting ProcessBuilder (shell=$shell)")
-      val pb = ProcessBuilder(shell)
+      Log.d(TAG, "Checkpoint 3: Starting ProcessBuilder (proot=${EnvironmentInstaller.prootPath(context).canExecute()})")
+      // --login is only valid for bash (proot-wrapped or direct); sh / /system/bin/sh
+      // reject unknown options and will crash.  Determine if bash will actually run.
+      val usingProot = EnvironmentInstaller.prootPath(context).let { it.exists() && it.canExecute() } &&
+                       EnvironmentInstaller.bashPath(context).let { it.exists() && it.canExecute() }
+      val isBash = usingProot || shell.endsWith("bash")
+      val shellArgs = if (isBash) arrayOf("--login") else emptyArray()
+      val shellCmd = EnvironmentInstaller.buildShellCommand(context, shellArgs)
+      val pb = ProcessBuilder(shellCmd)
         .directory(sandboxRoot)
         .redirectErrorStream(false)
 
@@ -438,8 +445,8 @@ class TerminalSessionManager(private val context: Context) {
     return try {
       Log.d(TAG, "executeCommandInSandbox: $command")
 
-      val shellPath = EnvironmentInstaller.shellPath(context)
-      val pb = ProcessBuilder(shellPath, "-c", command)
+      val cmd = EnvironmentInstaller.buildShellCommand(context, arrayOf("-c", command))
+      val pb = ProcessBuilder(cmd)
         .directory(sandboxRoot)
         .redirectErrorStream(false)
 
@@ -525,8 +532,8 @@ class TerminalSessionManager(private val context: Context) {
    */
   fun executeCommandWithExitCode(command: String, timeoutSeconds: Long = CMD_TIMEOUT_SECONDS): Pair<Int, String> {
     return try {
-      val shellPath = EnvironmentInstaller.shellPath(context)
-      val pb = ProcessBuilder(shellPath, "-c", command)
+      val cmd = EnvironmentInstaller.buildShellCommand(context, arrayOf("-c", command))
+      val pb = ProcessBuilder(cmd)
         .directory(sandboxRoot)
         .redirectErrorStream(false)
 
