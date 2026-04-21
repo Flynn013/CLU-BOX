@@ -1254,6 +1254,7 @@ class AgentTools() : ToolSet {
 
       _actionChannel.send(
         SkillProgressAgentAction(
+          label = "Shell: command finished",
           inProgress = false,
           addItemTitle = "Shell_Execute",
           addItemDescription = "$ $safeCmd\n${output.take(200)}${if (output.length > 200) "…" else ""}",
