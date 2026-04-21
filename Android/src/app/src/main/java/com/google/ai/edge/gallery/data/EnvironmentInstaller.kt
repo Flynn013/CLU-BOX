@@ -23,6 +23,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
 import java.io.File
@@ -113,6 +115,18 @@ object EnvironmentInstaller {
   /** Observable installation state for UI progress indicators. */
   val state: StateFlow<State> = _state.asStateFlow()
 
+  /**
+   * Guards concurrent calls to [ensureInstalled].
+   *
+   * Without this mutex, two simultaneous callers (e.g. a UI LaunchedEffect
+   * and TerminalSessionManager.runPreFlightCheck) both pass the
+   * `isInstalled()` fast-path check, both download to the same
+   * `cacheDir/bootstrap-aarch64.zip` file concurrently, and the two
+   * interleaved writes corrupt the archive — causing extraction to fail
+   * with an invalid-zip error and leaving the environment permanently broken.
+   */
+  private val installMutex = Mutex()
+
   // ── Path helpers ───────────────────────────────────────────────────
 
   /** Root of the internal sysroot: `context.filesDir/usr`. */
@@ -190,49 +204,60 @@ object EnvironmentInstaller {
    * 2. Network download from GitHub releases (fallback when no asset found).
    */
   suspend fun ensureInstalled(context: Context) {
+    // Fast path: already installed — no lock needed.
     if (isInstalled(context)) {
       _state.value = State.Ready
       return
     }
 
-    withContext(Dispatchers.IO) {
-      try {
-        val zipFile = File(context.cacheDir, BOOTSTRAP_ASSET_NAME)
-
-        // 1. Try bundled asset; fall back to network download.
-        val fromAsset = tryCopyFromAsset(context, zipFile)
-        if (!fromAsset) {
-          _state.value = State.Downloading(0)
-          downloadBootstrap(zipFile)
-        }
-
-        // 2. Extract
-        _state.value = State.Extracting
-        extractBootstrap(zipFile, context.filesDir)
-
-        // 3. Symlinks + permissions
-        _state.value = State.FixingPermissions
-        processSymlinks(context.filesDir)
-        fixPermissions(context)
-
-        // 4. Create runtime directories that Termux expects.
-        homeDir(context).mkdirs()
-        tmpDir(context).mkdirs()
-
-        // 5. Clean up
-        zipFile.delete()
-
-        // 6. Persist success
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-          .edit().putBoolean(KEY_INSTALLED, true).apply()
-
+    // Slow path: acquire the mutex so that only one coroutine downloads and
+    // extracts the bootstrap at a time.  Re-check after acquiring in case a
+    // concurrent caller finished the install while we were waiting.
+    installMutex.withLock {
+      if (isInstalled(context)) {
         _state.value = State.Ready
-        Log.i(TAG, "Bootstrap installed at ${prefixDir(context).absolutePath}")
-      } catch (e: Exception) {
-        Log.e(TAG, "Bootstrap installation failed", e)
-        _state.value = State.Failed(e.message ?: "Unknown error")
+        return
       }
-    }
+
+      withContext(Dispatchers.IO) {
+        try {
+          val zipFile = File(context.cacheDir, BOOTSTRAP_ASSET_NAME)
+
+          // 1. Try bundled asset; fall back to network download.
+          val fromAsset = tryCopyFromAsset(context, zipFile)
+          if (!fromAsset) {
+            _state.value = State.Downloading(0)
+            downloadBootstrap(zipFile)
+          }
+
+          // 2. Extract
+          _state.value = State.Extracting
+          extractBootstrap(zipFile, context.filesDir)
+
+          // 3. Symlinks + permissions
+          _state.value = State.FixingPermissions
+          processSymlinks(context.filesDir)
+          fixPermissions(context)
+
+          // 4. Create runtime directories that Termux expects.
+          homeDir(context).mkdirs()
+          tmpDir(context).mkdirs()
+
+          // 5. Clean up
+          zipFile.delete()
+
+          // 6. Persist success
+          context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_INSTALLED, true).apply()
+
+          _state.value = State.Ready
+          Log.i(TAG, "Bootstrap installed at ${prefixDir(context).absolutePath}")
+        } catch (e: Exception) {
+          Log.e(TAG, "Bootstrap installation failed", e)
+          _state.value = State.Failed(e.message ?: "Unknown error")
+        }
+      } // withContext(Dispatchers.IO)
+    } // installMutex.withLock
   }
 
   // ── Private helpers ────────────────────────────────────────────────

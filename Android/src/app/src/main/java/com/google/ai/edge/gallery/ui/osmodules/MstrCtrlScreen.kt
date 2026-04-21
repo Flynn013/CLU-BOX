@@ -94,15 +94,17 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
   var inputText by remember { mutableStateOf("") }
 
   // ── Bootstrap state observation ──────────────────────────────
-  // Trigger the EnvironmentInstaller on first composition.
+  // Observe the installer state so the progress overlay and the terminal
+  // can react once the bootstrap finishes.  The actual installation is
+  // driven by TerminalSessionManager.startSession() → runPreFlightCheck()
+  // → EnvironmentInstaller.ensureInstalled().  Do NOT call ensureInstalled
+  // here: a second concurrent call races the first and they both write to
+  // the same cacheDir zip file, corrupting the archive and causing
+  // extraction to fail with an invalid-zip error.
   val bootstrapState by EnvironmentInstaller.state.collectAsState()
 
   // ── Terminal online status (set after pkg update -y succeeds) ──
   val terminalOnline by sessionManager.terminalOnline.collectAsState()
-
-  LaunchedEffect(Unit) {
-    EnvironmentInstaller.ensureInstalled(context)
-  }
 
   // If the bootstrap is not yet ready (and hasn't failed), show a progress
   // overlay instead of the terminal. On failure, fall through to the
