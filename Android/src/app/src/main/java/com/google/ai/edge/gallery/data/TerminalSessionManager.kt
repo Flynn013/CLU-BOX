@@ -143,7 +143,7 @@ class TerminalSessionManager(private val context: Context) {
    * Must be called once (e.g. from Application or first screen visit).
    */
   fun startSession() = sessionLock.withLock {
-    if (isSessionAlive) return
+    if (isSessionAlive) return@withLock
     Log.d(TAG, "Checkpoint 1: Preparing persistent shell session (HOME=${sandboxRoot.absolutePath})")
 
     try {
