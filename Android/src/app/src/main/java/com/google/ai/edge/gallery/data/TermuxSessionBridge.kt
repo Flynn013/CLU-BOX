@@ -175,18 +175,15 @@ class TermuxSessionBridge(private val context: Context) {
     sessionInitError = null
 
     try {
-      // Resolve the internal bash binary path explicitly.
-      // Using the hardcoded bash path prevents any accidental fallback to
-      // /system/bin/sh, which does not accept the --login argument and would
-      // crash immediately with "sh: --: unknown option".
-      val bashPath = EnvironmentInstaller.bashPath(context).absolutePath
-      Log.d(TAG, "Checkpoint 1: Preparing session (bash=$bashPath)")
-
-      // Strict validation: if the bootstrap extraction failed or hasn't run yet,
-      // throw a clear error rather than silently launching the wrong shell.
-      if (!File(bashPath).exists()) {
-        throw IllegalStateException("Bash binary missing at $bashPath")
-      }
+      // Resolve the best available shell using the fallback chain:
+      //   $PREFIX/bin/bash  (Termux full bash — preferred)
+      //   $PREFIX/bin/sh    (POSIX sh from bootstrap)
+      //   /system/bin/sh    (stock Android sh — always present, last resort)
+      // This ensures the terminal degrades gracefully when the bootstrap
+      // has not yet been downloaded or the download failed.
+      val shellPath = EnvironmentInstaller.shellPath(context)
+      val isBash = shellPath.endsWith("bash")
+      Log.d(TAG, "Checkpoint 1: Preparing session (shell=$shellPath, isBash=$isBash)")
 
       if (terminalSession != null) {
         Log.w(TAG, "Session already exists — destroying old one first")
@@ -222,7 +219,7 @@ class TermuxSessionBridge(private val context: Context) {
         "COLORTERM=truecolor",
         "LANG=en_US.UTF-8",
         "TMPDIR=${tmpDir.absolutePath}",
-        "SHELL=$bashPath",
+        "SHELL=$shellPath",
         // Visible prompt so the user gets immediate boot feedback.
         "PS1=CLU/BOX \$ ",
       )
@@ -236,16 +233,16 @@ class TermuxSessionBridge(private val context: Context) {
 
       // Pass --login so bash reads /etc/profile and ~/.bash_profile, which sets
       // up the Termux $PATH, aliases, and TERM correctly.
-      // NOTE: --login is only valid for bash, not for /system/bin/sh — this is
-      // why we explicitly use bashPath above instead of a generic shell fallback.
-      val args = arrayOf(bashPath, "--login")
+      // NOTE: --login is only valid for bash; sh and /system/bin/sh do not
+      // support it and will crash with "unknown option".
+      val args = if (isBash) arrayOf(shellPath, "--login") else arrayOf(shellPath)
 
       Log.d(TAG, "Checkpoint 3: Allocating PTY via TerminalSession")
 
       terminalSession = TerminalSession(
-        bashPath,           // executable (explicit bash — no sh fallback)
+        shellPath,          // executable (bash preferred, sh fallback)
         cwd.absolutePath,   // working directory
-        args,               // arguments (argv[0]=bash, argv[1]=--login)
+        args,               // arguments
         env.toTypedArray(), // environment
         // Use the Termux library's default transcript size (typically 2000 rows).
         // This provides a reasonable scrollback buffer for CLU-BOX workflows.

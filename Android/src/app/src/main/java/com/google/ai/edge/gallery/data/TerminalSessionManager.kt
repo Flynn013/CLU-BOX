@@ -434,9 +434,8 @@ class TerminalSessionManager(private val context: Context) {
     return try {
       Log.d(TAG, "executeCommandInSandbox: $command")
 
-      val bashPath = EnvironmentInstaller.bashPath(context).absolutePath
-      if (!File(bashPath).exists()) throw IllegalStateException("Bash binary missing at $bashPath")
-      val pb = ProcessBuilder(bashPath, "-c", command)
+      val shellPath = EnvironmentInstaller.shellPath(context)
+      val pb = ProcessBuilder(shellPath, "-c", command)
         .directory(sandboxRoot)
         .redirectErrorStream(false)
 
@@ -520,9 +519,8 @@ class TerminalSessionManager(private val context: Context) {
    */
   fun executeCommandWithExitCode(command: String, timeoutSeconds: Long = CMD_TIMEOUT_SECONDS): Pair<Int, String> {
     return try {
-      val bashPath = EnvironmentInstaller.bashPath(context).absolutePath
-      if (!File(bashPath).exists()) throw IllegalStateException("Bash binary missing at $bashPath")
-      val pb = ProcessBuilder(bashPath, "-c", command)
+      val shellPath = EnvironmentInstaller.shellPath(context)
+      val pb = ProcessBuilder(shellPath, "-c", command)
         .directory(sandboxRoot)
         .redirectErrorStream(false)
 

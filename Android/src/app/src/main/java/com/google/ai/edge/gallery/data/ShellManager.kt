@@ -45,14 +45,12 @@ fun executeCommand(context: Context, command: String): String {
   return try {
     Log.d(TAG, "executeCommand: $command")
 
-    // Use the extracted bash binary so shell syntax (&&, |, $VAR) works correctly.
-    // /system/bin/sh does not support these features reliably on Android.
-    val bashPath = EnvironmentInstaller.bashPath(context).absolutePath
-    if (!File(bashPath).exists()) {
-      throw IllegalStateException("Bash binary missing at $bashPath")
-    }
-
-    val pb = ProcessBuilder(bashPath, "-c", command)
+    // Use the best available shell via the fallback chain:
+    //   $PREFIX/bin/bash → $PREFIX/bin/sh → /system/bin/sh
+    // This ensures commands still run even before the Termux bootstrap has
+    // been installed (or when the download fails).
+    val shellPath = EnvironmentInstaller.shellPath(context)
+    val pb = ProcessBuilder(shellPath, "-c", command)
       .redirectErrorStream(false)
 
     // $HOME uses the Termux-compatible home directory so pkg/apt config files work.
@@ -61,7 +59,6 @@ fun executeCommand(context: Context, command: String): String {
     val binDir  = EnvironmentInstaller.binDir(context)
     val prefix  = EnvironmentInstaller.prefixDir(context)
     val libDir  = EnvironmentInstaller.libDir(context)
-    val shell   = EnvironmentInstaller.shellPath(context)
 
     // Build PATH: sysroot bin + applets (busybox) + stock Android fallback.
     val appletsDir = File(binDir, "applets")
@@ -77,7 +74,7 @@ fun executeCommand(context: Context, command: String): String {
     pb.environment()["HOME"]           = homeDir.absolutePath
     pb.environment()["TMPDIR"]         = tmpDir.absolutePath
     pb.environment()["LANG"]           = "en_US.UTF-8"
-    pb.environment()["SHELL"]          = shell
+    pb.environment()["SHELL"]          = shellPath
     pb.environment()["PATH"]           = effectivePath
     if (prefix.isDirectory) {
       pb.environment()["PREFIX"]         = prefix.absolutePath
