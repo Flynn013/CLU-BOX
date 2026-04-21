@@ -658,6 +658,8 @@ object EnvironmentInstaller {
         dest.parentFile?.mkdirs()
         FileOutputStream(dest).use { output -> input.copyTo(output) }
       }
+      // Keep this world-executable to match the bootstrap requirement for the
+      // copied asset and avoid execute-bit regressions across shell launch paths.
       dest.setExecutable(true, false)
       Log.i(TAG, "installProot: proot installed at ${dest.absolutePath}")
     } catch (e: IOException) {
