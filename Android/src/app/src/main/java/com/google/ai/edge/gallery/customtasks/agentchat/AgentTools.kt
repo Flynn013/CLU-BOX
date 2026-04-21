@@ -111,28 +111,18 @@ private fun validateRelativePath(path: String): String? {
 }
 
 /**
- * Dangerous shell metacharacter patterns that should be blocked from tool-supplied commands.
- * This prevents the LLM from constructing shell injections via tool arguments.
+ * Shell metacharacters that are blocked for ALL engines (true injection vectors).
+ * Backtick and `$(` / `${` enable arbitrary command substitution; `\n` allows
+ * newline-injection to smuggle a second command past a single-line parser.
  */
-private val DANGEROUS_SHELL_PATTERNS = listOf(
-  "&&", "||", ";", "|", "`", "\$(", "\${", ">", "<", "\n", "*", "?",
-)
+private val SHELL_INJECTION_PATTERNS = listOf("`", "\$(", "\${", "\n")
 
 /**
- * Returns a non-null error message if [command] contains suspicious
- * metacharacters that could enable shell injection via chained commands.
+ * Additional metacharacters blocked in LOCAL engine mode.
+ * These enable command chaining, piping, and redirection — safe on cloud
+ * infrastructure but inappropriate for the single-command-at-a-time local model.
  */
-private fun validateShellCommand(command: String): String? {
-  if (command.isBlank()) return "Command must not be empty"
-  if (command.length > MAX_INPUT_CHARS) return "Command exceeds maximum length"
-  for (pattern in DANGEROUS_SHELL_PATTERNS) {
-    if (command.contains(pattern)) {
-      return "Command contains disallowed shell metacharacter: '$pattern'. " +
-        "Execute only a single, simple command per call."
-    }
-  }
-  return null
-}
+private val LOCAL_SHELL_CHAIN_PATTERNS = listOf("&&", "||", ";", "|", ">", "<", "*", "?")
 
 /** Hard cap on the total serialized size of a tool result map (all keys + values).
  *  Prevents recursive tool loops from overflowing the KV cache with accumulated
@@ -296,6 +286,45 @@ class AgentTools() : ToolSet {
     } else {
       text
     }
+  }
+
+  /**
+   * Engine-aware shell-command validator.
+   *
+   * **LOCAL:** Blocks all shell metacharacters that could chain or redirect
+   * commands, forcing the model to issue only a single, simple command per
+   * tool call — matching the LOCAL_CONSTRAINT injected into the system prompt.
+   *
+   * **CLOUD:** Only blocks true command-injection vectors (backtick, `$(`,
+   * `${`, newline).  Chaining operators (`;`, `&&`, `||`), pipes (`|`),
+   * redirects (`>`, `<`), and glob patterns (`*`, `?`) are permitted so the
+   * Gemini model can compose multi-step shell pipelines and scripts as
+   * advertised by the CLOUD_CONSTRAINT.
+   *
+   * @return A non-null error string if [command] is invalid, null if safe.
+   */
+  internal fun validateShellCommand(command: String): String? {
+    if (command.isBlank()) return "Command must not be empty"
+    if (command.length > MAX_INPUT_CHARS) return "Command exceeds maximum length"
+
+    // Always block true injection vectors regardless of engine.
+    for (pattern in SHELL_INJECTION_PATTERNS) {
+      if (command.contains(pattern)) {
+        return "Command contains disallowed injection pattern: '$pattern'."
+      }
+    }
+
+    // LOCAL engine: additionally block chaining / redirect / glob metacharacters.
+    if (engine == AgentEngine.LOCAL) {
+      for (pattern in LOCAL_SHELL_CHAIN_PATTERNS) {
+        if (command.contains(pattern)) {
+          return "Command contains disallowed shell metacharacter: '$pattern'. " +
+            "Execute only a single, simple command per call."
+        }
+      }
+    }
+
+    return null
   }
 
   /** Optional VectorEngine for embedding generation and semantic search. */
