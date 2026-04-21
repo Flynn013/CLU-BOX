@@ -97,6 +97,9 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
   // Trigger the EnvironmentInstaller on first composition.
   val bootstrapState by EnvironmentInstaller.state.collectAsState()
 
+  // ── Terminal online status (set after pkg update -y succeeds) ──
+  val terminalOnline by sessionManager.terminalOnline.collectAsState()
+
   LaunchedEffect(Unit) {
     EnvironmentInstaller.ensureInstalled(context)
   }
@@ -131,9 +134,7 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
         Log.e("MstrCtrlScreen", "PTY init failed: ${b.sessionInitError}")
       }
     }
-  }
-
-  // Start the legacy session manager (pre-flight + agent tools).
+  }  // Start the legacy session manager (pre-flight + agent tools).
   LaunchedEffect(Unit) {
     sessionManager.startSession()
   }
@@ -167,6 +168,21 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
       .background(absoluteBlack)
       .imePadding(),
   ) {
+    // ── Status bar: TERMINAL ONLINE indicator ──────────────────
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .background(absoluteBlack)
+        .padding(horizontal = 10.dp, vertical = 3.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Text(
+        text = if (terminalOnline) "● TERMINAL: ONLINE" else "○ TERMINAL: OFFLINE",
+        color = if (terminalOnline) neonGreen else neonGreen.copy(alpha = 0.4f),
+        fontFamily = FontFamily.Monospace,
+        fontSize = 12.sp,
+      )
+    }
     // ── Termux TerminalView (main content area) ────────────────
     Box(
       modifier = Modifier

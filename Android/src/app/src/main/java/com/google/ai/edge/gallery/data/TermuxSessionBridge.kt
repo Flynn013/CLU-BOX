@@ -168,10 +168,11 @@ class TermuxSessionBridge(private val context: Context) {
    * crash the entire application. On failure, [sessionInitFailed] is set
    * and a diagnostic message is stored in [sessionInitError].
    *
-   * @param sandboxRoot The directory to use as `$HOME` and initial cwd.
-   * @param shell       Path to the shell binary (default: `/system/bin/sh`).
+   * @param cwd   Initial working directory for the shell process.
+   * @param shell Path to the shell binary (defaults to `$PREFIX/bin/bash`
+   *              when available, then `$PREFIX/bin/sh`, then `/system/bin/sh`).
    */
-  fun createSession(sandboxRoot: File, shell: String = EnvironmentInstaller.shellPath(context)) {
+  fun createSession(cwd: File, shell: String = EnvironmentInstaller.shellPath(context)) {
     sessionInitFailed = false
     sessionInitError = null
 
@@ -183,8 +184,10 @@ class TermuxSessionBridge(private val context: Context) {
         destroySession()
       }
 
-      val cwd = sandboxRoot.absolutePath
-      val home = sandboxRoot.absolutePath
+      // $HOME is a dedicated home directory inside filesDir (mirrors Termux convention).
+      val homeDir = EnvironmentInstaller.homeDir(context).also { it.mkdirs() }
+      // $TMPDIR lives inside the sysroot so pkg/apt scripts can find it.
+      val tmpDir = EnvironmentInstaller.tmpDir(context).also { it.mkdirs() }
 
       Log.d(TAG, "Checkpoint 2: Building environment")
 
@@ -204,12 +207,12 @@ class TermuxSessionBridge(private val context: Context) {
       }
 
       val env = mutableListOf(
-        "HOME=$home",
+        "HOME=${homeDir.absolutePath}",
         "TERM=xterm-256color",
         "PATH=$effectivePath",
         "COLORTERM=truecolor",
         "LANG=en_US.UTF-8",
-        "TMPDIR=${context.cacheDir.absolutePath}",
+        "TMPDIR=${tmpDir.absolutePath}",
         // Visible prompt so the user gets immediate boot feedback.
         "PS1=CLU/BOX \$ ",
       )
@@ -221,15 +224,17 @@ class TermuxSessionBridge(private val context: Context) {
         env.add("LD_LIBRARY_PATH=${EnvironmentInstaller.libDir(context).absolutePath}")
       }
 
-      val args = arrayOf(shell)
+      // Pass --login so bash reads /etc/profile and ~/.bash_profile, which sets
+      // up the Termux $PATH, aliases, and TERM correctly.
+      val args = arrayOf(shell, "--login")
 
       Log.d(TAG, "Checkpoint 3: Allocating PTY via TerminalSession")
 
       terminalSession = TerminalSession(
-        shell,    // executable
-        cwd,      // working directory
-        args,     // arguments
-        env.toTypedArray(),  // environment
+        shell,              // executable
+        cwd.absolutePath,   // working directory
+        args,               // arguments (argv[0]=shell, argv[1]=--login)
+        env.toTypedArray(), // environment
         // Use the Termux library's default transcript size (typically 2000 rows).
         // This provides a reasonable scrollback buffer for CLU-BOX workflows.
         TerminalEmulator.DEFAULT_TERMINAL_TRANSCRIPT_ROWS,

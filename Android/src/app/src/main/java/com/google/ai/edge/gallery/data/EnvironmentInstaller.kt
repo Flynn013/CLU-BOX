@@ -27,6 +27,7 @@ import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.zip.ZipInputStream
@@ -35,7 +36,13 @@ private const val TAG = "EnvironmentInstaller"
 
 /**
  * Bootstraps a self-contained Linux sysroot inside the app's private data
- * directory by downloading and extracting the official Termux `bootstrap-aarch64.zip`.
+ * directory by extracting the Termux `bootstrap-aarch64.zip`.
+ *
+ * **Source priority:**
+ * 1. Bundled asset at `assets/bootstrap-aarch64.zip` — used when the zip is
+ *    shipped inside the APK (avoids any network requirement).
+ * 2. Network download from the official Termux release — used as a fallback
+ *    when no bundled asset is present.
  *
  * After installation the sysroot lives at `context.filesDir/usr/` and provides
  * `bash`, `apt`/`pkg`, and the corresponding shared libraries — all without
@@ -44,16 +51,23 @@ private const val TAG = "EnvironmentInstaller"
  * Typical lifecycle:
  * 1. [MstrCtrlScreen] or [TerminalSessionManager] calls [ensureInstalled].
  * 2. If the sysroot is already present the call is a no-op.
- * 3. Otherwise the bootstrap archive is downloaded, extracted, symlinks are
- *    created from `SYMLINKS.txt`, and file permissions are fixed.
+ * 3. Otherwise the bootstrap archive is copied from assets (or downloaded),
+ *    extracted, symlinks are created from `SYMLINKS.txt`, and file permissions
+ *    are fixed.
  * 4. Once [state] emits [State.Ready], the terminal can start.
  */
 object EnvironmentInstaller {
 
   /**
+   * Name of the bundled bootstrap asset (placed in `app/src/main/assets/`).
+   * If this asset exists it is used in preference to a network download.
+   */
+  private const val BOOTSTRAP_ASSET_NAME = "bootstrap-aarch64.zip"
+
+  /**
    * URL of the official Termux bootstrap archive for aarch64.
    *
-   * This points to the latest release asset from the termux-packages repo.
+   * Used as a fallback when no bundled asset is available.
    * Update the URL if a newer bootstrap is published or if the release
    * scheme changes.
    */
@@ -110,6 +124,24 @@ object EnvironmentInstaller {
   /** Lib directory containing shared libraries (`$PREFIX/lib`). */
   fun libDir(context: Context): File = File(prefixDir(context), "lib")
 
+  /**
+   * The `$HOME` directory for Termux sessions: `context.filesDir/home`.
+   *
+   * This is a dedicated home directory **separate** from the app's `filesDir`
+   * and separate from the sysroot, matching Termux's own layout
+   * (`/data/data/com.termux/files/home`).
+   */
+  fun homeDir(context: Context): File = File(context.filesDir, "home")
+
+  /**
+   * The `$TMPDIR` for Termux sessions: `$PREFIX/tmp`.
+   *
+   * Placing tmp inside the sysroot ensures that temporary files created by
+   * package management scripts (e.g. `pkg`/`apt`) stay within a directory
+   * that bash and libc can find via the standard Termux conventions.
+   */
+  fun tmpDir(context: Context): File = File(prefixDir(context), "tmp")
+
   /** Absolute path to the internal `bash` binary. */
   fun bashPath(context: Context): File = File(binDir(context), "bash")
 
@@ -152,6 +184,10 @@ object EnvironmentInstaller {
    * no-op that immediately sets [state] to [State.Ready].
    *
    * Must be called from a coroutine context. Runs heavy I/O on [Dispatchers.IO].
+   *
+   * **Source priority:**
+   * 1. Bundled `assets/bootstrap-aarch64.zip` (fast — no network required).
+   * 2. Network download from GitHub releases (fallback when no asset found).
    */
   suspend fun ensureInstalled(context: Context) {
     if (isInstalled(context)) {
@@ -161,11 +197,14 @@ object EnvironmentInstaller {
 
     withContext(Dispatchers.IO) {
       try {
-        val zipFile = File(context.cacheDir, "bootstrap-aarch64.zip")
+        val zipFile = File(context.cacheDir, BOOTSTRAP_ASSET_NAME)
 
-        // 1. Download
-        _state.value = State.Downloading(0)
-        downloadBootstrap(zipFile)
+        // 1. Try bundled asset; fall back to network download.
+        val fromAsset = tryCopyFromAsset(context, zipFile)
+        if (!fromAsset) {
+          _state.value = State.Downloading(0)
+          downloadBootstrap(zipFile)
+        }
 
         // 2. Extract
         _state.value = State.Extracting
@@ -176,10 +215,14 @@ object EnvironmentInstaller {
         processSymlinks(context.filesDir)
         fixPermissions(context)
 
-        // 4. Clean up
+        // 4. Create runtime directories that Termux expects.
+        homeDir(context).mkdirs()
+        tmpDir(context).mkdirs()
+
+        // 5. Clean up
         zipFile.delete()
 
-        // 5. Persist success
+        // 6. Persist success
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
           .edit().putBoolean(KEY_INSTALLED, true).apply()
 
@@ -193,6 +236,29 @@ object EnvironmentInstaller {
   }
 
   // ── Private helpers ────────────────────────────────────────────────
+
+  /**
+   * Attempts to copy the bundled `assets/bootstrap-aarch64.zip` to [destination].
+   *
+   * @return `true` if the asset was found and successfully copied, `false` if
+   *         the asset is not bundled (caller should fall back to downloading).
+   */
+  private fun tryCopyFromAsset(context: Context, destination: File): Boolean {
+    return try {
+      context.assets.open(BOOTSTRAP_ASSET_NAME).use { input ->
+        Log.d(TAG, "Copying bootstrap from bundled asset")
+        _state.value = State.Extracting  // reuse Extracting for asset copy progress
+        FileOutputStream(destination).use { output ->
+          input.copyTo(output)
+        }
+      }
+      Log.d(TAG, "Asset copy complete → ${destination.absolutePath}")
+      true
+    } catch (e: IOException) {
+      Log.d(TAG, "No bundled bootstrap asset found ($BOOTSTRAP_ASSET_NAME) — will download")
+      false
+    }
+  }
 
   /**
    * Downloads the bootstrap archive to [destination], following HTTP redirects.
@@ -345,23 +411,27 @@ object EnvironmentInstaller {
   }
 
   /**
-   * Makes all files under `bin/` and `libexec/` executable.
+   * Makes all files under `bin/`, `lib/`, and `libexec/` executable (0755).
    *
-   * The bootstrap zip extracts to a flat structure (`filesDir/bin/`,
-   * `filesDir/libexec/`), **not** under a `usr/` prefix. The zip format
-   * does not preserve Unix permissions, so every binary needs an explicit
-   * `chmod 0755` after extraction.
+   * The bootstrap zip extracts to a `usr/`-rooted structure inside `filesDir`.
+   * The zip format does not preserve Unix permissions, so every binary and
+   * shared library needs an explicit `chmod 0755` after extraction.
    *
-   * Uses [Os.chmod] for aggressive, world-executable permission setting
-   * to avoid Exit 126 ("Permission Denied") errors at runtime.
+   * Also covers flat extraction layouts (`filesDir/bin/` etc.) in case the
+   * zip uses a different root structure.
+   *
+   * Uses [Os.chmod] for world-executable permission setting to avoid Exit 126
+   * ("Permission Denied") and dynamic-linker failures at runtime.
    */
   private fun fixPermissions(context: Context) {
-    // Target the flat extraction layout: filesDir/bin/ and filesDir/libexec/.
     val dirs = listOf(
+      // Flat layout (filesDir/bin, filesDir/lib, filesDir/libexec)
       File(context.filesDir, "bin"),
+      File(context.filesDir, "lib"),
       File(context.filesDir, "libexec"),
-      // Also cover the usr/-prefixed paths in case the zip contains both layouts.
+      // usr/-prefixed layout (filesDir/usr/bin, filesDir/usr/lib, filesDir/usr/libexec)
       binDir(context),
+      libDir(context),
       File(prefixDir(context), "libexec"),
     )
     var count = 0

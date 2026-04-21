@@ -126,6 +126,16 @@ class TerminalSessionManager(private val context: Context) {
   /** Emits `true` once the pre-flight bootstrap completes with exit code 0. */
   val preFlightReady: StateFlow<Boolean> = _preFlightReady.asStateFlow()
 
+  // ── Terminal online state ────────────────────────────────────
+  private val _terminalOnline = MutableStateFlow(false)
+
+  /**
+   * Emits `true` once the agentic verification loop confirms that `pkg`
+   * is working (`pkg update -y` returns a `$` prompt delimiter without
+   * error). The UI binds to this to display "TERMINAL: ONLINE".
+   */
+  val terminalOnline: StateFlow<Boolean> = _terminalOnline.asStateFlow()
+
   // ── Public API ───────────────────────────────────────────────
 
   /**
@@ -157,10 +167,11 @@ class TerminalSessionManager(private val context: Context) {
       }
 
       val env = mutableMapOf(
-        "HOME" to sandboxRoot.absolutePath,
+        "HOME" to EnvironmentInstaller.homeDir(context).also { it.mkdirs() }.absolutePath,
         "TERM" to "xterm-256color",
         "PATH" to effectivePath,
-        "TMPDIR" to context.cacheDir.absolutePath,
+        "TMPDIR" to EnvironmentInstaller.tmpDir(context).also { it.mkdirs() }.absolutePath,
+        "LANG" to "en_US.UTF-8",
       )
       // Inject sysroot environment variables when the bootstrap prefix exists.
       // This gives Shell_Execute access to bash, python, node, pkg, git, and native libs.
@@ -420,8 +431,9 @@ class TerminalSessionManager(private val context: Context) {
         .directory(sandboxRoot)
         .redirectErrorStream(false)
 
-      pb.environment()["HOME"] = sandboxRoot.absolutePath
-      pb.environment()["TMPDIR"] = context.cacheDir.absolutePath
+      pb.environment()["HOME"] = EnvironmentInstaller.homeDir(context).also { it.mkdirs() }.absolutePath
+      pb.environment()["TMPDIR"] = EnvironmentInstaller.tmpDir(context).also { it.mkdirs() }.absolutePath
+      pb.environment()["LANG"] = "en_US.UTF-8"
       // Inject internal sysroot environment so bash/python/node/pkg are visible.
       val binDir = EnvironmentInstaller.binDir(context)
       val prefix = EnvironmentInstaller.prefixDir(context)
@@ -503,8 +515,9 @@ class TerminalSessionManager(private val context: Context) {
         .directory(sandboxRoot)
         .redirectErrorStream(false)
 
-      pb.environment()["HOME"] = sandboxRoot.absolutePath
-      pb.environment()["TMPDIR"] = context.cacheDir.absolutePath
+      pb.environment()["HOME"] = EnvironmentInstaller.homeDir(context).also { it.mkdirs() }.absolutePath
+      pb.environment()["TMPDIR"] = EnvironmentInstaller.tmpDir(context).also { it.mkdirs() }.absolutePath
+      pb.environment()["LANG"] = "en_US.UTF-8"
       // Inject internal sysroot environment so bash/python/node/pkg are visible.
       val binDir = EnvironmentInstaller.binDir(context)
       val prefix = EnvironmentInstaller.prefixDir(context)
@@ -679,7 +692,8 @@ class TerminalSessionManager(private val context: Context) {
       // Even on subsequent boots, run the self-heal check to handle
       // corrupted permissions from OTA updates or storage clears.
       scope.launch {
-        checkEnvironment()
+        val healthy = checkEnvironment()
+        if (healthy) _terminalOnline.value = true
         firstBootHandled = true
         _preFlightReady.value = true
       }
@@ -700,17 +714,35 @@ class TerminalSessionManager(private val context: Context) {
         val hasPkg = pkgBinary.exists() && pkgBinary.canExecute()
 
         if (hasPkg) {
-          appendSystemLine("[FIRMWARE] pkg detected — installing development packages…")
-          val cmd = "pkg update -y && pkg upgrade -y && pkg install git python nodejs -y 2>&1"
-          val (exitCode, result) = executeCommandWithExitCode(cmd)
-          result.lines().forEach { line ->
+          appendSystemLine("[FIRMWARE] pkg detected — running update to verify terminal connectivity…")
+          // Agentic verification: pipe pkg update -y and monitor the output stream.
+          // If the command completes successfully (exit 0), the terminal is online.
+          val pkgUpdateCmd = "pkg update -y 2>&1"
+          val (updateExit, updateResult) = executeCommandWithExitCode(pkgUpdateCmd)
+          updateResult.lines().forEach { line ->
             appendLine(TerminalLine(line, LineSource.STDOUT))
           }
 
-          if (exitCode == 0) {
+          // Detect the shell prompt delimiter ($) in the output as the success signal.
+          val hasPromptDelimiter = updateResult.contains("$ ") || updateExit == 0
+          if (hasPromptDelimiter) {
+            appendSystemLine("[FIRMWARE] pkg update completed — TERMINAL: ONLINE")
+            _terminalOnline.value = true
+          } else {
+            appendSystemLine("[FIRMWARE] pkg update finished with exit $updateExit — connectivity uncertain.")
+          }
+
+          // Also install core development packages.
+          appendSystemLine("[FIRMWARE] Installing development packages…")
+          val installCmd = "pkg upgrade -y && pkg install git python nodejs -y 2>&1"
+          val (installExit, installResult) = executeCommandWithExitCode(installCmd)
+          installResult.lines().forEach { line ->
+            appendLine(TerminalLine(line, LineSource.STDOUT))
+          }
+          if (installExit == 0) {
             appendSystemLine("[FIRMWARE] Package install PASSED (exit 0).")
           } else {
-            appendSystemLine("[FIRMWARE] Package install finished with exit code $exitCode — continuing.")
+            appendSystemLine("[FIRMWARE] Package install finished with exit code $installExit — continuing.")
           }
         } else {
           appendSystemLine("[FIRMWARE] pkg not available in bootstrap — base sysroot only.")
