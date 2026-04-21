@@ -1249,12 +1249,11 @@ class AgentTools() : ToolSet {
       val output = if (tsm != null) {
         tsm.sendCommand(safeCmd, visible = false)
       } else {
-        com.google.ai.edge.gallery.data.executeCommand(safeCmd)
+        com.google.ai.edge.gallery.data.executeCommand(context, safeCmd)
       }
 
       _actionChannel.send(
         SkillProgressAgentAction(
-          label = "Shell: command finished",
           inProgress = false,
           addItemTitle = "Shell_Execute",
           addItemDescription = "$ $safeCmd\n${output.take(200)}${if (output.length > 200) "…" else ""}",
@@ -1328,7 +1327,7 @@ class AgentTools() : ToolSet {
         tsm.sendCommand(safeCmd, visible = true)
       } else {
         // Fallback: run silently if terminal session is not available.
-        com.google.ai.edge.gallery.data.executeCommand(safeCmd)
+        com.google.ai.edge.gallery.data.executeCommand(context, safeCmd)
       }
 
       _actionChannel.send(
@@ -1506,7 +1505,7 @@ class AgentTools() : ToolSet {
       val output = if (tsm != null) {
         tsm.sendCommand(cmd, visible = false)
       } else {
-        com.google.ai.edge.gallery.data.executeCommand(cmd)
+        com.google.ai.edge.gallery.data.executeCommand(context, cmd)
       }
 
       _actionChannel.send(
@@ -1666,7 +1665,7 @@ class AgentTools() : ToolSet {
       val output = if (tsm != null) {
         tsm.sendCommand(cmd, visible = true)
       } else {
-        com.google.ai.edge.gallery.data.executeCommand(cmd)
+        com.google.ai.edge.gallery.data.executeCommand(context, cmd)
       }
 
       // Try to extract error line number from common error output patterns.

@@ -16,7 +16,9 @@
 
 package com.google.ai.edge.gallery.data
 
+import android.content.Context
 import android.util.Log
+import java.io.File
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
@@ -29,22 +31,33 @@ private const val TIMEOUT_SECONDS = 10L
 private const val READER_THREAD_JOIN_TIMEOUT_MS = 5_000L
 
 /**
- * Executes a shell command via `sh -c` and returns the combined stdout + stderr output.
+ * Executes a shell command via the internal bash binary and returns the combined stdout + stderr output.
  *
  * A strict [TIMEOUT_SECONDS]-second timeout is enforced. If the process does not finish
  * in time it is destroyed and `"TIMEOUT ERROR"` is returned, preventing the app from hanging
  * on runaway commands (e.g. accidental infinite loops).
  *
+ * @param context Application context used to resolve the internal bash binary path.
  * @param command The shell command string to execute.
  * @return The raw terminal output (stdout followed by stderr), or `"TIMEOUT ERROR"`.
  */
-fun executeCommand(command: String): String {
+fun executeCommand(context: Context, command: String): String {
   return try {
     Log.d(TAG, "executeCommand: $command")
 
-    val process = ProcessBuilder("sh", "-c", command)
+    // Use the extracted bash binary so shell syntax (&&, |, $VAR) works correctly.
+    // /system/bin/sh does not support these features reliably on Android.
+    val bashPath = EnvironmentInstaller.bashPath(context).absolutePath
+    if (!File(bashPath).exists()) {
+      throw IllegalStateException("Bash binary missing at $bashPath")
+    }
+
+    val pb = ProcessBuilder(bashPath, "-c", command)
       .redirectErrorStream(false)
-      .start()
+    // Set PATH and HOME explicitly so commands can locate binaries and write files.
+    pb.environment()["PATH"] = "${context.filesDir.absolutePath}/usr/bin:/system/bin"
+    pb.environment()["HOME"] = "${context.filesDir.absolutePath}/clu_file_box"
+    val process = pb.start()
 
     // Read stdout and stderr on background threads so the pipe buffers don't fill up
     // and deadlock the process before waitFor returns.

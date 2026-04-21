@@ -426,12 +426,13 @@ class TerminalSessionManager(private val context: Context) {
     return try {
       Log.d(TAG, "executeCommandInSandbox: $command")
 
-      val shell = EnvironmentInstaller.shellPath(context)
-      val pb = ProcessBuilder(shell, "-c", command)
+      val bashPath = EnvironmentInstaller.bashPath(context).absolutePath
+      if (!File(bashPath).exists()) throw IllegalStateException("Bash binary missing at $bashPath")
+      val pb = ProcessBuilder(bashPath, "-c", command)
         .directory(sandboxRoot)
         .redirectErrorStream(false)
 
-      pb.environment()["HOME"] = EnvironmentInstaller.homeDir(context).also { it.mkdirs() }.absolutePath
+      pb.environment()["HOME"] = sandboxRoot.absolutePath
       pb.environment()["TMPDIR"] = EnvironmentInstaller.tmpDir(context).also { it.mkdirs() }.absolutePath
       pb.environment()["LANG"] = "en_US.UTF-8"
       // Inject internal sysroot environment so bash/python/node/pkg are visible.
@@ -510,12 +511,13 @@ class TerminalSessionManager(private val context: Context) {
    */
   fun executeCommandWithExitCode(command: String): Pair<Int, String> {
     return try {
-      val shell = EnvironmentInstaller.shellPath(context)
-      val pb = ProcessBuilder(shell, "-c", command)
+      val bashPath = EnvironmentInstaller.bashPath(context).absolutePath
+      if (!File(bashPath).exists()) throw IllegalStateException("Bash binary missing at $bashPath")
+      val pb = ProcessBuilder(bashPath, "-c", command)
         .directory(sandboxRoot)
         .redirectErrorStream(false)
 
-      pb.environment()["HOME"] = EnvironmentInstaller.homeDir(context).also { it.mkdirs() }.absolutePath
+      pb.environment()["HOME"] = sandboxRoot.absolutePath
       pb.environment()["TMPDIR"] = EnvironmentInstaller.tmpDir(context).also { it.mkdirs() }.absolutePath
       pb.environment()["LANG"] = "en_US.UTF-8"
       // Inject internal sysroot environment so bash/python/node/pkg are visible.
