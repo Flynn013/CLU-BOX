@@ -158,6 +158,17 @@ class TermuxSessionBridge(private val context: Context) {
     private set
 
   /**
+   * `true` when [createSession] fell back to `/system/bin/sh` because the
+   * bootstrap `bash` was not yet executable.
+   *
+   * Observed by [MstrCtrlScreen] to trigger an automatic bridge restart once
+   * [EnvironmentInstaller] self-heals and the terminal goes online.
+   */
+  @Volatile
+  var usedFallbackShell: Boolean = false
+    private set
+
+  /**
    * Creates and starts a new PTY-backed shell session.
    *
    * The shell process is not started until the [com.termux.view.TerminalView]
@@ -183,6 +194,9 @@ class TermuxSessionBridge(private val context: Context) {
       // has not yet been downloaded or the download failed.
       val shellPath = EnvironmentInstaller.shellPath(context)
       val isBash = shellPath.endsWith("bash")
+      // Track whether we fell back to the stock Android shell so the UI can
+      // trigger an automatic restart once the bootstrap self-heals.
+      usedFallbackShell = shellPath == "/system/bin/sh"
       Log.d(TAG, "Checkpoint 1: Preparing session (shell=$shellPath, isBash=$isBash)")
 
       if (terminalSession != null) {
@@ -229,6 +243,12 @@ class TermuxSessionBridge(private val context: Context) {
       if (prefix.isDirectory) {
         env.add("PREFIX=${prefix.absolutePath}")
         env.add("LD_LIBRARY_PATH=${EnvironmentInstaller.libDir(context).absolutePath}")
+        // TERMUX_PREFIX is read by Termux's runtime-patched apt and dpkg binaries
+        // to locate their configuration directories ($TERMUX_PREFIX/etc/apt,
+        // $TERMUX_PREFIX/var/lib/dpkg, …) at runtime instead of using their
+        // compiled-in Termux default path.  Without this variable, pkg install
+        // silently looks for configs in /data/data/com.termux/… and fails.
+        env.add("TERMUX_PREFIX=${prefix.absolutePath}")
       }
 
       // Pass --login so bash reads /etc/profile and ~/.bash_profile, which sets

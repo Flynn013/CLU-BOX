@@ -44,6 +44,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -68,6 +69,7 @@ import com.termux.view.TerminalView
 import com.termux.view.TerminalViewClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * MSTR_CTRL — full-screen terminal UI powered by the Termux terminal-emulator
@@ -105,6 +107,10 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
 
   // ── Terminal online status (set after pkg update -y succeeds) ──
   val terminalOnline by sessionManager.terminalOnline.collectAsState()
+
+  // Epoch counter incremented on every bridge restart to force the
+  // AndroidView to fully re-create and re-attach the new PTY session.
+  var bridgeRestartCount by remember { mutableStateOf(0) }
 
   // If the bootstrap is not yet ready (and hasn't failed), show a progress
   // overlay instead of the terminal. On failure, fall through to the
@@ -164,6 +170,20 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
     onDispose { bridge.destroySession() }
   }
 
+  // Auto-upgrade: when the bootstrap self-heals and the terminal goes ONLINE,
+  // restart the bridge if it was started with the /system/bin/sh fallback.
+  // This replaces the stuck /system/bin/sh session with a proper bash session
+  // without requiring the user to manually press the restart button.
+  LaunchedEffect(terminalOnline) {
+    if (terminalOnline && bridge.usedFallbackShell) {
+      withContext(Dispatchers.IO) {
+        bridge.destroySession()
+        bridge.createSession(sessionManager.sandboxRoot)
+      }
+      bridgeRestartCount++ // Triggers AndroidView re-attachment with the new bash session.
+    }
+  }
+
   Column(
     modifier = Modifier
       .fillMaxSize()
@@ -191,46 +211,51 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
         .weight(1f)
         .fillMaxWidth(),
     ) {
-      AndroidView(
-        modifier = Modifier.fillMaxSize(),
-        factory = { ctx ->
-          TerminalView(ctx, null).apply {
-            // Wire up the view client that handles keyboard/touch events.
-            setTerminalViewClient(CluTerminalViewClient(this))
+      // key(bridgeRestartCount) forces a full TerminalView re-creation whenever the
+      // bridge is restarted (e.g. after self-healing upgrades /system/bin/sh
+      // to bash).  This ensures attachSession() runs against the new session.
+      key(bridgeRestartCount) {
+        AndroidView(
+          modifier = Modifier.fillMaxSize(),
+          factory = { ctx ->
+            TerminalView(ctx, null).apply {
+              // Wire up the view client that handles keyboard/touch events.
+              setTerminalViewClient(CluTerminalViewClient(this))
 
-            // Style: monospace font, neon-green on black.
-            setTextSize(20)
-            setTypeface(Typeface.MONOSPACE)
+              // Style: monospace font, neon-green on black.
+              setTextSize(20)
+              setTypeface(Typeface.MONOSPACE)
 
-            // Black background to match CLU/BOX aesthetic.
-            setBackgroundColor(android.graphics.Color.BLACK)
+              // Black background to match CLU/BOX aesthetic.
+              setBackgroundColor(android.graphics.Color.BLACK)
 
-            // Make the view focusable so it can receive keyboard input.
-            isFocusable = true
-            isFocusableInTouchMode = true
+              // Make the view focusable so it can receive keyboard input.
+              isFocusable = true
+              isFocusableInTouchMode = true
 
-            // Attach the PTY session — the shell starts once the view measures.
-            val session = bridge.terminalSession
-            if (session != null) {
-              attachSession(session)
+              // Attach the PTY session — the shell starts once the view measures.
+              val session = bridge.terminalSession
+              if (session != null) {
+                attachSession(session)
+              }
+
+              // Store reference so the bridge callback can invalidate this view.
+              terminalViewRef = this
             }
-
-            // Store reference so the bridge callback can invalidate this view.
-            terminalViewRef = this
-          }
-        },
-        update = { view ->
-          // Keep the view reference current.
-          terminalViewRef = view
-          // Re-attach if the session was recreated.
-          // Note: `mTermSession` is a public field in Termux's TerminalView Java API.
-          // There is no getter method — direct access is the intended usage pattern.
-          val session = bridge.terminalSession
-          if (session != null && view.mTermSession !== session) {
-            view.attachSession(session)
-          }
-        },
-      )
+          },
+          update = { view ->
+            // Keep the view reference current.
+            terminalViewRef = view
+            // Re-attach if the session was recreated.
+            // Note: `mTermSession` is a public field in Termux's TerminalView Java API.
+            // There is no getter method — direct access is the intended usage pattern.
+            val session = bridge.terminalSession
+            if (session != null && view.mTermSession !== session) {
+              view.attachSession(session)
+            }
+          },
+        )
+      }
     }
 
     // ── Bottom input row (quick command injection) ─────────────

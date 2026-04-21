@@ -79,6 +79,19 @@ object EnvironmentInstaller {
   /** SharedPreferences file used to track installation state across launches. */
   private const val PREFS_NAME = "env_installer_prefs"
   private const val KEY_INSTALLED = "bootstrap_installed"
+  /** Persisted once script shebang paths have been rewritten for this app's prefix. */
+  private const val KEY_SHEBANGS_PATCHED = "shebangs_patched"
+
+  /**
+   * Hard-coded sysroot prefix baked into every Termux bootstrap script shebang,
+   * e.g. `#!/data/data/com.termux/files/usr/bin/bash`.
+   *
+   * Must be replaced with the actual [prefixDir] after extraction so that `pkg`,
+   * `apt-get`, and other shell scripts can be executed from our app's private
+   * storage. Without this replacement the kernel cannot find the interpreter and
+   * reports "inaccessible or not found" for every Termux script.
+   */
+  private const val TERMUX_HARDCODED_PREFIX = "/data/data/com.termux/files/usr"
 
   /**
    * Separator used in Termux's `SYMLINKS.txt` — the UTF-8 leftward arrow (U+2190).
@@ -191,67 +204,107 @@ object EnvironmentInstaller {
       (bashPath(context).exists() || shPath(context).exists())
   }
 
+  /**
+   * Returns `true` when the hardcoded Termux shebang paths inside the sysroot
+   * have already been rewritten to this app's actual [prefixDir].
+   */
+  fun isPatched(context: Context): Boolean {
+    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    return prefs.getBoolean(KEY_SHEBANGS_PATCHED, false)
+  }
+
   // ── Public API ─────────────────────────────────────────────────────
 
   /**
-   * Ensures the Linux sysroot is installed. If already present this is a
-   * no-op that immediately sets [state] to [State.Ready].
+   * Ensures the Linux sysroot is installed, executable, and shebang-patched.
    *
-   * Must be called from a coroutine context. Runs heavy I/O on [Dispatchers.IO].
+   * **Three work tiers handled in a single mutex-protected block:**
+   * 1. **Full install** — bootstrap archive is missing entirely: download (or copy
+   *    from bundled asset) and extract.
+   * 2. **Permission repair** — sysroot is present but bash lost its execute bit
+   *    (e.g. after an OTA update or storage-encryption re-key): re-run
+   *    [fixPermissions].
+   * 3. **Shebang patching** — script shebangs still contain the hardcoded Termux
+   *    prefix (`/data/data/com.termux/files/usr`): replace with this app's actual
+   *    [prefixDir] so `pkg`, `apt-get`, and every other shell script can be
+   *    exec'd directly.
    *
-   * **Source priority:**
-   * 1. Bundled `assets/bootstrap-aarch64.zip` (fast — no network required).
-   * 2. Network download from GitHub releases (fallback when no asset found).
+   * Must be called from a coroutine context. Heavy I/O runs on [Dispatchers.IO].
    */
   suspend fun ensureInstalled(context: Context) {
-    // Fast path: already installed — no lock needed.
-    if (isInstalled(context)) {
+    // Truly fast path: installed, executable, and already patched — nothing to do.
+    if (isInstalled(context) && isPatched(context) &&
+        (bashPath(context).canExecute() || shPath(context).canExecute())) {
       _state.value = State.Ready
       return
     }
 
-    // Slow path: acquire the mutex so that only one coroutine downloads and
-    // extracts the bootstrap at a time.  Re-check after acquiring in case a
-    // concurrent caller finished the install while we were waiting.
+    // Need to do some work. Acquire the mutex so that only one coroutine proceeds
+    // at a time (prevents concurrent download/extract races and double-patching).
     installMutex.withLock {
-      if (isInstalled(context)) {
+      // Double-check after acquiring the lock.
+      if (isInstalled(context) && isPatched(context) &&
+          (bashPath(context).canExecute() || shPath(context).canExecute())) {
         _state.value = State.Ready
         return
       }
 
       withContext(Dispatchers.IO) {
         try {
-          val zipFile = File(context.cacheDir, BOOTSTRAP_ASSET_NAME)
+          // ── Tier 1: Full install if the sysroot is missing ───────────────
+          if (!isInstalled(context)) {
+            val zipFile = File(context.cacheDir, BOOTSTRAP_ASSET_NAME)
 
-          // 1. Try bundled asset; fall back to network download.
-          val fromAsset = tryCopyFromAsset(context, zipFile)
-          if (!fromAsset) {
-            _state.value = State.Downloading(0)
-            downloadBootstrap(zipFile)
+            // Prefer bundled asset; fall back to network download.
+            val fromAsset = tryCopyFromAsset(context, zipFile)
+            if (!fromAsset) {
+              _state.value = State.Downloading(0)
+              downloadBootstrap(zipFile)
+            }
+
+            _state.value = State.Extracting
+            extractBootstrap(zipFile, context.filesDir)
+
+            _state.value = State.FixingPermissions
+            processSymlinks(context.filesDir)
+            fixPermissions(context)
+
+            // Create runtime directories that Termux expects.
+            homeDir(context).mkdirs()
+            tmpDir(context).mkdirs()
+
+            zipFile.delete()
+
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+              .edit().putBoolean(KEY_INSTALLED, true).apply()
+
+            Log.i(TAG, "Bootstrap extracted to ${prefixDir(context).absolutePath}")
           }
 
-          // 2. Extract
-          _state.value = State.Extracting
-          extractBootstrap(zipFile, context.filesDir)
+          // ── Tier 2: Permission repair ────────────────────────────────────
+          // The zip format does not preserve Unix permissions and Android OTA
+          // updates can strip execute bits. Re-apply 0755 whenever bash is
+          // not directly executable; this also covers first-run-after-extract.
+          if (!bashPath(context).canExecute() && !shPath(context).canExecute()) {
+            Log.i(TAG, "Repairing execute permissions on sysroot binaries")
+            _state.value = State.FixingPermissions
+            fixPermissions(context)
+          }
 
-          // 3. Symlinks + permissions
-          _state.value = State.FixingPermissions
-          processSymlinks(context.filesDir)
-          fixPermissions(context)
-
-          // 4. Create runtime directories that Termux expects.
-          homeDir(context).mkdirs()
-          tmpDir(context).mkdirs()
-
-          // 5. Clean up
-          zipFile.delete()
-
-          // 6. Persist success
-          context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit().putBoolean(KEY_INSTALLED, true).apply()
+          // ── Tier 3: Shebang path patching ────────────────────────────────
+          // Every Termux bootstrap script has `#!/data/data/com.termux/files/usr/…`
+          // hard-coded as its interpreter path.  Kernel exec fails with "No such
+          // file or directory" until we rewrite these to this app's actual prefix.
+          if (!isPatched(context)) {
+            Log.i(TAG, "Patching Termux shebang paths → ${prefixDir(context).absolutePath}")
+            _state.value = State.FixingPermissions
+            patchShebangPaths(context)
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+              .edit().putBoolean(KEY_SHEBANGS_PATCHED, true).apply()
+          }
 
           _state.value = State.Ready
-          Log.i(TAG, "Bootstrap installed at ${prefixDir(context).absolutePath}")
+          Log.i(TAG, "Bootstrap ready at ${prefixDir(context).absolutePath}")
         } catch (e: Exception) {
           Log.e(TAG, "Bootstrap installation failed", e)
           _state.value = State.Failed(e.message ?: "Unknown error")
@@ -472,5 +525,70 @@ object EnvironmentInstaller {
       }
     }
     Log.d(TAG, "Made $count files executable")
+  }
+
+  /**
+   * Rewrites hardcoded Termux shebang interpreter paths in shell scripts to use
+   * this app's actual [prefixDir].
+   *
+   * Every script in `$PREFIX/bin/` and `$PREFIX/libexec/` extracted from the
+   * official Termux bootstrap archive has a shebang like:
+   * ```
+   * #!/data/data/com.termux/files/usr/bin/bash
+   * ```
+   * When installed into *this* app's prefix the kernel cannot find the interpreter
+   * at that path → "inaccessible or not found". Replacing every occurrence of the
+   * hardcoded prefix with [prefixDir] makes `pkg`, `apt-get`, `python3`, and all
+   * other Termux shell scripts directly executable under our sysroot.
+   *
+   * Additionally, Termux's runtime-patched `apt` and `dpkg` binaries respect the
+   * `TERMUX_PREFIX` environment variable (set by [TermuxSessionBridge] and
+   * [TerminalSessionManager]) to locate their config directories at runtime, so
+   * package installation continues to work after the script shebangs are fixed.
+   *
+   * **Safety:** Only regular, non-symlink text files starting with `#!` are
+   * rewritten. ELF binaries, symlinks, and non-UTF-8 files are skipped.
+   * Symlinks are explicitly excluded — writing through a symlink would overwrite
+   * the *target* binary (e.g. a busybox-applet symlink → corrupt busybox itself).
+   */
+  private fun patchShebangPaths(context: Context) {
+    val oldPrefix = TERMUX_HARDCODED_PREFIX
+    val newPrefix = prefixDir(context).absolutePath
+
+    if (oldPrefix == newPrefix) return // No-op — paths are identical
+
+    var patched = 0
+
+    val dirs = listOf(binDir(context), File(prefixDir(context), "libexec"))
+    for (dir in dirs) {
+      if (!dir.isDirectory) continue
+      dir.walkTopDown().forEach { file ->
+        if (!file.isFile) return@forEach
+        // Skip symlinks — writing through them overwrites the symlink target,
+        // e.g. an `ls -> busybox` applet symlink would corrupt the busybox binary.
+        if (java.nio.file.Files.isSymbolicLink(file.toPath())) return@forEach
+        try {
+          // Only process shell scripts identified by their `#!` shebang header.
+          val header = ByteArray(2)
+          val bytesRead = file.inputStream().use { it.read(header) }
+          if (bytesRead < 2 ||
+              header[0] != '#'.code.toByte() ||
+              header[1] != '!'.code.toByte()) {
+            return@forEach // ELF binary or non-script file — leave untouched
+          }
+          val content = file.readText(Charsets.UTF_8)
+          if (content.contains(oldPrefix)) {
+            file.writeText(content.replace(oldPrefix, newPrefix), Charsets.UTF_8)
+            patched++
+          }
+        } catch (e: Exception) {
+          // Binary-looking file detected as text, encoding error, or permission
+          // issue — skip silently.  Log at debug level to aid device diagnostics.
+          Log.d(TAG, "patchShebangPaths: skipping ${file.name} (${e.javaClass.simpleName})")
+        }
+      }
+    }
+
+    Log.d(TAG, "patchShebangPaths: rewrote $patched scripts ($oldPrefix → $newPrefix)")
   }
 }

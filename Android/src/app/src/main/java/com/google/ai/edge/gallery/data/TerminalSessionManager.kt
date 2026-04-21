@@ -186,6 +186,10 @@ class TerminalSessionManager(private val context: Context) {
       if (prefix.isDirectory) {
         env["PREFIX"] = prefix.absolutePath
         env["LD_LIBRARY_PATH"] = libDir.absolutePath
+        // TERMUX_PREFIX is read by Termux's runtime-patched apt/dpkg to locate
+        // their config directories at runtime instead of the compiled-in Termux
+        // default path.  Required for `pkg install` / `apt-get` to work.
+        env["TERMUX_PREFIX"] = prefix.absolutePath
       }
 
       Log.d(TAG, "Checkpoint 3: Starting ProcessBuilder (shell=$shell)")
@@ -458,6 +462,8 @@ class TerminalSessionManager(private val context: Context) {
         pb.environment()["PATH"] = fullPath
         pb.environment()["PREFIX"] = prefix.absolutePath
         pb.environment()["LD_LIBRARY_PATH"] = libDir.absolutePath
+        // Required for Termux-patched apt/dpkg to find config at our prefix.
+        pb.environment()["TERMUX_PREFIX"] = prefix.absolutePath
       }
 
       val proc = pb.start()
@@ -543,6 +549,8 @@ class TerminalSessionManager(private val context: Context) {
         pb.environment()["PATH"] = fullPath
         pb.environment()["PREFIX"] = prefix.absolutePath
         pb.environment()["LD_LIBRARY_PATH"] = libDir.absolutePath
+        // Required for Termux-patched apt/dpkg to find config at our prefix.
+        pb.environment()["TERMUX_PREFIX"] = prefix.absolutePath
       }
 
       val proc = pb.start()
