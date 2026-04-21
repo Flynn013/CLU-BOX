@@ -25,7 +25,7 @@ import java.util.concurrent.atomic.AtomicReference
 private const val TAG = "ShellManager"
 
 /** Timeout in seconds before a shell process is forcibly killed. */
-private const val TIMEOUT_SECONDS = 10L
+private const val TIMEOUT_SECONDS = 60L
 
 /** Maximum time (ms) to wait for reader threads to finish after the process exits. */
 private const val READER_THREAD_JOIN_TIMEOUT_MS = 5_000L
@@ -54,9 +54,36 @@ fun executeCommand(context: Context, command: String): String {
 
     val pb = ProcessBuilder(bashPath, "-c", command)
       .redirectErrorStream(false)
-    // Set PATH and HOME explicitly so commands can locate binaries and write files.
-    pb.environment()["PATH"] = "${context.filesDir.absolutePath}/usr/bin:/system/bin"
-    pb.environment()["HOME"] = "${context.filesDir.absolutePath}/clu_file_box"
+
+    // $HOME uses the Termux-compatible home directory so pkg/apt config files work.
+    val homeDir = EnvironmentInstaller.homeDir(context).also { it.mkdirs() }
+    val tmpDir  = EnvironmentInstaller.tmpDir(context).also  { it.mkdirs() }
+    val binDir  = EnvironmentInstaller.binDir(context)
+    val prefix  = EnvironmentInstaller.prefixDir(context)
+    val libDir  = EnvironmentInstaller.libDir(context)
+    val shell   = EnvironmentInstaller.shellPath(context)
+
+    // Build PATH: sysroot bin + applets (busybox) + stock Android fallback.
+    val appletsDir = File(binDir, "applets")
+    val effectivePath = buildString {
+      if (binDir.isDirectory) {
+        append(binDir.absolutePath)
+        if (appletsDir.isDirectory) append(":${appletsDir.absolutePath}")
+        append(":")
+      }
+      append("/system/bin:/system/xbin")
+    }
+
+    pb.environment()["HOME"]           = homeDir.absolutePath
+    pb.environment()["TMPDIR"]         = tmpDir.absolutePath
+    pb.environment()["LANG"]           = "en_US.UTF-8"
+    pb.environment()["SHELL"]          = shell
+    pb.environment()["PATH"]           = effectivePath
+    if (prefix.isDirectory) {
+      pb.environment()["PREFIX"]         = prefix.absolutePath
+      pb.environment()["LD_LIBRARY_PATH"] = libDir.absolutePath
+    }
+
     val process = pb.start()
 
     // Read stdout and stderr on background threads so the pipe buffers don't fill up

@@ -222,6 +222,7 @@ class TermuxSessionBridge(private val context: Context) {
         "COLORTERM=truecolor",
         "LANG=en_US.UTF-8",
         "TMPDIR=${tmpDir.absolutePath}",
+        "SHELL=$bashPath",
         // Visible prompt so the user gets immediate boot feedback.
         "PS1=CLU/BOX \$ ",
       )

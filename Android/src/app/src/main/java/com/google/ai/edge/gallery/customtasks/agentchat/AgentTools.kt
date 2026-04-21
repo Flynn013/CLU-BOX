@@ -61,20 +61,27 @@ enum class AgentEngine { LOCAL, CLOUD }
  */
 data class AgentGovernor(val maxLoops: Int, val maxOutputBuffer: Int) {
   companion object {
-    val LOCAL  = AgentGovernor(maxLoops = 3,  maxOutputBuffer = 2_000)
-    val CLOUD  = AgentGovernor(maxLoops = 10, maxOutputBuffer = 50_000)
+    // LOCAL needs more loop iterations than CLOUD because it can only issue one
+    // simple command per turn — complex tasks require many more round-trips.
+    val LOCAL  = AgentGovernor(maxLoops = 15, maxOutputBuffer = 2_000)
+    val CLOUD  = AgentGovernor(maxLoops = 20, maxOutputBuffer = 50_000)
 
     /** Engine-specific constraint appended to the base system prompt. */
     const val LOCAL_CONSTRAINT =
-      "SYSTEM CONSTRAINT: You are running on local mobile hardware. Your context window is limited. " +
-      "You MUST only execute ONE simple bash command at a time. Do NOT use complex pipes or scripts. " +
-      "If an error occurs, report it immediately to the user. Do not attempt infinite retries."
+      "SYSTEM CONSTRAINT: You are running on local mobile hardware. Context window is limited. " +
+      "Execute ONE simple bash command at a time — no pipes, no multi-command scripts. " +
+      "Use taskQueueUpdate(status='pending', next_task_description='...') after each step to " +
+      "continue multi-step work across turns. When you hit an error, diagnose it with the next " +
+      "command and keep going — only call operatorHalt when you genuinely need the user or have " +
+      "fully completed the task."
 
     const val CLOUD_CONSTRAINT =
       "SYSTEM CONSTRAINT: You are running on cloud infrastructure with advanced reasoning. " +
       "You have full read/write access to the clu_workspace via the bash terminal. " +
       "You may chain commands, write Python scripts to solve complex logic, and use git. " +
-      "If you encounter an error, use your tools to independently diagnose and fix it before reporting back to the user."
+      "Use taskQueueUpdate(status='pending', next_task_description='...') to continue multi-step " +
+      "work across turns. If you encounter an error, use your tools to independently diagnose and " +
+      "fix it before reporting back to the user."
   }
 }
 

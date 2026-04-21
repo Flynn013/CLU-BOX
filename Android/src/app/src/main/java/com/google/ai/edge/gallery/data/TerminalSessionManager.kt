@@ -42,8 +42,8 @@ private const val TAG = "TerminalSessionManager"
 private const val PREFS_NAME = "mstr_ctrl_prefs"
 private const val KEY_FIRST_BOOT_DONE = "first_boot_done"
 
-/** Timeout for individual commands piped through the session (seconds). */
-private const val CMD_TIMEOUT_SECONDS = 10L
+/** Timeout in seconds before a shell process is forcibly killed. */
+private const val CMD_TIMEOUT_SECONDS = 60L
 
 /** Maximum time (ms) to wait for reader threads to finish after the process exits. */
 private const val READER_THREAD_JOIN_TIMEOUT_MS = 5_000L
@@ -56,6 +56,13 @@ private const val PTY_POLL_INTERVAL_MS = 50L
 
 /** Maximum ms of silence before we consider a PTY command complete. */
 private const val PTY_SILENCE_THRESHOLD_MS = 300L
+
+/**
+ * Extended timeout (seconds) used for package-manager operations that require
+ * network I/O: `pkg update`, `pkg upgrade`, `pkg install`, `pip install`, etc.
+ * Network latency on mobile can push these well past the normal 60-second cap.
+ */
+private const val PKG_INSTALL_TIMEOUT_SECONDS = 300L
 
 /**
  * Represents a single line of terminal output, tagged by source.
@@ -172,6 +179,7 @@ class TerminalSessionManager(private val context: Context) {
         "PATH" to effectivePath,
         "TMPDIR" to EnvironmentInstaller.tmpDir(context).also { it.mkdirs() }.absolutePath,
         "LANG" to "en_US.UTF-8",
+        "SHELL" to EnvironmentInstaller.shellPath(context),
       )
       // Inject sysroot environment variables when the bootstrap prefix exists.
       // This gives Shell_Execute access to bash, python, node, pkg, git, and native libs.
@@ -432,9 +440,10 @@ class TerminalSessionManager(private val context: Context) {
         .directory(sandboxRoot)
         .redirectErrorStream(false)
 
-      pb.environment()["HOME"] = sandboxRoot.absolutePath
+      pb.environment()["HOME"] = EnvironmentInstaller.homeDir(context).also { it.mkdirs() }.absolutePath
       pb.environment()["TMPDIR"] = EnvironmentInstaller.tmpDir(context).also { it.mkdirs() }.absolutePath
       pb.environment()["LANG"] = "en_US.UTF-8"
+      pb.environment()["SHELL"] = EnvironmentInstaller.shellPath(context)
       // Inject internal sysroot environment so bash/python/node/pkg are visible.
       val binDir = EnvironmentInstaller.binDir(context)
       val prefix = EnvironmentInstaller.prefixDir(context)
@@ -509,7 +518,7 @@ class TerminalSessionManager(private val context: Context) {
    * Executes [command] and returns a [Pair] of (exitCode, combinedOutput).
    * Used by the Auto-Validator to inspect the exit code separately.
    */
-  fun executeCommandWithExitCode(command: String): Pair<Int, String> {
+  fun executeCommandWithExitCode(command: String, timeoutSeconds: Long = CMD_TIMEOUT_SECONDS): Pair<Int, String> {
     return try {
       val bashPath = EnvironmentInstaller.bashPath(context).absolutePath
       if (!File(bashPath).exists()) throw IllegalStateException("Bash binary missing at $bashPath")
@@ -517,9 +526,10 @@ class TerminalSessionManager(private val context: Context) {
         .directory(sandboxRoot)
         .redirectErrorStream(false)
 
-      pb.environment()["HOME"] = sandboxRoot.absolutePath
+      pb.environment()["HOME"] = EnvironmentInstaller.homeDir(context).also { it.mkdirs() }.absolutePath
       pb.environment()["TMPDIR"] = EnvironmentInstaller.tmpDir(context).also { it.mkdirs() }.absolutePath
       pb.environment()["LANG"] = "en_US.UTF-8"
+      pb.environment()["SHELL"] = EnvironmentInstaller.shellPath(context)
       // Inject internal sysroot environment so bash/python/node/pkg are visible.
       val binDir = EnvironmentInstaller.binDir(context)
       val prefix = EnvironmentInstaller.prefixDir(context)
@@ -550,7 +560,7 @@ class TerminalSessionManager(private val context: Context) {
         stderrRef.set(proc.errorStream.bufferedReader(Charsets.UTF_8).readText())
       }.also { it.start() }
 
-      val finished = proc.waitFor(CMD_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+      val finished = proc.waitFor(timeoutSeconds, TimeUnit.SECONDS)
 
       if (!finished) {
         proc.destroyForcibly()
@@ -720,7 +730,7 @@ class TerminalSessionManager(private val context: Context) {
           // Agentic verification: pipe pkg update -y and monitor the output stream.
           // If the command completes successfully (exit 0), the terminal is online.
           val pkgUpdateCmd = "pkg update -y 2>&1"
-          val (updateExit, updateResult) = executeCommandWithExitCode(pkgUpdateCmd)
+          val (updateExit, updateResult) = executeCommandWithExitCode(pkgUpdateCmd, PKG_INSTALL_TIMEOUT_SECONDS)
           updateResult.lines().forEach { line ->
             appendLine(TerminalLine(line, LineSource.STDOUT))
           }
@@ -736,7 +746,7 @@ class TerminalSessionManager(private val context: Context) {
           // Also install core development packages.
           appendSystemLine("[FIRMWARE] Installing development packages…")
           val installCmd = "pkg upgrade -y && pkg install git python nodejs -y 2>&1"
-          val (installExit, installResult) = executeCommandWithExitCode(installCmd)
+          val (installExit, installResult) = executeCommandWithExitCode(installCmd, PKG_INSTALL_TIMEOUT_SECONDS)
           installResult.lines().forEach { line ->
             appendLine(TerminalLine(line, LineSource.STDOUT))
           }
@@ -756,7 +766,7 @@ class TerminalSessionManager(private val context: Context) {
         // Stage 4: Agentic verification — confirm Dev-Ready status.
         if (envHealthy) {
           appendSystemLine("[FIRMWARE] Agentic verification: installing pip packages…")
-          val (pipExit, pipOut) = executeCommandWithExitCode("pip install requests 2>&1")
+          val (pipExit, pipOut) = executeCommandWithExitCode("pip install requests 2>&1", PKG_INSTALL_TIMEOUT_SECONDS)
           if (pipExit == 0) {
             appendSystemLine("[FIRMWARE] pip install requests — OK")
           } else {
