@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -36,6 +37,9 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -112,13 +116,15 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
   // AndroidView to fully re-create and re-attach the new PTY session.
   var bridgeRestartCount by remember { mutableStateOf(0) }
 
-  // If the bootstrap is not yet ready (and hasn't failed), show a progress
-  // overlay instead of the terminal. On failure, fall through to the
-  // terminal with the limited /system/bin/sh shell.
-  if (bootstrapState !is EnvironmentInstaller.State.Ready &&
-    bootstrapState !is EnvironmentInstaller.State.Failed
-  ) {
-    BootstrapProgressOverlay(bootstrapState)
+  // If the bootstrap is not yet ready (including failed — user gets a retry button
+  // instead of a silent degraded /system/bin/sh terminal), show the overlay.
+  if (bootstrapState !is EnvironmentInstaller.State.Ready) {
+    BootstrapProgressOverlay(
+      state = bootstrapState,
+      onRetry = if (bootstrapState is EnvironmentInstaller.State.Failed) {
+        { scope.launch { EnvironmentInstaller.retry(context) } }
+      } else null,
+    )
     return
   }
 
@@ -329,35 +335,62 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
 
 // ── Bootstrap progress overlay ───────────────────────────────────────────
 //
-// Shown while EnvironmentInstaller is downloading/extracting the sysroot.
+// Shown while EnvironmentInstaller is downloading/extracting the sysroot,
+// AND when the install fails — so the user always gets a clear status message
+// and a Retry button instead of a silent degraded /system/bin/sh terminal.
 
 @Composable
-private fun BootstrapProgressOverlay(state: EnvironmentInstaller.State) {
+private fun BootstrapProgressOverlay(
+  state: EnvironmentInstaller.State,
+  onRetry: (() -> Unit)? = null,
+) {
   Box(
     modifier = Modifier
       .fillMaxSize()
       .background(absoluteBlack),
     contentAlignment = Alignment.Center,
   ) {
-    val message = when (state) {
-      is EnvironmentInstaller.State.Idle -> "Preparing Linux environment…"
-      is EnvironmentInstaller.State.Downloading ->
-        "Downloading bootstrap… ${state.percent}%"
-      is EnvironmentInstaller.State.Extracting -> "Extracting sysroot…"
-      is EnvironmentInstaller.State.FixingPermissions -> "Setting up environment…"
-      is EnvironmentInstaller.State.Failed ->
-        "Bootstrap failed: ${state.message}\n\nTerminal will use limited Android shell."
-      is EnvironmentInstaller.State.Ready -> "Ready!"
-    }
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+      val message = when (state) {
+        is EnvironmentInstaller.State.Idle -> "Preparing Linux environment…"
+        is EnvironmentInstaller.State.Downloading ->
+          "Downloading bootstrap (${state.percent}%)…\nThis only happens once."
+        is EnvironmentInstaller.State.Extracting -> "Extracting sysroot…"
+        is EnvironmentInstaller.State.FixingPermissions -> "Setting up environment…"
+        is EnvironmentInstaller.State.Failed ->
+          "Bootstrap failed:\n${state.message}\n\nTap Retry to try again."
+        is EnvironmentInstaller.State.Ready -> "Ready!"
+      }
 
-    Text(
-      text = message,
-      color = neonGreen,
-      fontFamily = FontFamily.Monospace,
-      fontSize = 16.sp,
-      textAlign = TextAlign.Center,
-      modifier = Modifier.padding(32.dp),
-    )
+      Text(
+        text = message,
+        color = if (state is EnvironmentInstaller.State.Failed) neonGreen.copy(alpha = 0.8f) else neonGreen,
+        fontFamily = FontFamily.Monospace,
+        fontSize = 16.sp,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.padding(32.dp),
+      )
+
+      // Show Retry button only when failed and a retry callback is provided.
+      if (state is EnvironmentInstaller.State.Failed && onRetry != null) {
+        Spacer(Modifier.height(16.dp))
+        Button(
+          onClick = onRetry,
+          colors = ButtonDefaults.buttonColors(
+            containerColor = neonGreen.copy(alpha = 0.15f),
+            contentColor = neonGreen,
+          ),
+        ) {
+          Icon(Icons.Default.Refresh, contentDescription = null)
+          Spacer(Modifier.width(8.dp))
+          Text(
+            text = "RETRY INSTALL",
+            fontFamily = FontFamily.Monospace,
+            fontSize = 15.sp,
+          )
+        }
+      }
+    }
   }
 }
 

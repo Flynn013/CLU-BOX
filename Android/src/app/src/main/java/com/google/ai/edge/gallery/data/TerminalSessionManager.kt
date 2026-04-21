@@ -711,9 +711,13 @@ class TerminalSessionManager(private val context: Context) {
     val alreadyDone = prefs.getBoolean(KEY_FIRST_BOOT_DONE, false)
 
     if (alreadyDone && EnvironmentInstaller.isInstalled(context)) {
-      // Subsequent boot with a verified sysroot: run the self-heal check to
-      // fix any permission regressions from OTA updates or storage clears.
+      // Subsequent boot with a verified sysroot.
+      // Still call ensureInstalled() so any pending work (shebang patching,
+      // permission repair introduced in later app versions) is applied before
+      // we declare the terminal online.  The fast path in ensureInstalled()
+      // makes this effectively a no-op once the environment is fully up-to-date.
       scope.launch {
+        EnvironmentInstaller.ensureInstalled(context)
         val healthy = checkEnvironment()
         if (healthy) _terminalOnline.value = true
         firstBootHandled = true

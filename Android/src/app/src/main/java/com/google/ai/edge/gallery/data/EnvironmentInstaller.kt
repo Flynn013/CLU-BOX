@@ -17,6 +17,7 @@
 package com.google.ai.edge.gallery.data
 
 import android.content.Context
+import android.os.Build
 import android.system.Os
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
@@ -61,20 +62,45 @@ private const val TAG = "EnvironmentInstaller"
 object EnvironmentInstaller {
 
   /**
-   * Name of the bundled bootstrap asset (placed in `app/src/main/assets/`).
-   * If this asset exists it is used in preference to a network download.
+   * Determines the correct Termux bootstrap CPU architecture string for the
+   * running device by inspecting [Build.SUPPORTED_ABIS] in priority order.
+   *
+   * Mapping:
+   * - `arm64-v8a`  → `aarch64`  (64-bit ARM — all modern phones)
+   * - `armeabi-v7a`→ `arm`       (32-bit ARM — older phones)
+   * - `x86_64`     → `x86_64`   (64-bit x86 — emulators, ChromeOS)
+   * - `x86`        → `i686`     (32-bit x86 — old emulators)
+   *
+   * Falls back to `aarch64` when no match is found.
    */
-  private const val BOOTSTRAP_ASSET_NAME = "bootstrap-aarch64.zip"
+  private val bootstrapArch: String = when {
+    Build.SUPPORTED_ABIS.contains("arm64-v8a")   -> "aarch64"
+    Build.SUPPORTED_ABIS.contains("armeabi-v7a") -> "arm"
+    Build.SUPPORTED_ABIS.contains("x86_64")      -> "x86_64"
+    Build.SUPPORTED_ABIS.contains("x86")         -> "i686"
+    else                                          -> "aarch64"
+  }
 
   /**
-   * URL of the official Termux bootstrap archive for aarch64.
-   *
-   * Used as a fallback when no bundled asset is available.
-   * Update the URL if a newer bootstrap is published or if the release
-   * scheme changes.
+   * Name of the bootstrap asset bundled in `app/src/main/assets/`.
+   * File must match the running device's CPU architecture.
    */
-  private const val BOOTSTRAP_URL =
-    "https://github.com/termux/termux-packages/releases/latest/download/bootstrap-aarch64.zip"
+  private val BOOTSTRAP_ASSET_NAME: String = "bootstrap-$bootstrapArch.zip"
+
+  /**
+   * Primary download URL — official Termux bootstrap for the device arch.
+   * Uses the GitHub `latest` redirect so it always points to the newest release.
+   */
+  private val BOOTSTRAP_URL: String =
+    "https://github.com/termux/termux-packages/releases/latest/download/bootstrap-$bootstrapArch.zip"
+
+  /**
+   * Fallback download URL using a known-stable Termux release tag.
+   * Used when the `latest` redirect fails or returns a non-200 response.
+   * Update this tag when a newer stable bootstrap is published.
+   */
+  private val BOOTSTRAP_URL_FALLBACK: String =
+    "https://github.com/termux/termux-packages/releases/download/bootstrap-2024.12.16/bootstrap-$bootstrapArch.zip"
 
   /** SharedPreferences file used to track installation state across launches. */
   private const val PREFS_NAME = "env_installer_prefs"
@@ -216,6 +242,33 @@ object EnvironmentInstaller {
   // ── Public API ─────────────────────────────────────────────────────
 
   /**
+   * Clears all installation flags and re-runs the full bootstrap installation.
+   *
+   * Safe to call from the UI (e.g. from a "Retry" button in
+   * [BootstrapProgressOverlay]) when a previous [ensureInstalled] call failed.
+   * Deletes any partially-extracted sysroot so the extraction starts clean.
+   */
+  suspend fun retry(context: Context) {
+    Log.i(TAG, "retry: clearing installation state and re-bootstrapping")
+    // Reset observable state first so the UI immediately shows the overlay.
+    _state.value = State.Idle
+
+    // Clear both installation flags so ensureInstalled runs the full path.
+    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+      .edit()
+      .putBoolean(KEY_INSTALLED, false)
+      .putBoolean(KEY_SHEBANGS_PATCHED, false)
+      .apply()
+
+    // Delete the partially-extracted sysroot (if any) to start clean.
+    withContext(Dispatchers.IO) {
+      prefixDir(context).deleteRecursively()
+    }
+
+    ensureInstalled(context)
+  }
+
+  /**
    * Ensures the Linux sysroot is installed, executable, and shebang-patched.
    *
    * **Three work tiers handled in a single mutex-protected block:**
@@ -338,30 +391,61 @@ object EnvironmentInstaller {
   }
 
   /**
-   * Downloads the bootstrap archive to [destination], following HTTP redirects.
+   * Downloads the bootstrap archive to [destination], trying the primary URL
+   * first and the [BOOTSTRAP_URL_FALLBACK] if the primary returns a non-200
+   * response or throws a network error.
    *
-   * GitHub release assets redirect through multiple HTTPS→HTTPS hops; we
-   * handle up to 5 redirects manually to cover cross-host redirects that
-   * [HttpURLConnection.setInstanceFollowRedirects] may not follow.
+   * Follows HTTP redirects (up to 5 per attempt) and sends a User-Agent that
+   * identifies the request so GitHub/CDN does not rate-limit anonymous traffic.
    */
   private fun downloadBootstrap(destination: File) {
-    var currentUrl = URL(BOOTSTRAP_URL)
+    val urls = listOf(BOOTSTRAP_URL, BOOTSTRAP_URL_FALLBACK)
+    var lastException: Exception? = null
+
+    for ((index, url) in urls.withIndex()) {
+      try {
+        Log.d(TAG, "downloadBootstrap: attempt ${index + 1} from $url")
+        downloadFromUrl(url, destination)
+        Log.i(TAG, "downloadBootstrap: succeeded from $url")
+        return // success — no need to try fallback
+      } catch (e: Exception) {
+        Log.w(TAG, "downloadBootstrap: attempt ${index + 1} failed (${e.message})")
+        lastException = e
+        destination.delete() // clean up partial file before retry
+      }
+    }
+
+    throw lastException ?: RuntimeException("All download URLs exhausted")
+  }
+
+  /**
+   * Downloads from a single [urlString], following up to 5 HTTP redirects.
+   * Sets a User-Agent so GitHub CDN does not treat the request as a bot.
+   */
+  private fun downloadFromUrl(urlString: String, destination: File) {
+    var currentUrl = URL(urlString)
     var redirectCount = 0
     var connection: HttpURLConnection
 
-    // Manually follow redirects to handle cross-host HTTPS→HTTPS hops
-    // (e.g. github.com → objects.githubusercontent.com).
     while (true) {
-      if (redirectCount > 5) throw RuntimeException("Too many redirects")
-      Log.d("CLU_BOOTSTRAP", "Downloading from: $currentUrl")
+      if (redirectCount > 5) throw RuntimeException("Too many redirects ($redirectCount)")
+      Log.d(TAG, "downloadFromUrl: connecting to $currentUrl")
       connection = currentUrl.openConnection() as HttpURLConnection
       connection.instanceFollowRedirects = false
       connection.connectTimeout = 30_000
       connection.readTimeout = 60_000
+      // Identify the app to GitHub/CDN. Using a fixed product token avoids
+      // rate-limiting of anonymous requests; Build.VERSION.RELEASE and
+      // Build.MODEL give enough context for debugging without hard-coding a
+      // version number that would drift out of sync with BuildConfig.
+      connection.setRequestProperty(
+        "User-Agent",
+        "CLU-BOX (Android ${Build.VERSION.RELEASE}; ${Build.MODEL}) TermuxBootstrapInstaller",
+      )
       connection.connect()
 
       val responseCode = connection.responseCode
-      Log.d("CLU_BOOTSTRAP", "Response code: $responseCode from $currentUrl")
+      Log.d(TAG, "downloadFromUrl: HTTP $responseCode from $currentUrl")
 
       when (responseCode) {
         HttpURLConnection.HTTP_MOVED_TEMP,
@@ -372,18 +456,19 @@ object EnvironmentInstaller {
           val location = connection.getHeaderField("Location")
             ?: throw RuntimeException("Redirect without Location header")
           connection.disconnect()
-          Log.d("CLU_BOOTSTRAP", "Redirect #$redirectCount → $location")
+          Log.d(TAG, "downloadFromUrl: redirect #$redirectCount → $location")
           currentUrl = URL(location)
           redirectCount++
         }
 
         HttpURLConnection.HTTP_OK -> {
-          Log.d("CLU_BOOTSTRAP", "Download stream ready (${connection.contentLengthLong} bytes)")
+          Log.d(TAG, "downloadFromUrl: stream ready (${connection.contentLengthLong} bytes)")
           break
         }
+
         else -> {
           connection.disconnect()
-          throw RuntimeException("Download failed: HTTP $responseCode")
+          throw RuntimeException("Download failed: HTTP $responseCode from $currentUrl")
         }
       }
     }
@@ -407,7 +492,7 @@ object EnvironmentInstaller {
         }
       }
 
-      Log.d(TAG, "Downloaded $downloadedBytes bytes to ${destination.absolutePath}")
+      Log.d(TAG, "downloadFromUrl: downloaded $downloadedBytes bytes")
     } finally {
       connection.disconnect()
     }
