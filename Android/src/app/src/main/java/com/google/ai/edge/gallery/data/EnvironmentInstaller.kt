@@ -116,24 +116,13 @@ object EnvironmentInstaller {
   /** SharedPreferences file used to track installation state across launches. */
   private const val PREFS_NAME = "env_installer_prefs"
   private const val KEY_INSTALLED = "bootstrap_installed"
-  /** Persisted once script shebang paths have been rewritten for this app's prefix. */
-  private const val KEY_SHEBANGS_PATCHED = "shebangs_patched"
-  /**
-   * Stores the prefix path that was active when shebangs were last patched.
-   * If it differs from the current [prefixDir], shebangs are re-patched so that
-   * a change from the old `filesDir/usr` layout to the new flat `filesDir` layout
-   * is automatically healed on the next boot.
-   */
-  private const val KEY_SHEBANGS_PATCHED_PREFIX = "shebangs_patched_prefix"
 
   /**
-   * Hard-coded sysroot prefix baked into every Termux bootstrap script shebang,
-   * e.g. `#!/data/data/com.termux/files/usr/bin/bash`.
+   * Hard-coded Termux prefix expected by bundled binaries and shell scripts,
+   * e.g. `/data/data/com.termux/files/usr/bin/bash`.
    *
-   * Must be replaced with the actual [prefixDir] after extraction so that `pkg`,
-   * `apt-get`, and other shell scripts can be executed from our app's private
-   * storage. Without this replacement the kernel cannot find the interpreter and
-   * reports "inaccessible or not found" for every Termux script.
+   * proot bind-mounts [prefixDir] onto this guest path at launch time so those
+   * compiled-in paths resolve natively without mutating extracted files.
    */
   private const val TERMUX_HARDCODED_PREFIX = "/data/data/com.termux/files/usr"
 
@@ -276,7 +265,7 @@ object EnvironmentInstaller {
         addAll(shellArgs)
       }
     }
-    // proot not available — launch shell directly (shebang-patching is the fallback).
+    // proot not available — launch the best direct shell fallback.
     val shell = shellPath(context)
     return buildList {
       add(shell)
@@ -297,21 +286,6 @@ object EnvironmentInstaller {
       (bashPath(context).exists() || shPath(context).exists())
   }
 
-  /**
-   * Returns `true` when the hardcoded Termux shebang paths inside the sysroot
-   * have already been rewritten to this app's current [prefixDir].
-   *
-   * Returns `false` if either the flag was never set OR the prefix stored at
-   * patch time differs from the current [prefixDir] (handles upgrade from the
-   * old `filesDir/usr` layout to the new flat `filesDir` layout).
-   */
-  fun isPatched(context: Context): Boolean {
-    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    if (!prefs.getBoolean(KEY_SHEBANGS_PATCHED, false)) return false
-    val patchedPrefix = prefs.getString(KEY_SHEBANGS_PATCHED_PREFIX, "") ?: ""
-    return patchedPrefix == prefixDir(context).absolutePath
-  }
-
   // ── Public API ─────────────────────────────────────────────────────
 
   /**
@@ -330,8 +304,6 @@ object EnvironmentInstaller {
     context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
       .edit()
       .putBoolean(KEY_INSTALLED, false)
-      .putBoolean(KEY_SHEBANGS_PATCHED, false)
-      .remove(KEY_SHEBANGS_PATCHED_PREFIX)
       .apply()
 
     // Delete the partially-extracted sysroot (if any) to start clean.
@@ -343,7 +315,7 @@ object EnvironmentInstaller {
   }
 
   /**
-   * Ensures the Linux sysroot is installed, executable, and shebang-patched.
+   * Ensures the Linux sysroot is installed, executable, and proot-ready.
    *
    * **Three work tiers handled in a single mutex-protected block:**
    * 1. **Full install** — bootstrap archive is missing entirely: download (or copy
@@ -351,33 +323,27 @@ object EnvironmentInstaller {
    * 2. **Permission repair** — sysroot is present but bash lost its execute bit
    *    (e.g. after an OTA update or storage-encryption re-key): re-run
    *    [fixPermissions].
-   * 3. **Shebang patching** — script shebangs still contain the hardcoded Termux
-   *    prefix (`/data/data/com.termux/files/usr`): replace with this app's actual
-   *    [prefixDir] so `pkg`, `apt-get`, and every other shell script can be
-   *    exec'd directly.
+   * 3. **proot installation** — copy the bundled static `proot` binary into
+   *    `$PREFIX/bin/proot` so shell launches can bind-mount [prefixDir] onto the
+   *    hardcoded Termux guest prefix.
    *
    * Must be called from a coroutine context. Heavy I/O runs on [Dispatchers.IO].
    */
   suspend fun ensureInstalled(context: Context) {
-    // Truly fast path: installed, executable, and already patched — nothing to do.
-    if (isInstalled(context) && isPatched(context) &&
-        (bashPath(context).canExecute() || shPath(context).canExecute())) {
-      _state.value = State.Ready
-      return
-    }
-
     // Need to do some work. Acquire the mutex so that only one coroutine proceeds
-    // at a time (prevents concurrent download/extract races and double-patching).
+    // at a time (prevents concurrent download/extract races and double-installs).
     installMutex.withLock {
-      // Double-check after acquiring the lock.
-      if (isInstalled(context) && isPatched(context) &&
-          (bashPath(context).canExecute() || shPath(context).canExecute())) {
-        _state.value = State.Ready
-        return
-      }
-
       withContext(Dispatchers.IO) {
         try {
+          val shellReady = isInstalled(context) &&
+            (bashPath(context).canExecute() || shPath(context).canExecute())
+
+          if (shellReady) {
+            installProot(context)
+            _state.value = State.Ready
+            return@withContext
+          }
+
           // ── Tier 1: Full install if the sysroot is missing ───────────────
           if (!isInstalled(context)) {
             val zipFile = File(context.cacheDir, BOOTSTRAP_ASSET_NAME)
@@ -418,24 +384,7 @@ object EnvironmentInstaller {
             fixPermissions(context)
           }
 
-          // ── Tier 3: Shebang path patching ────────────────────────────────
-          // Every Termux bootstrap script has `#!/data/data/com.termux/files/usr/…`
-          // hard-coded as its interpreter path.  Kernel exec fails with "No such
-          // file or directory" until we rewrite these to this app's actual prefix.
-          // isPatched() also returns false when the stored prefix differs from the
-          // current prefixDir (handles upgrade from filesDir/usr → filesDir).
-          if (!isPatched(context)) {
-            Log.i(TAG, "Patching Termux shebang paths → ${prefixDir(context).absolutePath}")
-            _state.value = State.FixingPermissions
-            patchShebangPaths(context)
-            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-              .edit()
-              .putBoolean(KEY_SHEBANGS_PATCHED, true)
-              .putString(KEY_SHEBANGS_PATCHED_PREFIX, prefixDir(context).absolutePath)
-              .apply()
-          }
-
-          // ── Tier 4: proot installation ───────────────────────────────────
+          // ── Tier 3: proot installation ───────────────────────────────────
           // Copy proot from assets into bin/ so syscall interception is
           // available on the next shell launch. installProot is idempotent.
           installProot(context)
@@ -690,90 +639,6 @@ object EnvironmentInstaller {
   }
 
   /**
-   * Rewrites hardcoded Termux shebang interpreter paths in shell scripts to use
-   * this app's actual [prefixDir].
-   *
-   * Every script in `$PREFIX/bin/` and `$PREFIX/libexec/` extracted from the
-   * official Termux bootstrap archive has a shebang like:
-   * ```
-   * #!/data/data/com.termux/files/usr/bin/bash
-   * ```
-   * When installed into *this* app's prefix the kernel cannot find the interpreter
-   * at that path → "inaccessible or not found". Replacing every occurrence of the
-   * hardcoded prefix with [prefixDir] (`filesDir`) makes `pkg`, `apt-get`,
-   * `python3`, and all other Termux shell scripts directly executable under our
-   * sysroot, e.g. `#!/data/user/0/<pkg>/files/bin/bash`.
-   *
-   * A second legacy prefix (`filesDir/usr`) is also replaced to handle devices
-   * where an earlier code version incorrectly patched shebangs with a `usr/`-
-   * appended prefix instead of the correct flat `filesDir` prefix.
-   *
-   * Additionally, Termux's runtime-patched `apt` and `dpkg` binaries respect the
-   * `TERMUX_PREFIX` environment variable (set by [TermuxSessionBridge] and
-   * [TerminalSessionManager]) to locate their config directories at runtime, so
-   * package installation continues to work after the script shebangs are fixed.
-   *
-   * **Safety:** Only regular, non-symlink text files starting with `#!` are
-   * rewritten. ELF binaries, symlinks, and non-UTF-8 files are skipped.
-   * Symlinks are explicitly excluded — writing through a symlink would overwrite
-   * the *target* binary (e.g. a busybox-applet symlink → corrupt busybox itself).
-   */
-  private fun patchShebangPaths(context: Context) {
-    val newPrefix = prefixDir(context).absolutePath
-
-    // Build list of stale prefixes to replace:
-    // 1. Original Termux hardcode: /data/data/com.termux/files/usr
-    // 2. Legacy wrong prefix: filesDir/usr — produced by an older version of
-    //    this code that incorrectly set prefixDir = File(filesDir, "usr").
-    val legacyWrongPrefix = File(newPrefix, "usr").absolutePath
-    val oldPrefixes = listOf(TERMUX_HARDCODED_PREFIX, legacyWrongPrefix)
-
-    var patched = 0
-
-    val dirs = listOf(binDir(context), File(prefixDir(context), "libexec"))
-    for (dir in dirs) {
-      if (!dir.isDirectory) continue
-      dir.walkTopDown().forEach { file ->
-        if (!file.isFile) return@forEach
-        // Skip symlinks — writing through them overwrites the symlink target,
-        // e.g. an `ls -> busybox` applet symlink would corrupt the busybox binary.
-        if (java.nio.file.Files.isSymbolicLink(file.toPath())) return@forEach
-        try {
-          // Only process shell scripts identified by their `#!` shebang header.
-          val header = ByteArray(2)
-          val bytesRead = file.inputStream().use { it.read(header) }
-          if (bytesRead < 2 ||
-              header[0] != '#'.code.toByte() ||
-              header[1] != '!'.code.toByte()) {
-            return@forEach // ELF binary or non-script file — leave untouched
-          }
-          val original = file.readText(Charsets.UTF_8)
-          // Apply each replacement to the *running* string so that the output
-          // of one replacement is the input of the next. Guard with != newPrefix
-          // to ensure we never accidentally replace with an identical string.
-          var content = original
-          for (old in oldPrefixes) {
-            if (old != newPrefix) {
-              content = content.replace(old, newPrefix)
-            }
-          }
-          if (content != original) {
-            file.writeText(content, Charsets.UTF_8)
-            file.setExecutable(true, false)
-            patched++
-          }
-        } catch (e: Exception) {
-          // Binary-looking file detected as text, encoding error, or permission
-          // issue — skip silently.  Log at debug level to aid device diagnostics.
-          Log.d(TAG, "patchShebangPaths: skipping ${file.name} (${e.javaClass.simpleName})")
-        }
-      }
-    }
-
-    Log.d(TAG, "patchShebangPaths: rewrote $patched scripts (→ $newPrefix)")
-  }
-
-  /**
    * Copies the bundled `proot` binary from `assets/` into `$PREFIX/bin/proot`
    * and marks it world-executable.
    *
@@ -781,9 +646,8 @@ object EnvironmentInstaller {
    * `/data/data/com.termux/files/usr` so that `apt`, `dpkg`, and shell scripts
    * with Termux shebangs run natively — no root required.
    *
-   * This is a best-effort operation: if the asset is absent (developer chose not
-   * to bundle proot) the function logs at debug level and returns silently.  The
-   * engine then falls back to direct bash execution + shebang-patching.
+   * This is a best-effort operation: if the asset is absent the function logs at
+   * debug level and returns silently, and shell launch falls back to direct exec.
    */
   private fun installProot(context: Context) {
     val dest = prootPath(context)
@@ -794,11 +658,10 @@ object EnvironmentInstaller {
         dest.parentFile?.mkdirs()
         FileOutputStream(dest).use { output -> input.copyTo(output) }
       }
-      dest.setExecutable(true, true)  // owner-only — no need for world-exec
+      dest.setExecutable(true, false)
       Log.i(TAG, "installProot: proot installed at ${dest.absolutePath}")
     } catch (e: IOException) {
-      // Asset not bundled — proot integration is disabled; shebang-patching is
-      // the active fallback.  Not an error condition.
+      // Asset not bundled — direct shell fallback remains available.
       Log.d(TAG, "installProot: '$PROOT_ASSET_NAME' asset not found — proot disabled")
     }
   }

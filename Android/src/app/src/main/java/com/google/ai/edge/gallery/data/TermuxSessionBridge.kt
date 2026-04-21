@@ -242,12 +242,6 @@ class TermuxSessionBridge(private val context: Context) {
       // shared libraries.
       if (prefix.isDirectory) {
         env.add("PREFIX=${prefix.absolutePath}")
-        env.add("LD_LIBRARY_PATH=${EnvironmentInstaller.libDir(context).absolutePath}")
-        // TERMUX_PREFIX is read by Termux's runtime-patched apt and dpkg binaries
-        // to locate their configuration directories ($TERMUX_PREFIX/etc/apt,
-        // $TERMUX_PREFIX/var/lib/dpkg, …) at runtime instead of using their
-        // compiled-in Termux default path.  Without this variable, pkg install
-        // silently looks for configs in /data/data/com.termux/… and fails.
         env.add("TERMUX_PREFIX=${prefix.absolutePath}")
       }
 

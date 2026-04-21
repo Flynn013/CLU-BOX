@@ -56,7 +56,6 @@ fun executeCommand(context: Context, command: String): String {
     val tmpDir  = EnvironmentInstaller.tmpDir(context).also  { it.mkdirs() }
     val binDir  = EnvironmentInstaller.binDir(context)
     val prefix  = EnvironmentInstaller.prefixDir(context)
-    val libDir  = EnvironmentInstaller.libDir(context)
 
     // Build PATH: sysroot bin + applets (busybox) + stock Android fallback.
     val appletsDir = File(binDir, "applets")
@@ -76,7 +75,7 @@ fun executeCommand(context: Context, command: String): String {
     pb.environment()["PATH"]           = effectivePath
     if (prefix.isDirectory) {
       pb.environment()["PREFIX"]         = prefix.absolutePath
-      pb.environment()["LD_LIBRARY_PATH"] = libDir.absolutePath
+      pb.environment()["TERMUX_PREFIX"]  = prefix.absolutePath
     }
 
     val process = pb.start()

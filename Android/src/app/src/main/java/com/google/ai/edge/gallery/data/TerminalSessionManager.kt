@@ -157,7 +157,6 @@ class TerminalSessionManager(private val context: Context) {
       // Resolve internal sysroot paths via EnvironmentInstaller.
       val prefix = EnvironmentInstaller.prefixDir(context)
       val binDir = EnvironmentInstaller.binDir(context)
-      val libDir = EnvironmentInstaller.libDir(context)
       val shell = EnvironmentInstaller.shellPath(context)
 
       // Build PATH: include internal bin and applets dirs only if the bootstrap is installed.
@@ -185,7 +184,6 @@ class TerminalSessionManager(private val context: Context) {
       // This gives Shell_Execute access to bash, python, node, pkg, git, and native libs.
       if (prefix.isDirectory) {
         env["PREFIX"] = prefix.absolutePath
-        env["LD_LIBRARY_PATH"] = libDir.absolutePath
         // TERMUX_PREFIX is read by Termux's runtime-patched apt/dpkg to locate
         // their config directories at runtime instead of the compiled-in Termux
         // default path.  Required for `pkg install` / `apt-get` to work.
@@ -457,7 +455,6 @@ class TerminalSessionManager(private val context: Context) {
       // Inject internal sysroot environment so bash/python/node/pkg are visible.
       val binDir = EnvironmentInstaller.binDir(context)
       val prefix = EnvironmentInstaller.prefixDir(context)
-      val libDir = EnvironmentInstaller.libDir(context)
       if (binDir.isDirectory) {
         val appletsDir = File(binDir, "applets")
         val basePath = pb.environment()["PATH"] ?: "/system/bin:/system/xbin"
@@ -468,7 +465,6 @@ class TerminalSessionManager(private val context: Context) {
         }
         pb.environment()["PATH"] = fullPath
         pb.environment()["PREFIX"] = prefix.absolutePath
-        pb.environment()["LD_LIBRARY_PATH"] = libDir.absolutePath
         // Required for Termux-patched apt/dpkg to find config at our prefix.
         pb.environment()["TERMUX_PREFIX"] = prefix.absolutePath
       }
@@ -544,7 +540,6 @@ class TerminalSessionManager(private val context: Context) {
       // Inject internal sysroot environment so bash/python/node/pkg are visible.
       val binDir = EnvironmentInstaller.binDir(context)
       val prefix = EnvironmentInstaller.prefixDir(context)
-      val libDir = EnvironmentInstaller.libDir(context)
       if (binDir.isDirectory) {
         val appletsDir = File(binDir, "applets")
         val basePath = pb.environment()["PATH"] ?: "/system/bin:/system/xbin"
@@ -555,7 +550,6 @@ class TerminalSessionManager(private val context: Context) {
         }
         pb.environment()["PATH"] = fullPath
         pb.environment()["PREFIX"] = prefix.absolutePath
-        pb.environment()["LD_LIBRARY_PATH"] = libDir.absolutePath
         // Required for Termux-patched apt/dpkg to find config at our prefix.
         pb.environment()["TERMUX_PREFIX"] = prefix.absolutePath
       }
@@ -719,7 +713,7 @@ class TerminalSessionManager(private val context: Context) {
 
     if (alreadyDone && EnvironmentInstaller.isInstalled(context)) {
       // Subsequent boot with a verified sysroot.
-      // Still call ensureInstalled() so any pending work (shebang patching,
+      // Still call ensureInstalled() so any pending work (proot installation,
       // permission repair introduced in later app versions) is applied before
       // we declare the terminal online.  The fast path in ensureInstalled()
       // makes this effectively a no-op once the environment is fully up-to-date.
