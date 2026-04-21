@@ -989,23 +989,44 @@ class AgentTools() : ToolSet {
 
       // ── Phase 5: Auto-Validator Interceptor (Syntax Gatekeeper) ──
       // After saving, inspect the file extension and run a syntax check.
-      // If validation fails, return the error to force the LLM to debug.
+      // Guard 1: only attempt validation if the required runtime binary actually
+      //          exists at $PREFIX/bin — avoids false rejections when the Termux
+      //          bootstrap is not yet installed or python/node wasn't installed.
+      // Guard 2: treat exit code 127 (command not found) as "validator unavailable"
+      //          rather than a syntax error, so a missing runtime never deletes
+      //          a syntactically valid file.
       val ext = safePath.substringAfterLast('.', "").lowercase()
       val absolutePath = java.io.File(mgr.root, safePath).absolutePath
       val tsm = terminalSessionManager
 
+      // Termux convention: Python is 'python3', not 'python'.
+      val (binaryName, validationCmdTemplate) = when (ext) {
+        "py" -> "python3" to "python3 -m py_compile"
+        "js" -> "node" to "node --check"
+        else -> null to null
+      }
+
+      // Only build a validation command if the binary is actually present.
+      val binDir = com.google.ai.edge.gallery.data.EnvironmentInstaller.binDir(context)
+      val binaryExists = binaryName != null && java.io.File(binDir, binaryName).let { it.exists() && it.canExecute() }
+
       // Escape the file path for safe shell interpolation (replace ' with '\'').
       val escapedPath = absolutePath.replace("'", "'\\''")
-      val validationCmd: String? = when (ext) {
-        "py" -> "python -m py_compile '$escapedPath'"
-        "js" -> "node --check '$escapedPath'"
-        else -> null
+      val validationCmd: String? = if (binaryExists && validationCmdTemplate != null) {
+        "$validationCmdTemplate '$escapedPath'"
+      } else {
+        null
       }
 
       if (validationCmd != null && tsm != null) {
         Log.d(TAG, "fileBoxWrite: running auto-validation: $validationCmd")
         val (exitCode, validationOutput) = tsm.executeCommandWithExitCode(validationCmd)
-        if (exitCode != 0) {
+
+        // Exit code 127 = command not found — runtime is missing or PATH is wrong.
+        // This is NOT a syntax error; skip validation silently.
+        if (exitCode == 127) {
+          Log.w(TAG, "fileBoxWrite: validator binary not found (exit 127) for '$safePath' — skipping validation")
+        } else if (exitCode != 0) {
           val errMsg = validationOutput.ifEmpty { "Unknown syntax error" }
           Log.w(TAG, "fileBoxWrite: validation FAILED for '$safePath': $errMsg")
 
@@ -1027,14 +1048,16 @@ class AgentTools() : ToolSet {
             "error" to "FILE REJECTED & DELETED due to syntax error: $errMsg. " +
               "You MUST fix the code and call fileBoxWrite again with the corrected content.",
           )
+        } else {
+          Log.d(TAG, "fileBoxWrite: validation PASSED for '$safePath'")
         }
-        Log.d(TAG, "fileBoxWrite: validation PASSED for '$safePath'")
       }
 
+      val validated = validationCmd != null && tsm != null
       mapOf(
         "file_path" to safePath,
         "status" to "succeeded",
-        "message" to if (validationCmd != null) "File written and validated successfully" else "File written successfully",
+        "message" to if (validated) "File written and validated successfully" else "File written successfully",
       )
       } catch (e: Exception) {
         Log.e(TAG, "fileBoxWrite: unexpected error", e)
