@@ -365,6 +365,9 @@ object EnvironmentInstaller {
             // Create runtime directories that Termux expects.
             homeDir(context).mkdirs()
             tmpDir(context).mkdirs()
+            // Create a proot-specific tmp dir directly under filesDir so that
+            // PROOT_TMP_DIR points to a location proot can always write to.
+            File(context.filesDir, "tmp").mkdirs()
 
             zipFile.delete()
 

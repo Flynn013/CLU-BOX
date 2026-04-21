@@ -244,6 +244,12 @@ class TermuxSessionBridge(private val context: Context) {
         env.add("PREFIX=${prefix.absolutePath}")
         env.add("TERMUX_PREFIX=${prefix.absolutePath}")
       }
+      // proot writes its fake rootfs to a tmp directory.  Redirect it to our
+      // private storage so it never touches the read-only /tmp on the host.
+      // PROOT_NO_SECCOMP=1 disables seccomp filtering, which avoids compatibility
+      // crashes on kernels that enforce strict syscall policies.
+      env.add("PROOT_TMP_DIR=${context.filesDir.absolutePath}/tmp")
+      env.add("PROOT_NO_SECCOMP=1")
 
       // Build proot-wrapped (or direct) command list.
       // Pass --login so bash reads /etc/profile and ~/.bash_profile.

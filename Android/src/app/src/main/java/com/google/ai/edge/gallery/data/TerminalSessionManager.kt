@@ -189,6 +189,10 @@ class TerminalSessionManager(private val context: Context) {
         // default path.  Required for `pkg install` / `apt-get` to work.
         env["TERMUX_PREFIX"] = prefix.absolutePath
       }
+      // proot needs a writable tmp directory inside our private storage to build
+      // its fake rootfs; disable seccomp so it runs on kernels with strict policies.
+      env["PROOT_TMP_DIR"] = context.filesDir.absolutePath + "/tmp"
+      env["PROOT_NO_SECCOMP"] = "1"
 
       Log.d(TAG, "Checkpoint 3: Starting ProcessBuilder (proot=${EnvironmentInstaller.prootPath(context).canExecute()})")
       // --login is only valid for bash (proot-wrapped or direct); sh / /system/bin/sh
@@ -468,6 +472,8 @@ class TerminalSessionManager(private val context: Context) {
         // Required for Termux-patched apt/dpkg to find config at our prefix.
         pb.environment()["TERMUX_PREFIX"] = prefix.absolutePath
       }
+      pb.environment()["PROOT_TMP_DIR"] = context.filesDir.absolutePath + "/tmp"
+      pb.environment()["PROOT_NO_SECCOMP"] = "1"
 
       val proc = pb.start()
 
@@ -553,6 +559,8 @@ class TerminalSessionManager(private val context: Context) {
         // Required for Termux-patched apt/dpkg to find config at our prefix.
         pb.environment()["TERMUX_PREFIX"] = prefix.absolutePath
       }
+      pb.environment()["PROOT_TMP_DIR"] = context.filesDir.absolutePath + "/tmp"
+      pb.environment()["PROOT_NO_SECCOMP"] = "1"
 
       val proc = pb.start()
 
