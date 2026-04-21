@@ -723,13 +723,12 @@ class TerminalSessionManager(private val context: Context) {
             appendLine(TerminalLine(line, LineSource.STDOUT))
           }
 
-          // Detect the shell prompt delimiter ($) in the output as the success signal.
-          val hasPromptDelimiter = updateResult.contains("$ ") || updateExit == 0
-          if (hasPromptDelimiter) {
+          // Detect success: exit code 0 means pkg updated successfully.
+          if (updateExit == 0) {
             appendSystemLine("[FIRMWARE] pkg update completed — TERMINAL: ONLINE")
             _terminalOnline.value = true
           } else {
-            appendSystemLine("[FIRMWARE] pkg update finished with exit $updateExit — connectivity uncertain.")
+            appendSystemLine("[FIRMWARE] pkg update failed with exit $updateExit — terminal initialization incomplete.")
           }
 
           // Also install core development packages.

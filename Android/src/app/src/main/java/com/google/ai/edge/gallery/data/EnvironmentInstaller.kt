@@ -247,7 +247,6 @@ object EnvironmentInstaller {
     return try {
       context.assets.open(BOOTSTRAP_ASSET_NAME).use { input ->
         Log.d(TAG, "Copying bootstrap from bundled asset")
-        _state.value = State.Extracting  // reuse Extracting for asset copy progress
         FileOutputStream(destination).use { output ->
           input.copyTo(output)
         }
