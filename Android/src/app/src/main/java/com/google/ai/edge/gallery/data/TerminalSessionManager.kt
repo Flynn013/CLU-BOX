@@ -191,7 +191,7 @@ class TerminalSessionManager(private val context: Context) {
       }
       // proot needs a writable tmp directory inside our private storage to build
       // its fake rootfs; disable seccomp so it runs on kernels with strict policies.
-      env["PROOT_TMP_DIR"] = context.filesDir.absolutePath + "/tmp"
+      env["PROOT_TMP_DIR"] = File(context.filesDir, "tmp").absolutePath
       env["PROOT_NO_SECCOMP"] = "1"
 
       Log.d(TAG, "Checkpoint 3: Starting ProcessBuilder (proot=${EnvironmentInstaller.prootPath(context).canExecute()})")
@@ -472,7 +472,7 @@ class TerminalSessionManager(private val context: Context) {
         // Required for Termux-patched apt/dpkg to find config at our prefix.
         pb.environment()["TERMUX_PREFIX"] = prefix.absolutePath
       }
-      pb.environment()["PROOT_TMP_DIR"] = context.filesDir.absolutePath + "/tmp"
+      pb.environment()["PROOT_TMP_DIR"] = File(context.filesDir, "tmp").absolutePath
       pb.environment()["PROOT_NO_SECCOMP"] = "1"
 
       val proc = pb.start()
@@ -559,7 +559,7 @@ class TerminalSessionManager(private val context: Context) {
         // Required for Termux-patched apt/dpkg to find config at our prefix.
         pb.environment()["TERMUX_PREFIX"] = prefix.absolutePath
       }
-      pb.environment()["PROOT_TMP_DIR"] = context.filesDir.absolutePath + "/tmp"
+      pb.environment()["PROOT_TMP_DIR"] = File(context.filesDir, "tmp").absolutePath
       pb.environment()["PROOT_NO_SECCOMP"] = "1"
 
       val proc = pb.start()

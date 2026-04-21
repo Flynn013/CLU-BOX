@@ -248,7 +248,7 @@ class TermuxSessionBridge(private val context: Context) {
       // private storage so it never touches the read-only /tmp on the host.
       // PROOT_NO_SECCOMP=1 disables seccomp filtering, which avoids compatibility
       // crashes on kernels that enforce strict syscall policies.
-      env.add("PROOT_TMP_DIR=${context.filesDir.absolutePath}/tmp")
+      env.add("PROOT_TMP_DIR=${File(context.filesDir, "tmp").absolutePath}")
       env.add("PROOT_NO_SECCOMP=1")
 
       // Build proot-wrapped (or direct) command list.

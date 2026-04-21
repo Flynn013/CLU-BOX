@@ -77,7 +77,7 @@ fun executeCommand(context: Context, command: String): String {
       pb.environment()["PREFIX"]         = prefix.absolutePath
       pb.environment()["TERMUX_PREFIX"]  = prefix.absolutePath
     }
-    pb.environment()["PROOT_TMP_DIR"]  = context.filesDir.absolutePath + "/tmp"
+    pb.environment()["PROOT_TMP_DIR"]    = File(context.filesDir, "tmp").absolutePath
     pb.environment()["PROOT_NO_SECCOMP"] = "1"
 
     val process = pb.start()
