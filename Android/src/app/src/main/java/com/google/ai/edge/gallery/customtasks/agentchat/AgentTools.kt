@@ -70,18 +70,20 @@ data class AgentGovernor(val maxLoops: Int, val maxOutputBuffer: Int) {
     const val LOCAL_CONSTRAINT =
       "SYSTEM CONSTRAINT: You are running on local mobile hardware. Context window is limited. " +
       "Execute ONE simple bash command at a time — no pipes, no multi-command scripts. " +
-      "Use taskQueueUpdate(status='pending', next_task_description='...') after each step to " +
-      "continue multi-step work across turns. When you hit an error, diagnose it with the next " +
-      "command and keep going — only call operatorHalt when you genuinely need the user or have " +
-      "fully completed the task."
+      "For multi-step agentic tasks: call taskQueueUpdate(status='pending', next_task_description='...') " +
+      "ONLY when a concrete next step still remains to complete the current task. " +
+      "For single questions or finished tasks, answer directly — do NOT call taskQueueUpdate. " +
+      "When you hit an error, diagnose it with the next command. " +
+      "Only call operatorHalt when you genuinely need user input or the task is fully complete."
 
     const val CLOUD_CONSTRAINT =
       "SYSTEM CONSTRAINT: You are running on cloud infrastructure with advanced reasoning. " +
       "You have full read/write access to the clu_workspace via the bash terminal. " +
       "You may chain commands, write Python scripts to solve complex logic, and use git. " +
-      "Use taskQueueUpdate(status='pending', next_task_description='...') to continue multi-step " +
-      "work across turns. If you encounter an error, use your tools to independently diagnose and " +
-      "fix it before reporting back to the user."
+      "For multi-step agentic tasks: call taskQueueUpdate(status='pending', next_task_description='...') " +
+      "ONLY when a concrete next step still remains. " +
+      "For single questions or finished tasks, answer directly — do NOT call taskQueueUpdate. " +
+      "If you encounter an error, use your tools to independently diagnose and fix it before reporting back to the user."
   }
 }
 
