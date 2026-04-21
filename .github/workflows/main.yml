@@ -1,5 +1,10 @@
 name: CLU-BOX CI — Build & Package
 
+env:
+  PROOT_VERSION: v5.3.0
+  PROOT_ASSET: proot-v5.3.0-aarch64-static
+  PROOT_SHA256: fa10b1a7818c2f5b1dcb5834450570c368c9ecf66d31521509621b95c4538a45
+
 on:
   push:
     branches: [ "main", "master", "copilot/**" ]
@@ -32,6 +37,12 @@ jobs:
 
       - name: Make gradlew executable
         run: chmod +x gradlew
+
+      - name: Fetch static proot binary
+        run: |
+          mkdir -p app/src/main/assets/
+          curl -fL --retry 3 --retry-delay 2 -o app/src/main/assets/proot "https://github.com/proot-me/proot/releases/download/${PROOT_VERSION}/${PROOT_ASSET}"
+          echo "${PROOT_SHA256}  app/src/main/assets/proot" | sha256sum -c -
 
       - name: Build Debug APK
         run: ./gradlew assembleDebug --stacktrace
