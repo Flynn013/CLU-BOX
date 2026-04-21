@@ -37,6 +37,7 @@ jobs:
         run: |
           mkdir -p app/src/main/assets/
           curl -L -o app/src/main/assets/proot https://github.com/proot-me/proot/releases/download/v5.3.0/proot-v5.3.0-aarch64-static
+          echo "fa10b1a7818c2f5b1dcb5834450570c368c9ecf66d31521509621b95c4538a45  app/src/main/assets/proot" | sha256sum -c -
 
       - name: Build Release APK
         run: ./gradlew assembleRelease --stacktrace
