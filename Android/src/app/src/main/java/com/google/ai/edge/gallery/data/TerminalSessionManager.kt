@@ -631,7 +631,11 @@ class TerminalSessionManager(private val context: Context) {
       return false
     }
 
-    val checks = listOf("bash --version", "git --version")
+    // Only check bash: git is NOT in the base Termux bootstrap and must be
+    // installed separately via pkg.  Checking git here causes a false
+    // "Self-heal FAILED" and makes checkEnvironment() return false even
+    // when the environment is perfectly functional.
+    val checks = listOf("bash --version")
     var needsRepair = false
 
     for (cmd in checks) {
@@ -698,9 +702,9 @@ class TerminalSessionManager(private val context: Context) {
     val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     val alreadyDone = prefs.getBoolean(KEY_FIRST_BOOT_DONE, false)
 
-    if (alreadyDone) {
-      // Even on subsequent boots, run the self-heal check to handle
-      // corrupted permissions from OTA updates or storage clears.
+    if (alreadyDone && EnvironmentInstaller.isInstalled(context)) {
+      // Subsequent boot with a verified sysroot: run the self-heal check to
+      // fix any permission regressions from OTA updates or storage clears.
       scope.launch {
         val healthy = checkEnvironment()
         if (healthy) _terminalOnline.value = true
@@ -710,7 +714,17 @@ class TerminalSessionManager(private val context: Context) {
       return
     }
 
-    appendSystemLine("[FIRMWARE] First boot detected — bootstrapping Linux environment…")
+    // If we reach here it is either a genuine first boot, OR a subsequent
+    // boot where the previous run wrote KEY_FIRST_BOOT_DONE=true but then
+    // crashed before the bootstrap was fully extracted (e.g. zip corruption
+    // from a concurrent download race).  In both cases we must run the full
+    // install path again — ensureInstalled() will skip the download if the
+    // sysroot is already healthy.
+    if (alreadyDone) {
+      appendSystemLine("[FIRMWARE] Sysroot missing on subsequent boot — re-bootstrapping…")
+    } else {
+      appendSystemLine("[FIRMWARE] First boot detected — bootstrapping Linux environment…")
+    }
     scope.launch {
       // Stage 1: Install the Termux bootstrap sysroot.
       EnvironmentInstaller.ensureInstalled(context)
@@ -724,21 +738,20 @@ class TerminalSessionManager(private val context: Context) {
         val hasPkg = pkgBinary.exists() && pkgBinary.canExecute()
 
         if (hasPkg) {
-          appendSystemLine("[FIRMWARE] pkg detected — running update to verify terminal connectivity…")
-          // Agentic verification: pipe pkg update -y and monitor the output stream.
-          // If the command completes successfully (exit 0), the terminal is online.
+          appendSystemLine("[FIRMWARE] pkg detected — running update (best-effort)…")
+          // Run pkg update as a best-effort network check; the exit code does
+          // NOT gate terminalOnline — a network failure must not leave the
+          // terminal permanently OFFLINE when the sysroot is functional.
           val pkgUpdateCmd = "pkg update -y 2>&1"
           val (updateExit, updateResult) = executeCommandWithExitCode(pkgUpdateCmd, PKG_INSTALL_TIMEOUT_SECONDS)
           updateResult.lines().forEach { line ->
             appendLine(TerminalLine(line, LineSource.STDOUT))
           }
 
-          // Detect success: exit code 0 means pkg updated successfully.
           if (updateExit == 0) {
-            appendSystemLine("[FIRMWARE] pkg update completed — TERMINAL: ONLINE")
-            _terminalOnline.value = true
+            appendSystemLine("[FIRMWARE] pkg update completed successfully.")
           } else {
-            appendSystemLine("[FIRMWARE] pkg update failed with exit $updateExit — terminal initialization incomplete.")
+            appendSystemLine("[FIRMWARE] pkg update finished with exit $updateExit (non-fatal — continuing).")
           }
 
           // Also install core development packages.
@@ -760,6 +773,13 @@ class TerminalSessionManager(private val context: Context) {
         // Stage 3: Validate environment with self-healing.
         appendSystemLine("[FIRMWARE] Running environment validation…")
         val envHealthy = checkEnvironment()
+
+        // The terminal is ONLINE as soon as the sysroot is functional —
+        // regardless of whether pkg update or package installs succeeded.
+        if (envHealthy) {
+          _terminalOnline.value = true
+          appendSystemLine("[FIRMWARE] TERMINAL: ONLINE")
+        }
 
         // Stage 4: Agentic verification — confirm Dev-Ready status.
         if (envHealthy) {
