@@ -47,9 +47,10 @@ private const val TAG = "EnvironmentInstaller"
  * 2. Network download from the official Termux release — used as a fallback
  *    when no bundled asset is present.
  *
- * After installation the sysroot lives at `context.filesDir/usr/` and provides
- * `bash`, `apt`/`pkg`, and the corresponding shared libraries — all without
- * requiring the external Termux app to be installed.
+ * After installation the sysroot lives directly inside `context.filesDir/`
+ * (i.e. `filesDir/bin/bash`, `filesDir/lib/`, …) and provides `bash`,
+ * `apt`/`pkg`, and the corresponding shared libraries — all without requiring
+ * the external Termux app to be installed.
  *
  * Typical lifecycle:
  * 1. [MstrCtrlScreen] or [TerminalSessionManager] calls [ensureInstalled].
@@ -107,6 +108,13 @@ object EnvironmentInstaller {
   private const val KEY_INSTALLED = "bootstrap_installed"
   /** Persisted once script shebang paths have been rewritten for this app's prefix. */
   private const val KEY_SHEBANGS_PATCHED = "shebangs_patched"
+  /**
+   * Stores the prefix path that was active when shebangs were last patched.
+   * If it differs from the current [prefixDir], shebangs are re-patched so that
+   * a change from the old `filesDir/usr` layout to the new flat `filesDir` layout
+   * is automatically healed on the next boot.
+   */
+  private const val KEY_SHEBANGS_PATCHED_PREFIX = "shebangs_patched_prefix"
 
   /**
    * Hard-coded sysroot prefix baked into every Termux bootstrap script shebang,
@@ -168,8 +176,15 @@ object EnvironmentInstaller {
 
   // ── Path helpers ───────────────────────────────────────────────────
 
-  /** Root of the internal sysroot: `context.filesDir/usr`. */
-  fun prefixDir(context: Context): File = File(context.filesDir, "usr")
+  /**
+   * Root of the internal sysroot: `context.filesDir` directly.
+   *
+   * The Termux bootstrap archive uses a flat layout — entries like `bin/bash`
+   * extract directly into `filesDir/bin/bash` rather than the `usr/`-prefixed
+   * layout used by the official Termux app.  `PREFIX` therefore equals
+   * `filesDir` itself.
+   */
+  fun prefixDir(context: Context): File = context.filesDir
 
   /** Bin directory containing executables (`$PREFIX/bin`). */
   fun binDir(context: Context): File = File(prefixDir(context), "bin")
@@ -178,13 +193,12 @@ object EnvironmentInstaller {
   fun libDir(context: Context): File = File(prefixDir(context), "lib")
 
   /**
-   * The `$HOME` directory for Termux sessions: `context.filesDir/home`.
+   * The `$HOME` directory for Termux sessions: `context.filesDir/clu_file_box`.
    *
-   * This is a dedicated home directory **separate** from the app's `filesDir`
-   * and separate from the sysroot, matching Termux's own layout
-   * (`/data/data/com.termux/files/home`).
+   * This is the shared sandbox root used by both the PTY terminal and the AI
+   * file-box workspace, matching [TerminalSessionManager.sandboxRoot].
    */
-  fun homeDir(context: Context): File = File(context.filesDir, "home")
+  fun homeDir(context: Context): File = File(context.filesDir, "clu_file_box")
 
   /**
    * The `$TMPDIR` for Termux sessions: `$PREFIX/tmp`.
@@ -232,11 +246,17 @@ object EnvironmentInstaller {
 
   /**
    * Returns `true` when the hardcoded Termux shebang paths inside the sysroot
-   * have already been rewritten to this app's actual [prefixDir].
+   * have already been rewritten to this app's current [prefixDir].
+   *
+   * Returns `false` if either the flag was never set OR the prefix stored at
+   * patch time differs from the current [prefixDir] (handles upgrade from the
+   * old `filesDir/usr` layout to the new flat `filesDir` layout).
    */
   fun isPatched(context: Context): Boolean {
     val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    return prefs.getBoolean(KEY_SHEBANGS_PATCHED, false)
+    if (!prefs.getBoolean(KEY_SHEBANGS_PATCHED, false)) return false
+    val patchedPrefix = prefs.getString(KEY_SHEBANGS_PATCHED_PREFIX, "") ?: ""
+    return patchedPrefix == prefixDir(context).absolutePath
   }
 
   // ── Public API ─────────────────────────────────────────────────────
@@ -253,11 +273,12 @@ object EnvironmentInstaller {
     // Reset observable state first so the UI immediately shows the overlay.
     _state.value = State.Idle
 
-    // Clear both installation flags so ensureInstalled runs the full path.
+    // Clear all installation flags so ensureInstalled runs the full path.
     context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
       .edit()
       .putBoolean(KEY_INSTALLED, false)
       .putBoolean(KEY_SHEBANGS_PATCHED, false)
+      .remove(KEY_SHEBANGS_PATCHED_PREFIX)
       .apply()
 
     // Delete the partially-extracted sysroot (if any) to start clean.
@@ -348,12 +369,17 @@ object EnvironmentInstaller {
           // Every Termux bootstrap script has `#!/data/data/com.termux/files/usr/…`
           // hard-coded as its interpreter path.  Kernel exec fails with "No such
           // file or directory" until we rewrite these to this app's actual prefix.
+          // isPatched() also returns false when the stored prefix differs from the
+          // current prefixDir (handles upgrade from filesDir/usr → filesDir).
           if (!isPatched(context)) {
             Log.i(TAG, "Patching Termux shebang paths → ${prefixDir(context).absolutePath}")
             _state.value = State.FixingPermissions
             patchShebangPaths(context)
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-              .edit().putBoolean(KEY_SHEBANGS_PATCHED, true).apply()
+              .edit()
+              .putBoolean(KEY_SHEBANGS_PATCHED, true)
+              .putString(KEY_SHEBANGS_PATCHED_PREFIX, prefixDir(context).absolutePath)
+              .apply()
           }
 
           _state.value = State.Ready
@@ -501,8 +527,9 @@ object EnvironmentInstaller {
   /**
    * Extracts the bootstrap zip into [targetDir].
    *
-   * The zip typically contains `usr/bin/`, `usr/lib/`, etc. at its top level,
-   * so extraction to `context.filesDir` produces `context.filesDir/usr/bin/bash`.
+   * The zip uses a flat layout — entries like `bin/bash`, `lib/libc.so`,
+   * etc. sit directly at the archive root, so extraction to `context.filesDir`
+   * produces `context.filesDir/bin/bash`.
    */
   private fun extractBootstrap(zipFile: File, targetDir: File) {
     ZipInputStream(zipFile.inputStream().buffered()).use { zis ->
@@ -575,23 +602,15 @@ object EnvironmentInstaller {
   /**
    * Makes all files under `bin/`, `lib/`, and `libexec/` executable (0755).
    *
-   * The bootstrap zip extracts to a `usr/`-rooted structure inside `filesDir`.
+   * The bootstrap zip uses a flat layout (`filesDir/bin/`, `filesDir/lib/`, …).
    * The zip format does not preserve Unix permissions, so every binary and
    * shared library needs an explicit `chmod 0755` after extraction.
-   *
-   * Also covers flat extraction layouts (`filesDir/bin/` etc.) in case the
-   * zip uses a different root structure.
    *
    * Uses [Os.chmod] for world-executable permission setting to avoid Exit 126
    * ("Permission Denied") and dynamic-linker failures at runtime.
    */
   private fun fixPermissions(context: Context) {
     val dirs = listOf(
-      // Flat layout (filesDir/bin, filesDir/lib, filesDir/libexec)
-      File(context.filesDir, "bin"),
-      File(context.filesDir, "lib"),
-      File(context.filesDir, "libexec"),
-      // usr/-prefixed layout (filesDir/usr/bin, filesDir/usr/lib, filesDir/usr/libexec)
       binDir(context),
       libDir(context),
       File(prefixDir(context), "libexec"),
@@ -623,8 +642,13 @@ object EnvironmentInstaller {
    * ```
    * When installed into *this* app's prefix the kernel cannot find the interpreter
    * at that path → "inaccessible or not found". Replacing every occurrence of the
-   * hardcoded prefix with [prefixDir] makes `pkg`, `apt-get`, `python3`, and all
-   * other Termux shell scripts directly executable under our sysroot.
+   * hardcoded prefix with [prefixDir] (`filesDir`) makes `pkg`, `apt-get`,
+   * `python3`, and all other Termux shell scripts directly executable under our
+   * sysroot, e.g. `#!/data/user/0/<pkg>/files/bin/bash`.
+   *
+   * A second legacy prefix (`filesDir/usr`) is also replaced to handle devices
+   * where an earlier code version incorrectly patched shebangs with a `usr/`-
+   * appended prefix instead of the correct flat `filesDir` prefix.
    *
    * Additionally, Termux's runtime-patched `apt` and `dpkg` binaries respect the
    * `TERMUX_PREFIX` environment variable (set by [TermuxSessionBridge] and
@@ -637,10 +661,14 @@ object EnvironmentInstaller {
    * the *target* binary (e.g. a busybox-applet symlink → corrupt busybox itself).
    */
   private fun patchShebangPaths(context: Context) {
-    val oldPrefix = TERMUX_HARDCODED_PREFIX
     val newPrefix = prefixDir(context).absolutePath
 
-    if (oldPrefix == newPrefix) return // No-op — paths are identical
+    // Build list of stale prefixes to replace:
+    // 1. Original Termux hardcode: /data/data/com.termux/files/usr
+    // 2. Legacy wrong prefix: filesDir/usr — produced by an older version of
+    //    this code that incorrectly set prefixDir = File(filesDir, "usr").
+    val legacyWrongPrefix = File(newPrefix, "usr").absolutePath
+    val oldPrefixes = listOf(TERMUX_HARDCODED_PREFIX, legacyWrongPrefix)
 
     var patched = 0
 
@@ -661,9 +689,19 @@ object EnvironmentInstaller {
               header[1] != '!'.code.toByte()) {
             return@forEach // ELF binary or non-script file — leave untouched
           }
-          val content = file.readText(Charsets.UTF_8)
-          if (content.contains(oldPrefix)) {
-            file.writeText(content.replace(oldPrefix, newPrefix), Charsets.UTF_8)
+          val original = file.readText(Charsets.UTF_8)
+          // Apply each replacement to the *running* string so that the output
+          // of one replacement is the input of the next. Guard with != newPrefix
+          // to ensure we never accidentally replace with an identical string.
+          var content = original
+          for (old in oldPrefixes) {
+            if (old != newPrefix) {
+              content = content.replace(old, newPrefix)
+            }
+          }
+          if (content != original) {
+            file.writeText(content, Charsets.UTF_8)
+            file.setExecutable(true, false)
             patched++
           }
         } catch (e: Exception) {
@@ -674,6 +712,6 @@ object EnvironmentInstaller {
       }
     }
 
-    Log.d(TAG, "patchShebangPaths: rewrote $patched scripts ($oldPrefix → $newPrefix)")
+    Log.d(TAG, "patchShebangPaths: rewrote $patched scripts (→ $newPrefix)")
   }
 }
