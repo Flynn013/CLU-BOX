@@ -179,6 +179,12 @@ fun AgentChatScreen(
   val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
   val selectedModel = modelManagerUiState.selectedModel
   LaunchedEffect(selectedModel) {
+    // ── Agentic Context Router: sync engine with model backend ────────────
+    agentTools.engine = if (selectedModel.runtimeType == RuntimeType.GEMINI_CLOUD) {
+      AgentEngine.CLOUD
+    } else {
+      AgentEngine.LOCAL
+    }
     if (selectedModel.runtimeType == RuntimeType.GEMINI_CLOUD &&
       !GeminiApiKeyStore.hasApiKey(context)
     ) {
@@ -251,17 +257,18 @@ fun AgentChatScreen(
       val pendingTask = agentTools.pendingTaskDescription
       if (pendingTask != null) {
         // ── Circuit Breaker: hard cap on consecutive autonomous iterations ──
-        if (autonomousIterationCount >= MAX_AUTONOMOUS_ITERATIONS) {
+        val maxLoops = agentTools.governor.maxLoops
+        if (autonomousIterationCount >= maxLoops) {
           Log.w(
             TAG,
-            "Autonomous loop HALTED: reached $MAX_AUTONOMOUS_ITERATIONS iterations. " +
+            "Autonomous loop HALTED: reached $maxLoops iterations (engine=${agentTools.engine}). " +
               "Clearing pending task to prevent crash."
           )
           agentTools.pendingTaskDescription = null
           viewModel.addMessage(
             model = model,
             message = ChatMessageText(
-              content = "[System: Autonomous loop halted after $MAX_AUTONOMOUS_ITERATIONS " +
+              content = "[System: Autonomous loop halted after $maxLoops " +
                 "iterations to protect device stability. Send a new message to continue.]",
               side = ChatSide.AGENT,
             ),

@@ -42,6 +42,42 @@ import kotlinx.coroutines.runBlocking
 
 private const val TAG = "AGAgentTools"
 
+// ── Agentic Context Router ─────────────────────────────────────────────────
+
+/**
+ * Identifies whether the active LLM backend is running on-device (LOCAL)
+ * or via the Gemini Cloud API (CLOUD).  This drives [AgentGovernor] limits
+ * and the engine-specific System Constraint injected into every session.
+ */
+enum class AgentEngine { LOCAL, CLOUD }
+
+/**
+ * Runtime governor limits derived from the active [AgentEngine].
+ *
+ * @param maxLoops        Hard cap on consecutive autonomous loop iterations.
+ * @param maxOutputBuffer Max characters of terminal/tool output fed back to the
+ *                        model in a single [OBSERVE] step.  Larger outputs are
+ *                        truncated with a [SYSTEM WARNING] suffix.
+ */
+data class AgentGovernor(val maxLoops: Int, val maxOutputBuffer: Int) {
+  companion object {
+    val LOCAL  = AgentGovernor(maxLoops = 3,  maxOutputBuffer = 2_000)
+    val CLOUD  = AgentGovernor(maxLoops = 10, maxOutputBuffer = 50_000)
+
+    /** Engine-specific constraint appended to the base system prompt. */
+    const val LOCAL_CONSTRAINT =
+      "SYSTEM CONSTRAINT: You are running on local mobile hardware. Your context window is limited. " +
+      "You MUST only execute ONE simple bash command at a time. Do NOT use complex pipes or scripts. " +
+      "If an error occurs, report it immediately to the user. Do not attempt infinite retries."
+
+    const val CLOUD_CONSTRAINT =
+      "SYSTEM CONSTRAINT: You are running on cloud infrastructure with advanced reasoning. " +
+      "You have full read/write access to the clu_workspace via the bash terminal. " +
+      "You may chain commands, write Python scripts to solve complex logic, and use git. " +
+      "If you encounter an error, use your tools to independently diagnose and fix it before reporting back to the user."
+  }
+}
+
 /**
  * Maximum character length for any single string argument accepted by a tool.
  * Prevents the LLM (or a prompt-injection) from sending megabytes of junk data
@@ -230,6 +266,37 @@ class AgentTools() : ToolSet {
   lateinit var context: Context
   lateinit var skillManagerViewModel: SkillManagerViewModel
   var brainBoxDao: BrainBoxDao? = null
+
+  /**
+   * The active engine type — set from [AgentChatTaskModule] and [AgentChatScreen]
+   * whenever the selected model changes.  Drives [governor] limits and the
+   * engine-specific System Constraint injected into the session prompt.
+   */
+  var engine: AgentEngine = AgentEngine.LOCAL
+
+  /**
+   * Runtime limits derived from [engine]. Updated automatically whenever
+   * [engine] changes; no manual synchronisation required.
+   */
+  val governor: AgentGovernor
+    get() = when (engine) {
+      AgentEngine.LOCAL -> AgentGovernor.LOCAL
+      AgentEngine.CLOUD -> AgentGovernor.CLOUD
+    }
+
+  /**
+   * Observe-phase circuit breaker: truncates [text] to [governor.maxOutputBuffer]
+   * chars and appends a [SYSTEM WARNING] suffix to prevent a massive terminal
+   * dump from blinding the local model or burning tokens on the cloud model.
+   */
+  internal fun capObserveOutput(text: String): String {
+    val limit = governor.maxOutputBuffer
+    return if (text.length > limit) {
+      text.take(limit) + "\n[SYSTEM WARNING: OUTPUT TRUNCATED. RESPONSE EXCEEDED SIZE LIMIT.]"
+    } else {
+      text
+    }
+  }
 
   /** Optional VectorEngine for embedding generation and semantic search. */
   var vectorEngine: VectorEngine? = null
@@ -1269,7 +1336,10 @@ class AgentTools() : ToolSet {
 
       mapOf(
         "command" to safeCmd,
-        "output" to capOutputWithSpill(output, spillDir),
+        // capOutputWithSpill: spills full output to disk and inserts a pointer if it
+        // exceeds MAX_OUTPUT_CHARS. capObserveOutput then applies the governor's
+        // engine-specific hard cap before the text is fed back to the model.
+        "output" to capObserveOutput(capOutputWithSpill(output, spillDir)),
         "status" to status,
       )
       } catch (e: SecurityException) {
@@ -1348,7 +1418,9 @@ class AgentTools() : ToolSet {
 
       mapOf(
         "command" to safeCmd,
-        "output" to capOutputWithSpill(output, spillDir),
+        // capOutputWithSpill spills large output to disk; capObserveOutput then
+        // applies the governor's engine-specific hard cap before model ingestion.
+        "output" to capObserveOutput(capOutputWithSpill(output, spillDir)),
         "status" to status,
       )
       } catch (e: SecurityException) {
