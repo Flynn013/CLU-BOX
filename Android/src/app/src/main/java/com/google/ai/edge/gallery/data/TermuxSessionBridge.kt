@@ -168,16 +168,25 @@ class TermuxSessionBridge(private val context: Context) {
    * crash the entire application. On failure, [sessionInitFailed] is set
    * and a diagnostic message is stored in [sessionInitError].
    *
-   * @param cwd   Initial working directory for the shell process.
-   * @param shell Path to the shell binary (defaults to `$PREFIX/bin/bash`
-   *              when available, then `$PREFIX/bin/sh`, then `/system/bin/sh`).
+   * @param cwd Initial working directory for the shell process.
    */
-  fun createSession(cwd: File, shell: String = EnvironmentInstaller.shellPath(context)) {
+  fun createSession(cwd: File) {
     sessionInitFailed = false
     sessionInitError = null
 
     try {
-      Log.d(TAG, "Checkpoint 1: Preparing session (shell=$shell)")
+      // Resolve the internal bash binary path explicitly.
+      // Using the hardcoded bash path prevents any accidental fallback to
+      // /system/bin/sh, which does not accept the --login argument and would
+      // crash immediately with "sh: --: unknown option".
+      val bashPath = EnvironmentInstaller.bashPath(context).absolutePath
+      Log.d(TAG, "Checkpoint 1: Preparing session (bash=$bashPath)")
+
+      // Strict validation: if the bootstrap extraction failed or hasn't run yet,
+      // throw a clear error rather than silently launching the wrong shell.
+      if (!File(bashPath).exists()) {
+        throw IllegalStateException("Bash binary missing at $bashPath")
+      }
 
       if (terminalSession != null) {
         Log.w(TAG, "Session already exists — destroying old one first")
@@ -226,14 +235,16 @@ class TermuxSessionBridge(private val context: Context) {
 
       // Pass --login so bash reads /etc/profile and ~/.bash_profile, which sets
       // up the Termux $PATH, aliases, and TERM correctly.
-      val args = arrayOf(shell, "--login")
+      // NOTE: --login is only valid for bash, not for /system/bin/sh — this is
+      // why we explicitly use bashPath above instead of a generic shell fallback.
+      val args = arrayOf(bashPath, "--login")
 
       Log.d(TAG, "Checkpoint 3: Allocating PTY via TerminalSession")
 
       terminalSession = TerminalSession(
-        shell,              // executable
+        bashPath,           // executable (explicit bash — no sh fallback)
         cwd.absolutePath,   // working directory
-        args,               // arguments (argv[0]=shell, argv[1]=--login)
+        args,               // arguments (argv[0]=bash, argv[1]=--login)
         env.toTypedArray(), // environment
         // Use the Termux library's default transcript size (typically 2000 rows).
         // This provides a reasonable scrollback buffer for CLU-BOX workflows.
