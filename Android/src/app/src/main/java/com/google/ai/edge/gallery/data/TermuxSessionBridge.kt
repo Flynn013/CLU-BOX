@@ -203,57 +203,26 @@ class TermuxSessionBridge(private val context: Context) {
         destroySession()
       }
 
-      // $HOME is a dedicated home directory inside filesDir (mirrors Termux convention).
-      val homeDir = EnvironmentInstaller.homeDir(context).also { it.mkdirs() }
-      // $TMPDIR lives inside the sysroot so pkg/apt scripts can find it.
-      val tmpDir = EnvironmentInstaller.tmpDir(context).also { it.mkdirs() }
-
       Log.d(TAG, "Checkpoint 2: Building environment")
 
-      // Build the environment for the shell using the internal sysroot.
-      val binDir = EnvironmentInstaller.binDir(context)
-      val prefix = EnvironmentInstaller.prefixDir(context)
-      // Include $PREFIX/bin/applets so Termux busybox applets (env, sed, awk …)
-      // are visible alongside the main bin directory.
-      val appletsDir = File(binDir, "applets")
-      val effectivePath = buildString {
-        if (binDir.isDirectory) {
-          append(binDir.absolutePath)
-          if (appletsDir.isDirectory) append(":${appletsDir.absolutePath}")
-          append(":")
-        }
-        append("/system/bin:/system/xbin")
-      }
-
-      val env = mutableListOf(
-        "HOME=${homeDir.absolutePath}",
-        "TERM=xterm-256color",
-        "PATH=$effectivePath",
-        "COLORTERM=truecolor",
-        "LANG=en_US.UTF-8",
-        "TMPDIR=${tmpDir.absolutePath}",
-        // SHELL should point to the underlying interpreter, not to proot.
-        "SHELL=$shellPath",
-        // Visible prompt so the user gets immediate boot feedback.
-        "PS1=CLU/BOX \$ ",
-      )
-      // Inject sysroot environment variables when the bootstrap prefix exists,
-      // giving the PTY shell access to bash, python, node, pkg, git, and native
-      // shared libraries.
-      if (prefix.isDirectory) {
-        env.add("PREFIX=${prefix.absolutePath}")
-        env.add("TERMUX_PREFIX=${prefix.absolutePath}")
-      }
-      // proot writes its fake rootfs to a tmp directory.  Redirect it to our
-      // private storage so it never touches the read-only /tmp on the host.
-      // PROOT_NO_SECCOMP=1 disables seccomp filtering, which avoids compatibility
-      // crashes on kernels that enforce strict syscall policies.
+      // Minimal, explicit environment for the proot-wrapped PTY session.
+      // Keeping this array small and deterministic avoids the $PATH=(null)
+      // issue that arises when the inherited process environment is absent or
+      // incomplete.  binDir is the host-side path; proot's bind-mount makes
+      // it visible under the Termux guest prefix too.
+      val filesDir = context.filesDir.absolutePath
       File(context.filesDir, "tmp").mkdirs()
-      env.add("PROOT_TMP_DIR=${File(context.filesDir, "tmp").absolutePath}")
-      env.add("PROOT_NO_SECCOMP=1")
-      env.add("PROOT_NO_SYSVIPC=1")
-      // Verbose proot logging to stderr — helps diagnose boot failures.
-      env.add("PROOT_VERBOSE=9")
+      EnvironmentInstaller.homeDir(context).mkdirs()
+      val envArray = arrayOf(
+        "PROOT_TMP_DIR=$filesDir/tmp",
+        "PROOT_NO_SECCOMP=1",
+        "PROOT_NO_SYSVIPC=1",
+        // Verbose proot logging to stderr — helps diagnose boot failures.
+        "PROOT_VERBOSE=9",
+        "HOME=$filesDir/clu_file_box",
+        "PATH=$filesDir/bin:/system/bin",
+        "TERM=xterm-256color",
+      )
 
       // Build proot-wrapped (or direct) command list.
       // Pass --login so bash reads /etc/profile and ~/.bash_profile.
@@ -268,7 +237,7 @@ class TermuxSessionBridge(private val context: Context) {
         cmd.first(),        // executable (proot when available, bash/sh otherwise)
         cwd.absolutePath,   // working directory
         cmd.toTypedArray(), // full args array (cmd[0] = program name as convention)
-        env.toTypedArray(), // environment
+        envArray,           // environment — explicit non-null array
         // Use the Termux library's default transcript size (typically 2000 rows).
         // This provides a reasonable scrollback buffer for CLU-BOX workflows.
         TerminalEmulator.DEFAULT_TERMINAL_TRANSCRIPT_ROWS,
