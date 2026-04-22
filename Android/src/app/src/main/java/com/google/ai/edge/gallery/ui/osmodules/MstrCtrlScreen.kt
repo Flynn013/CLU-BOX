@@ -44,7 +44,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -64,6 +63,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.google.ai.edge.gallery.data.EnvironmentInstaller
+import com.google.ai.edge.gallery.data.SharedShellManager
 import com.google.ai.edge.gallery.data.TerminalSessionManager
 import com.google.ai.edge.gallery.data.TermuxSessionBridge
 import com.google.ai.edge.gallery.ui.theme.absoluteBlack
@@ -94,7 +94,10 @@ import kotlinx.coroutines.withContext
  * • Bottom input row for quick command injection.
  */
 @Composable
-fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
+fun MstrCtrlScreen(
+  sessionManager: TerminalSessionManager,
+  sharedShellManager: SharedShellManager,
+) {
   val context = LocalContext.current
   val scope = rememberCoroutineScope()
   var inputText by remember { mutableStateOf("") }
@@ -136,29 +139,25 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
   // when new output arrives from the PTY.
   var terminalViewRef by remember { mutableStateOf<TerminalView?>(null) }
 
-  // Create the Termux PTY bridge and session eagerly so the session
-  // is ready before the AndroidView factory runs.  Previously this was
-  // in a LaunchedEffect which ran *after* the first composition,
-  // causing the TerminalView factory to see a null session.
-  //
-  // The createSession call is wrapped inside TermuxSessionBridge with a
-  // blast-shield try-catch, so even if PTY init fails due to W^X or
-  // native-lib errors the bridge object is still valid (sessionInitFailed
-  // will be true and terminalSession will be null).
-  val bridge = remember {
-    TermuxSessionBridge(context).also { b ->
-      b.createSession(sessionManager.sandboxRoot)
-      if (b.sessionInitFailed) {
-        Log.e("MstrCtrlScreen", "PTY init failed: ${b.sessionInitError}")
-      }
-    }
-  }  // Start the legacy session manager (pre-flight + agent tools).
+  // Use the application-level singleton bridge from SharedShellManager.
+  // This keeps the PTY session alive when the user switches to another module
+  // and returns — no shell restart, no lost history.
+  // The session was already created in SharedShellManager.init; we only
+  // attach/detach the TerminalView here.
+  val bridge = sharedShellManager.bridge
+  if (bridge.sessionInitFailed) {
+    Log.e("MstrCtrlScreen", "PTY init failed: ${bridge.sessionInitError}")
+  }
+
+  // Start the legacy session manager (pre-flight + agent tools).
   LaunchedEffect(Unit) {
     sessionManager.startSession()
   }
 
   // Wire up the bridge callback to invalidate the TerminalView whenever
   // new text arrives from the PTY.  Re-wires when the view ref changes.
+  // Note: setCallback replaces the default SharedShellManager callback, so
+  // we also call sharedShellManager.bridge's internal screen-version bump.
   LaunchedEffect(terminalViewRef) {
     bridge.setCallback(object : TermuxSessionBridge.Callback {
       override fun onTextChanged() {
@@ -179,11 +178,6 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
     })
   }
 
-  // Clean up PTY on disposal.
-  DisposableEffect(Unit) {
-    onDispose { bridge.destroySession() }
-  }
-
   // Auto-upgrade: when the bootstrap self-heals and the terminal goes ONLINE,
   // restart the bridge if it was started with the /system/bin/sh fallback.
   // This replaces the stuck /system/bin/sh session with a proper bash session
@@ -191,8 +185,7 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
   LaunchedEffect(terminalOnline) {
     if (terminalOnline && bridge.usedFallbackShell) {
       withContext(Dispatchers.IO) {
-        bridge.destroySession()
-        bridge.createSession(sessionManager.sandboxRoot)
+        sharedShellManager.restartSession()
       }
       bridgeRestartCount++ // Triggers AndroidView re-attachment with the new bash session.
     }
@@ -344,13 +337,13 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
         )
       }
 
-      // Clear / restart session.
+      // Clear / restart session — delegates to SharedShellManager so the
+      // single PTY session is replaced and both UI and AI see the new one.
       IconButton(
         onClick = {
           sessionTerminatedMsg = null
           scope.launch(Dispatchers.IO) {
-            bridge.destroySession()
-            bridge.createSession(sessionManager.sandboxRoot)
+            sharedShellManager.restartSession()
           }
         },
       ) {

@@ -342,6 +342,16 @@ class AgentTools() : ToolSet {
   /** Optional reference to the MSTR_CTRL terminal session for shell tools. */
   var terminalSessionManager: com.google.ai.edge.gallery.data.TerminalSessionManager? = null
 
+  /**
+   * Optional reference to the shared singleton PTY session.
+   *
+   * When set, [Shell_Execute] commands are also injected into the live MSTR_CTRL
+   * terminal so the user can watch the AI's actions in real time.  The AI can
+   * also call [com.google.ai.edge.gallery.data.SharedShellManager.readScreen]
+   * to observe the output directly from the shared session buffer.
+   */
+  var sharedShellManager: com.google.ai.edge.gallery.data.SharedShellManager? = null
+
   /** Lazily initialized FileBoxManager for file workspace operations. */
   val fileBoxManager: com.google.ai.edge.gallery.data.FileBoxManager by lazy {
     com.google.ai.edge.gallery.data.FileBoxManager(context)
@@ -1379,6 +1389,10 @@ class AgentTools() : ToolSet {
       } else {
         com.google.ai.edge.gallery.data.executeCommand(context, safeCmd)
       }
+
+      // Mirror the command to the shared MSTR_CTRL session so the user can
+      // observe AI-driven shell actions in real time.
+      sharedShellManager?.injectCommand(safeCmd)
 
       _actionChannel.send(
         SkillProgressAgentAction(

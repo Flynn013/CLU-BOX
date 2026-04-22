@@ -91,6 +91,7 @@ import com.google.ai.edge.gallery.ui.navigation.GALLERY_ROUTE_BENCHMARK
 import com.google.ai.edge.gallery.ui.navigation.GALLERY_ROUTE_MODEL
 import com.google.ai.edge.gallery.ui.navigation.GalleryNavHost
 import com.google.ai.edge.gallery.data.TerminalSessionManager
+import com.google.ai.edge.gallery.data.SharedShellManager
 import com.google.ai.edge.gallery.ui.osmodules.BrainBoxModuleScreen
 import com.google.ai.edge.gallery.ui.osmodules.FileBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.MstrCtrlScreen
@@ -126,6 +127,10 @@ fun GalleryApp(
   val db = remember { GraphDatabase.getInstance(context) }
   val fileBoxManager = remember { FileBoxManager(context) }
   val terminalSessionManager = remember { TerminalSessionManager(context) }
+  // SharedShellManager holds the single PTY session that both MSTR_CTRL UI and
+  // AI agents share.  Created here (not inside MstrCtrlScreen) so the session
+  // persists across module switches without restarting the shell.
+  val sharedShellManager = remember { SharedShellManager(context) }
   val skillManagerViewModel: SkillManagerViewModel = hiltViewModel()
   // AgentTools instance used by the SkillManagerBottomSheet for skill testing.
   val agentTools = remember {
@@ -137,6 +142,7 @@ fun GalleryApp(
   agentTools.brainBoxDao = remember(context) { GraphDatabase.getInstance(context).brainBoxDao() }
   agentTools.vectorEngine = remember(context) { com.google.ai.edge.gallery.data.brainbox.VectorEngine(context) }
   agentTools.terminalSessionManager = terminalSessionManager
+  agentTools.sharedShellManager = sharedShellManager
 
   // Separate nav controllers so each module retains its own back stack.
   val chatNavController = rememberNavController()
@@ -283,7 +289,10 @@ fun GalleryApp(
                     vectorEngine = remember(context) { com.google.ai.edge.gallery.data.brainbox.VectorEngine(context) },
                   )
                   OsModule.FILE_BOX -> FileBoxScreen(fileBoxManager = fileBoxManager)
-                  OsModule.MSTR_CTRL -> MstrCtrlScreen(sessionManager = terminalSessionManager)
+                  OsModule.MSTR_CTRL -> MstrCtrlScreen(
+                    sessionManager = terminalSessionManager,
+                    sharedShellManager = sharedShellManager,
+                  )
                   else -> {} // all modules covered above
                 }
               }

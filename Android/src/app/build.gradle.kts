@@ -136,6 +136,11 @@ dependencies {
   implementation(libs.mediapipe.tasks.text)
 
   // ── Termux terminal emulator (PTY-backed shell sessions + TerminalView) ──
+  // Active: JitPack prebuilt — works out of the box without local Termux source.
+  // To switch to local modules, uncomment the two project() lines below and
+  // comment-out the JitPack line.  Requires libs/ modules declared in settings.gradle.kts.
+  //   implementation(project(":terminal-emulator"))
+  //   implementation(project(":termux-shared"))
   // From JitPack — https://github.com/termux/termux-app/wiki/Termux-Libraries
   implementation("com.termux.termux-app:terminal-view:0.118.0")
   // Avoid Guava ListenableFuture classpath collision with Termux/shared deps.
