@@ -116,6 +116,10 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
   // AndroidView to fully re-create and re-attach the new PTY session.
   var bridgeRestartCount by remember { mutableStateOf(0) }
 
+  // Message shown at the bottom of the terminal when the PTY session exits.
+  // Null while the session is alive; set to the exit-code banner on death.
+  var sessionTerminatedMsg by remember { mutableStateOf<String?>(null) }
+
   // If the bootstrap is not yet ready (including failed — user gets a retry button
   // instead of a silent degraded /system/bin/sh terminal), show the overlay.
   if (bootstrapState !is EnvironmentInstaller.State.Ready) {
@@ -167,16 +171,10 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
 
       override fun onTitleChanged(title: String) {}
       override fun onBell() {}
-      override fun onSessionFinished() {
-        // Restart the PTY session so the user is never left with a frozen
-        // terminal and a locked soft keyboard after the shell exits.
-        scope.launch {
-          withContext(Dispatchers.IO) {
-            bridge.destroySession()
-            bridge.createSession(sessionManager.sandboxRoot)
-          }
-          bridgeRestartCount++ // Forces TerminalView to re-attach the new session.
-        }
+      override fun onSessionFinished(exitCode: Int) {
+        // Leave the terminal view open so the developer can read the preceding
+        // error output.  Restarting here would wipe the crash log.
+        sessionTerminatedMsg = "[SESSION TERMINATED - Exit Code: $exitCode]"
       }
     })
   }
@@ -274,6 +272,28 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
       }
     }
 
+    // ── Session-terminated banner ──────────────────────────────
+    // Shown when the PTY process exits, so the developer can see the exit
+    // code without the screen disappearing.  Cleared when the session is
+    // manually restarted via the restart button.
+    val terminationMsg = sessionTerminatedMsg
+    if (terminationMsg != null) {
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .background(absoluteBlack)
+          .padding(horizontal = 10.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Text(
+          text = terminationMsg,
+          color = neonGreen.copy(alpha = 0.7f),
+          fontFamily = FontFamily.Monospace,
+          fontSize = 12.sp,
+        )
+      }
+    }
+
     // ── Bottom input row (quick command injection) ─────────────
     Row(
       modifier = Modifier
@@ -327,6 +347,7 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
       // Clear / restart session.
       IconButton(
         onClick = {
+          sessionTerminatedMsg = null
           scope.launch(Dispatchers.IO) {
             bridge.destroySession()
             bridge.createSession(sessionManager.sandboxRoot)

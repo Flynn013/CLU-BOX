@@ -54,8 +54,8 @@ class TermuxSessionBridge(private val context: Context) {
     fun onTitleChanged(title: String)
     /** Called when a bell character is received. */
     fun onBell()
-    /** Called when the session finishes. */
-    fun onSessionFinished()
+    /** Called when the session finishes. [exitCode] is the process exit status. */
+    fun onSessionFinished(exitCode: Int)
   }
 
   private var callback: Callback? = null
@@ -79,8 +79,8 @@ class TermuxSessionBridge(private val context: Context) {
     }
 
     override fun onSessionFinished(finishedSession: TerminalSession) {
-      Log.d(TAG, "Terminal session finished")
-      callback?.onSessionFinished()
+      Log.d(TAG, "Terminal session finished (exit=${finishedSession.exitStatus})")
+      callback?.onSessionFinished(finishedSession.exitStatus)
     }
 
     override fun onBell(session: TerminalSession) {
@@ -252,6 +252,8 @@ class TermuxSessionBridge(private val context: Context) {
       env.add("PROOT_TMP_DIR=${File(context.filesDir, "tmp").absolutePath}")
       env.add("PROOT_NO_SECCOMP=1")
       env.add("PROOT_NO_SYSVIPC=1")
+      // Verbose proot logging to stderr — helps diagnose boot failures.
+      env.add("PROOT_VERBOSE=9")
 
       // Build proot-wrapped (or direct) command list.
       // Pass --login so bash reads /etc/profile and ~/.bash_profile.
