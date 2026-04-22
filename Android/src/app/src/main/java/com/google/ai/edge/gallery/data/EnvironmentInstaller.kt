@@ -253,18 +253,27 @@ object EnvironmentInstaller {
     val proot = prootPath(context)
     val bash  = bashPath(context)
     if (proot.exists() && proot.canExecute() && bash.exists() && bash.canExecute()) {
+      val filesDir = context.filesDir.absolutePath
+      val matrixRoot = "$filesDir/matrix"
+      // Pre-build the fake rootfs structure so proot has a valid destination to bind to.
+      File("$matrixRoot/data/data/com.termux/files/usr").mkdirs()
+      File("$filesDir/tmp").mkdirs()
       return buildList {
         add(proot.absolutePath)
-        add("-0")                     // fake root — bypasses UID checks in apt/dpkg
-        add("-b")
-        add("${prefixDir(context).absolutePath}:$TERMUX_HARDCODED_PREFIX")
-        add("-b"); add("/dev")        // device nodes required by PTY
-        add("-b"); add("/proc")       // process info required by various tools
-        add("-w"); add(homeDir(context).absolutePath) // initial working directory
-        // Use the host path so the kernel can exec bash directly.
-        // proot intercepts all subsequent syscalls made by bash, so scripts
-        // with hard-coded Termux shebangs still resolve through the binding.
-        add(bash.absolutePath)
+        add("-0")                        // fake root — bypasses UID checks in apt/dpkg
+        add("-r"); add(matrixRoot)       // chroot into our isolated fake filesystem
+        add("-b"); add("/system")        // bind native Android OS bins
+        add("-b"); add("/apex")          // bind modern Android Bionic libraries
+        add("-b"); add("/vendor")        // bind hardware libraries
+        add("-b"); add("/linkerconfig")  // bind Android 10+ linker configs
+        add("-b"); add("/dev")           // device nodes required by PTY
+        add("-b"); add("/proc")          // process info required by various tools
+        // Inject our Termux engine: host filesDir appears as the Termux prefix inside Matrix.
+        add("-b"); add("$filesDir:$TERMUX_HARDCODED_PREFIX")
+        // Initial working directory inside the Matrix (guest path).
+        add("-w"); add("$TERMUX_HARDCODED_PREFIX/clu_file_box")
+        // Execute bash via its guest path — proot resolves it through the bind above.
+        add("$TERMUX_HARDCODED_PREFIX/bin/bash")
         addAll(shellArgs)
       }
     }

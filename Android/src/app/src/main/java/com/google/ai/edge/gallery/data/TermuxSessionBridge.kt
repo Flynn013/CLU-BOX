@@ -211,6 +211,8 @@ class TermuxSessionBridge(private val context: Context) {
       // incomplete.  binDir is the host-side path; proot's bind-mount makes
       // it visible under the Termux guest prefix too.
       val filesDir = context.filesDir.absolutePath
+      val matrixRoot = "$filesDir/matrix"
+      File("$matrixRoot/data/data/com.termux/files/usr").mkdirs()
       File(context.filesDir, "tmp").mkdirs()
       EnvironmentInstaller.homeDir(context).mkdirs()
       val envArray = arrayOf(
@@ -219,8 +221,8 @@ class TermuxSessionBridge(private val context: Context) {
         "PROOT_NO_SYSVIPC=1",
         // Verbose proot logging to stderr — helps diagnose boot failures.
         "PROOT_VERBOSE=9",
-        "HOME=$filesDir/clu_file_box",
-        "PATH=$filesDir/bin:/system/bin",
+        "HOME=/data/data/com.termux/files/usr/clu_file_box",
+        "PATH=/data/data/com.termux/files/usr/bin:/system/bin",
         "TERM=xterm-256color",
       )
 
