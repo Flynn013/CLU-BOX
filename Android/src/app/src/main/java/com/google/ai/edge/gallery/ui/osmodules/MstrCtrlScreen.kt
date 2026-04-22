@@ -167,7 +167,17 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
 
       override fun onTitleChanged(title: String) {}
       override fun onBell() {}
-      override fun onSessionFinished() {}
+      override fun onSessionFinished() {
+        // Restart the PTY session so the user is never left with a frozen
+        // terminal and a locked soft keyboard after the shell exits.
+        scope.launch {
+          withContext(Dispatchers.IO) {
+            bridge.destroySession()
+            bridge.createSession(sessionManager.sandboxRoot)
+          }
+          bridgeRestartCount++ // Forces TerminalView to re-attach the new session.
+        }
+      }
     })
   }
 

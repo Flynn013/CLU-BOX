@@ -261,7 +261,11 @@ object EnvironmentInstaller {
         add("-b"); add("/dev")        // device nodes required by PTY
         add("-b"); add("/proc")       // process info required by various tools
         add("-w"); add(homeDir(context).absolutePath) // initial working directory
-        add(bash.absolutePath)
+        // Use the guest (Matrix) path so proot translates it through the binding.
+        // Passing the host path here causes proot to exit 255 because bash scripts
+        // and shebangs reference hard-coded Termux paths that only resolve inside
+        // the bound namespace.
+        add("$TERMUX_HARDCODED_PREFIX/bin/bash")
         addAll(shellArgs)
       }
     }
