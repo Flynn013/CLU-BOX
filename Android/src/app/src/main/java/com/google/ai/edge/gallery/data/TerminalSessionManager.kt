@@ -195,6 +195,7 @@ class TerminalSessionManager(private val context: Context) {
       env["PROOT_TMP_DIR"] = File(context.filesDir, "tmp").absolutePath
       env["PROOT_NO_SECCOMP"] = "1"
       env["PROOT_NO_SYSVIPC"] = "1"
+      env["LD_LIBRARY_PATH"] = File(context.filesDir, "lib").absolutePath
 
       Log.d(TAG, "Checkpoint 3: Starting ProcessBuilder (proot=${EnvironmentInstaller.prootPath(context).canExecute()})")
       // --login is only valid for bash (proot-wrapped or direct); sh / /system/bin/sh
@@ -478,6 +479,7 @@ class TerminalSessionManager(private val context: Context) {
       pb.environment()["PROOT_TMP_DIR"] = File(context.filesDir, "tmp").absolutePath
       pb.environment()["PROOT_NO_SECCOMP"] = "1"
       pb.environment()["PROOT_NO_SYSVIPC"] = "1"
+      pb.environment()["LD_LIBRARY_PATH"] = File(context.filesDir, "lib").absolutePath
 
       val proc = pb.start()
 
@@ -566,6 +568,7 @@ class TerminalSessionManager(private val context: Context) {
       pb.environment()["PROOT_TMP_DIR"] = File(context.filesDir, "tmp").absolutePath
       pb.environment()["PROOT_NO_SECCOMP"] = "1"
       pb.environment()["PROOT_NO_SYSVIPC"] = "1"
+      pb.environment()["LD_LIBRARY_PATH"] = File(context.filesDir, "lib").absolutePath
 
       val proc = pb.start()
 

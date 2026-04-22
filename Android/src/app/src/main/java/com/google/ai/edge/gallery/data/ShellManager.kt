@@ -80,6 +80,7 @@ fun executeCommand(context: Context, command: String): String {
     pb.environment()["PROOT_TMP_DIR"]    = File(context.filesDir, "tmp").also { it.mkdirs() }.absolutePath
     pb.environment()["PROOT_NO_SECCOMP"] = "1"
     pb.environment()["PROOT_NO_SYSVIPC"] = "1"
+    pb.environment()["LD_LIBRARY_PATH"]  = File(context.filesDir, "lib").absolutePath
 
     val process = pb.start()
 
