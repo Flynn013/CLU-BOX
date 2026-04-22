@@ -191,8 +191,10 @@ class TerminalSessionManager(private val context: Context) {
       }
       // proot needs a writable tmp directory inside our private storage to build
       // its fake rootfs; disable seccomp so it runs on kernels with strict policies.
+      File(context.filesDir, "tmp").mkdirs()
       env["PROOT_TMP_DIR"] = File(context.filesDir, "tmp").absolutePath
       env["PROOT_NO_SECCOMP"] = "1"
+      env["PROOT_NO_SYSVIPC"] = "1"
 
       Log.d(TAG, "Checkpoint 3: Starting ProcessBuilder (proot=${EnvironmentInstaller.prootPath(context).canExecute()})")
       // --login is only valid for bash (proot-wrapped or direct); sh / /system/bin/sh
@@ -472,14 +474,15 @@ class TerminalSessionManager(private val context: Context) {
         // Required for Termux-patched apt/dpkg to find config at our prefix.
         pb.environment()["TERMUX_PREFIX"] = prefix.absolutePath
       }
+      File(context.filesDir, "tmp").mkdirs()
       pb.environment()["PROOT_TMP_DIR"] = File(context.filesDir, "tmp").absolutePath
       pb.environment()["PROOT_NO_SECCOMP"] = "1"
+      pb.environment()["PROOT_NO_SYSVIPC"] = "1"
 
       val proc = pb.start()
 
       val stdoutRef = AtomicReference("")
       val stderrRef = AtomicReference("")
-
       val stdoutThread = Thread {
         stdoutRef.set(proc.inputStream.bufferedReader(Charsets.UTF_8).readText())
       }.also { it.start() }
@@ -559,8 +562,10 @@ class TerminalSessionManager(private val context: Context) {
         // Required for Termux-patched apt/dpkg to find config at our prefix.
         pb.environment()["TERMUX_PREFIX"] = prefix.absolutePath
       }
+      File(context.filesDir, "tmp").mkdirs()
       pb.environment()["PROOT_TMP_DIR"] = File(context.filesDir, "tmp").absolutePath
       pb.environment()["PROOT_NO_SECCOMP"] = "1"
+      pb.environment()["PROOT_NO_SYSVIPC"] = "1"
 
       val proc = pb.start()
 
