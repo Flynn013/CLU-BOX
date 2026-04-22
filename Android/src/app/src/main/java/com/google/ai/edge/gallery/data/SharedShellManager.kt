@@ -150,10 +150,12 @@ class SharedShellManager(context: Context) {
   fun readScreen(): String {
     val session: TerminalSession = bridge.terminalSession ?: return ""
     val emulator = session.emulator ?: return ""
+    // mRows and mColumns are public fields on TerminalEmulator.
+    // TerminalBuffer.mColumns is package-private and mRows does not exist there.
+    val cols = emulator.mColumns
+    val visibleRows = emulator.mRows
     val screen = emulator.screen
     val transcriptRows = screen.activeTranscriptRows
-    val visibleRows = screen.mRows
-    val cols = screen.mColumns
     if (cols <= 0 || visibleRows <= 0) return ""
     // getSelectedText covers scrollback (negative row indices) + visible rows.
     return screen.getSelectedText(
