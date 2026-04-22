@@ -42,6 +42,51 @@ import kotlinx.coroutines.runBlocking
 
 private const val TAG = "AGAgentTools"
 
+// ── Agentic Context Router ─────────────────────────────────────────────────
+
+/**
+ * Identifies whether the active LLM backend is running on-device (LOCAL)
+ * or via the Gemini Cloud API (CLOUD).  This drives [AgentGovernor] limits
+ * and the engine-specific System Constraint injected into every session.
+ */
+enum class AgentEngine { LOCAL, CLOUD }
+
+/**
+ * Runtime governor limits derived from the active [AgentEngine].
+ *
+ * @param maxLoops        Hard cap on consecutive autonomous loop iterations.
+ * @param maxOutputBuffer Max characters of terminal/tool output fed back to the
+ *                        model in a single [OBSERVE] step.  Larger outputs are
+ *                        truncated with a [SYSTEM WARNING] suffix.
+ */
+data class AgentGovernor(val maxLoops: Int, val maxOutputBuffer: Int) {
+  companion object {
+    // LOCAL needs more loop iterations than CLOUD because it can only issue one
+    // simple command per turn — complex tasks require many more round-trips.
+    val LOCAL  = AgentGovernor(maxLoops = 15, maxOutputBuffer = 2_000)
+    val CLOUD  = AgentGovernor(maxLoops = 20, maxOutputBuffer = 50_000)
+
+    /** Engine-specific constraint appended to the base system prompt. */
+    const val LOCAL_CONSTRAINT =
+      "SYSTEM CONSTRAINT: You are running on local mobile hardware. Context window is limited. " +
+      "Execute ONE simple bash command at a time — no pipes, no multi-command scripts. " +
+      "For multi-step agentic tasks: call taskQueueUpdate(status='pending', next_task_description='...') " +
+      "ONLY when a concrete next step still remains to complete the current task. " +
+      "For single questions or finished tasks, answer directly — do NOT call taskQueueUpdate. " +
+      "When you hit an error, diagnose it with the next command. " +
+      "Only call operatorHalt when you genuinely need user input or the task is fully complete."
+
+    const val CLOUD_CONSTRAINT =
+      "SYSTEM CONSTRAINT: You are running on cloud infrastructure with advanced reasoning. " +
+      "You have full read/write access to the clu_workspace via the bash terminal. " +
+      "You may chain commands, write Python scripts to solve complex logic, and use git. " +
+      "For multi-step agentic tasks: call taskQueueUpdate(status='pending', next_task_description='...') " +
+      "ONLY when a concrete next step still remains. " +
+      "For single questions or finished tasks, answer directly — do NOT call taskQueueUpdate. " +
+      "If you encounter an error, use your tools to independently diagnose and fix it before reporting back to the user."
+  }
+}
+
 /**
  * Maximum character length for any single string argument accepted by a tool.
  * Prevents the LLM (or a prompt-injection) from sending megabytes of junk data
@@ -75,28 +120,18 @@ private fun validateRelativePath(path: String): String? {
 }
 
 /**
- * Dangerous shell metacharacter patterns that should be blocked from tool-supplied commands.
- * This prevents the LLM from constructing shell injections via tool arguments.
+ * Shell metacharacters that are blocked for ALL engines (true injection vectors).
+ * Backtick and `$(` / `${` enable arbitrary command substitution; `\n` allows
+ * newline-injection to smuggle a second command past a single-line parser.
  */
-private val DANGEROUS_SHELL_PATTERNS = listOf(
-  "&&", "||", ";", "|", "`", "\$(", "\${", ">", "<", "\n", "*", "?",
-)
+private val SHELL_INJECTION_PATTERNS = listOf("`", "\$(", "\${", "\n")
 
 /**
- * Returns a non-null error message if [command] contains suspicious
- * metacharacters that could enable shell injection via chained commands.
+ * Additional metacharacters blocked in LOCAL engine mode.
+ * These enable command chaining, piping, and redirection — safe on cloud
+ * infrastructure but inappropriate for the single-command-at-a-time local model.
  */
-private fun validateShellCommand(command: String): String? {
-  if (command.isBlank()) return "Command must not be empty"
-  if (command.length > MAX_INPUT_CHARS) return "Command exceeds maximum length"
-  for (pattern in DANGEROUS_SHELL_PATTERNS) {
-    if (command.contains(pattern)) {
-      return "Command contains disallowed shell metacharacter: '$pattern'. " +
-        "Execute only a single, simple command per call."
-    }
-  }
-  return null
-}
+private val LOCAL_SHELL_CHAIN_PATTERNS = listOf("&&", "||", ";", "|", ">", "<", "*", "?")
 
 /** Hard cap on the total serialized size of a tool result map (all keys + values).
  *  Prevents recursive tool loops from overflowing the KV cache with accumulated
@@ -230,6 +265,76 @@ class AgentTools() : ToolSet {
   lateinit var context: Context
   lateinit var skillManagerViewModel: SkillManagerViewModel
   var brainBoxDao: BrainBoxDao? = null
+
+  /**
+   * The active engine type — set from [AgentChatTaskModule] and [AgentChatScreen]
+   * whenever the selected model changes.  Drives [governor] limits and the
+   * engine-specific System Constraint injected into the session prompt.
+   */
+  var engine: AgentEngine = AgentEngine.LOCAL
+
+  /**
+   * Runtime limits derived from [engine]. Updated automatically whenever
+   * [engine] changes; no manual synchronisation required.
+   */
+  val governor: AgentGovernor
+    get() = when (engine) {
+      AgentEngine.LOCAL -> AgentGovernor.LOCAL
+      AgentEngine.CLOUD -> AgentGovernor.CLOUD
+    }
+
+  /**
+   * Observe-phase circuit breaker: truncates [text] to [governor.maxOutputBuffer]
+   * chars and appends a [SYSTEM WARNING] suffix to prevent a massive terminal
+   * dump from blinding the local model or burning tokens on the cloud model.
+   */
+  internal fun capObserveOutput(text: String): String {
+    val limit = governor.maxOutputBuffer
+    return if (text.length > limit) {
+      text.take(limit) + "\n[SYSTEM WARNING: OUTPUT TRUNCATED TO PREVENT BUFFER OVERFLOW. USE grep OR tail TO REFINE SEARCH.]"
+    } else {
+      text
+    }
+  }
+
+  /**
+   * Engine-aware shell-command validator.
+   *
+   * **LOCAL:** Blocks all shell metacharacters that could chain or redirect
+   * commands, forcing the model to issue only a single, simple command per
+   * tool call — matching the LOCAL_CONSTRAINT injected into the system prompt.
+   *
+   * **CLOUD:** Only blocks true command-injection vectors (backtick, `$(`,
+   * `${`, newline).  Chaining operators (`;`, `&&`, `||`), pipes (`|`),
+   * redirects (`>`, `<`), and glob patterns (`*`, `?`) are permitted so the
+   * Gemini model can compose multi-step shell pipelines and scripts as
+   * advertised by the CLOUD_CONSTRAINT.
+   *
+   * @return A non-null error string if [command] is invalid, null if safe.
+   */
+  internal fun validateShellCommand(command: String): String? {
+    if (command.isBlank()) return "Command must not be empty"
+    if (command.length > MAX_INPUT_CHARS) return "Command exceeds maximum length"
+
+    // Always block true injection vectors regardless of engine.
+    for (pattern in SHELL_INJECTION_PATTERNS) {
+      if (command.contains(pattern)) {
+        return "Command contains disallowed injection pattern: '$pattern'."
+      }
+    }
+
+    // LOCAL engine: additionally block chaining / redirect / glob metacharacters.
+    if (engine == AgentEngine.LOCAL) {
+      for (pattern in LOCAL_SHELL_CHAIN_PATTERNS) {
+        if (command.contains(pattern)) {
+          return "Command contains disallowed shell metacharacter: '$pattern'. " +
+            "Execute only a single, simple command per call."
+        }
+      }
+    }
+
+    return null
+  }
 
   /** Optional VectorEngine for embedding generation and semantic search. */
   var vectorEngine: VectorEngine? = null
@@ -884,23 +989,44 @@ class AgentTools() : ToolSet {
 
       // ── Phase 5: Auto-Validator Interceptor (Syntax Gatekeeper) ──
       // After saving, inspect the file extension and run a syntax check.
-      // If validation fails, return the error to force the LLM to debug.
+      // Guard 1: only attempt validation if the required runtime binary actually
+      //          exists at $PREFIX/bin — avoids false rejections when the Termux
+      //          bootstrap is not yet installed or python/node wasn't installed.
+      // Guard 2: treat exit code 127 (command not found) as "validator unavailable"
+      //          rather than a syntax error, so a missing runtime never deletes
+      //          a syntactically valid file.
       val ext = safePath.substringAfterLast('.', "").lowercase()
       val absolutePath = java.io.File(mgr.root, safePath).absolutePath
       val tsm = terminalSessionManager
 
+      // Termux convention: Python is 'python3', not 'python'.
+      val (binaryName, validationCmdTemplate) = when (ext) {
+        "py" -> "python3" to "python3 -m py_compile"
+        "js" -> "node" to "node --check"
+        else -> null to null
+      }
+
+      // Only build a validation command if the binary is actually present.
+      val binDir = com.google.ai.edge.gallery.data.EnvironmentInstaller.binDir(context)
+      val binaryExists = binaryName != null && java.io.File(binDir, binaryName).let { it.exists() && it.canExecute() }
+
       // Escape the file path for safe shell interpolation (replace ' with '\'').
       val escapedPath = absolutePath.replace("'", "'\\''")
-      val validationCmd: String? = when (ext) {
-        "py" -> "python -m py_compile '$escapedPath'"
-        "js" -> "node --check '$escapedPath'"
-        else -> null
+      val validationCmd: String? = if (binaryExists && validationCmdTemplate != null) {
+        "$validationCmdTemplate '$escapedPath'"
+      } else {
+        null
       }
 
       if (validationCmd != null && tsm != null) {
         Log.d(TAG, "fileBoxWrite: running auto-validation: $validationCmd")
         val (exitCode, validationOutput) = tsm.executeCommandWithExitCode(validationCmd)
-        if (exitCode != 0) {
+
+        // Exit code 127 = command not found — runtime is missing or PATH is wrong.
+        // This is NOT a syntax error; skip validation silently.
+        if (exitCode == 127) {
+          Log.w(TAG, "fileBoxWrite: validator binary not found (exit 127) for '$safePath' — skipping validation")
+        } else if (exitCode != 0) {
           val errMsg = validationOutput.ifEmpty { "Unknown syntax error" }
           Log.w(TAG, "fileBoxWrite: validation FAILED for '$safePath': $errMsg")
 
@@ -922,14 +1048,16 @@ class AgentTools() : ToolSet {
             "error" to "FILE REJECTED & DELETED due to syntax error: $errMsg. " +
               "You MUST fix the code and call fileBoxWrite again with the corrected content.",
           )
+        } else {
+          Log.d(TAG, "fileBoxWrite: validation PASSED for '$safePath'")
         }
-        Log.d(TAG, "fileBoxWrite: validation PASSED for '$safePath'")
       }
 
+      val validated = validationCmd != null && tsm != null
       mapOf(
         "file_path" to safePath,
         "status" to "succeeded",
-        "message" to if (validationCmd != null) "File written and validated successfully" else "File written successfully",
+        "message" to if (validated) "File written and validated successfully" else "File written successfully",
       )
       } catch (e: Exception) {
         Log.e(TAG, "fileBoxWrite: unexpected error", e)
@@ -1249,7 +1377,7 @@ class AgentTools() : ToolSet {
       val output = if (tsm != null) {
         tsm.sendCommand(safeCmd, visible = false)
       } else {
-        com.google.ai.edge.gallery.data.executeCommand(safeCmd)
+        com.google.ai.edge.gallery.data.executeCommand(context, safeCmd)
       }
 
       _actionChannel.send(
@@ -1269,7 +1397,10 @@ class AgentTools() : ToolSet {
 
       mapOf(
         "command" to safeCmd,
-        "output" to capOutputWithSpill(output, spillDir),
+        // capOutputWithSpill: spills full output to disk and inserts a pointer if it
+        // exceeds MAX_OUTPUT_CHARS. capObserveOutput then applies the governor's
+        // engine-specific hard cap before the text is fed back to the model.
+        "output" to capObserveOutput(capOutputWithSpill(output, spillDir)),
         "status" to status,
       )
       } catch (e: SecurityException) {
@@ -1328,7 +1459,7 @@ class AgentTools() : ToolSet {
         tsm.sendCommand(safeCmd, visible = true)
       } else {
         // Fallback: run silently if terminal session is not available.
-        com.google.ai.edge.gallery.data.executeCommand(safeCmd)
+        com.google.ai.edge.gallery.data.executeCommand(context, safeCmd)
       }
 
       _actionChannel.send(
@@ -1348,7 +1479,9 @@ class AgentTools() : ToolSet {
 
       mapOf(
         "command" to safeCmd,
-        "output" to capOutputWithSpill(output, spillDir),
+        // capOutputWithSpill spills large output to disk; capObserveOutput then
+        // applies the governor's engine-specific hard cap before model ingestion.
+        "output" to capObserveOutput(capOutputWithSpill(output, spillDir)),
         "status" to status,
       )
       } catch (e: SecurityException) {
@@ -1506,7 +1639,7 @@ class AgentTools() : ToolSet {
       val output = if (tsm != null) {
         tsm.sendCommand(cmd, visible = false)
       } else {
-        com.google.ai.edge.gallery.data.executeCommand(cmd)
+        com.google.ai.edge.gallery.data.executeCommand(context, cmd)
       }
 
       _actionChannel.send(
@@ -1666,7 +1799,7 @@ class AgentTools() : ToolSet {
       val output = if (tsm != null) {
         tsm.sendCommand(cmd, visible = true)
       } else {
-        com.google.ai.edge.gallery.data.executeCommand(cmd)
+        com.google.ai.edge.gallery.data.executeCommand(context, cmd)
       }
 
       // Try to extract error line number from common error output patterns.

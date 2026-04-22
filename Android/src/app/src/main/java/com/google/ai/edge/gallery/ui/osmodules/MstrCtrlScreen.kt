@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -36,6 +37,9 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -44,6 +48,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -68,6 +73,7 @@ import com.termux.view.TerminalView
 import com.termux.view.TerminalViewClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * MSTR_CTRL — full-screen terminal UI powered by the Termux terminal-emulator
@@ -94,20 +100,35 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
   var inputText by remember { mutableStateOf("") }
 
   // ── Bootstrap state observation ──────────────────────────────
-  // Trigger the EnvironmentInstaller on first composition.
+  // Observe the installer state so the progress overlay and the terminal
+  // can react once the bootstrap finishes.  The actual installation is
+  // driven by TerminalSessionManager.startSession() → runPreFlightCheck()
+  // → EnvironmentInstaller.ensureInstalled().  Do NOT call ensureInstalled
+  // here: a second concurrent call races the first and they both write to
+  // the same cacheDir zip file, corrupting the archive and causing
+  // extraction to fail with an invalid-zip error.
   val bootstrapState by EnvironmentInstaller.state.collectAsState()
 
-  LaunchedEffect(Unit) {
-    EnvironmentInstaller.ensureInstalled(context)
-  }
+  // ── Terminal online status (set after pkg update -y succeeds) ──
+  val terminalOnline by sessionManager.terminalOnline.collectAsState()
 
-  // If the bootstrap is not yet ready (and hasn't failed), show a progress
-  // overlay instead of the terminal. On failure, fall through to the
-  // terminal with the limited /system/bin/sh shell.
-  if (bootstrapState !is EnvironmentInstaller.State.Ready &&
-    bootstrapState !is EnvironmentInstaller.State.Failed
-  ) {
-    BootstrapProgressOverlay(bootstrapState)
+  // Epoch counter incremented on every bridge restart to force the
+  // AndroidView to fully re-create and re-attach the new PTY session.
+  var bridgeRestartCount by remember { mutableStateOf(0) }
+
+  // Message shown at the bottom of the terminal when the PTY session exits.
+  // Null while the session is alive; set to the exit-code banner on death.
+  var sessionTerminatedMsg by remember { mutableStateOf<String?>(null) }
+
+  // If the bootstrap is not yet ready (including failed — user gets a retry button
+  // instead of a silent degraded /system/bin/sh terminal), show the overlay.
+  if (bootstrapState !is EnvironmentInstaller.State.Ready) {
+    BootstrapProgressOverlay(
+      state = bootstrapState,
+      onRetry = if (bootstrapState is EnvironmentInstaller.State.Failed) {
+        { scope.launch { EnvironmentInstaller.retry(context) } }
+      } else null,
+    )
     return
   }
 
@@ -131,9 +152,7 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
         Log.e("MstrCtrlScreen", "PTY init failed: ${b.sessionInitError}")
       }
     }
-  }
-
-  // Start the legacy session manager (pre-flight + agent tools).
+  }  // Start the legacy session manager (pre-flight + agent tools).
   LaunchedEffect(Unit) {
     sessionManager.startSession()
   }
@@ -152,7 +171,11 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
 
       override fun onTitleChanged(title: String) {}
       override fun onBell() {}
-      override fun onSessionFinished() {}
+      override fun onSessionFinished(exitCode: Int) {
+        // Leave the terminal view open so the developer can read the preceding
+        // error output.  Restarting here would wipe the crash log.
+        sessionTerminatedMsg = "[SESSION TERMINATED - Exit Code: $exitCode]"
+      }
     })
   }
 
@@ -161,58 +184,114 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
     onDispose { bridge.destroySession() }
   }
 
+  // Auto-upgrade: when the bootstrap self-heals and the terminal goes ONLINE,
+  // restart the bridge if it was started with the /system/bin/sh fallback.
+  // This replaces the stuck /system/bin/sh session with a proper bash session
+  // without requiring the user to manually press the restart button.
+  LaunchedEffect(terminalOnline) {
+    if (terminalOnline && bridge.usedFallbackShell) {
+      withContext(Dispatchers.IO) {
+        bridge.destroySession()
+        bridge.createSession(sessionManager.sandboxRoot)
+      }
+      bridgeRestartCount++ // Triggers AndroidView re-attachment with the new bash session.
+    }
+  }
+
   Column(
     modifier = Modifier
       .fillMaxSize()
       .background(absoluteBlack)
       .imePadding(),
   ) {
+    // ── Status bar: TERMINAL ONLINE indicator ──────────────────
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .background(absoluteBlack)
+        .padding(horizontal = 10.dp, vertical = 3.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Text(
+        text = if (terminalOnline) "● TERMINAL: ONLINE" else "○ TERMINAL: OFFLINE",
+        color = if (terminalOnline) neonGreen else neonGreen.copy(alpha = 0.4f),
+        fontFamily = FontFamily.Monospace,
+        fontSize = 12.sp,
+      )
+    }
     // ── Termux TerminalView (main content area) ────────────────
     Box(
       modifier = Modifier
         .weight(1f)
         .fillMaxWidth(),
     ) {
-      AndroidView(
-        modifier = Modifier.fillMaxSize(),
-        factory = { ctx ->
-          TerminalView(ctx, null).apply {
-            // Wire up the view client that handles keyboard/touch events.
-            setTerminalViewClient(CluTerminalViewClient(this))
+      // key(bridgeRestartCount) forces a full TerminalView re-creation whenever the
+      // bridge is restarted (e.g. after self-healing upgrades /system/bin/sh
+      // to bash).  This ensures attachSession() runs against the new session.
+      key(bridgeRestartCount) {
+        AndroidView(
+          modifier = Modifier.fillMaxSize(),
+          factory = { ctx ->
+            TerminalView(ctx, null).apply {
+              // Wire up the view client that handles keyboard/touch events.
+              setTerminalViewClient(CluTerminalViewClient(this))
 
-            // Style: monospace font, neon-green on black.
-            setTextSize(20)
-            setTypeface(Typeface.MONOSPACE)
+              // Style: monospace font, neon-green on black.
+              setTextSize(20)
+              setTypeface(Typeface.MONOSPACE)
 
-            // Black background to match CLU/BOX aesthetic.
-            setBackgroundColor(android.graphics.Color.BLACK)
+              // Black background to match CLU/BOX aesthetic.
+              setBackgroundColor(android.graphics.Color.BLACK)
 
-            // Make the view focusable so it can receive keyboard input.
-            isFocusable = true
-            isFocusableInTouchMode = true
+              // Make the view focusable so it can receive keyboard input.
+              isFocusable = true
+              isFocusableInTouchMode = true
 
-            // Attach the PTY session — the shell starts once the view measures.
-            val session = bridge.terminalSession
-            if (session != null) {
-              attachSession(session)
+              // Attach the PTY session — the shell starts once the view measures.
+              val session = bridge.terminalSession
+              if (session != null) {
+                attachSession(session)
+              }
+
+              // Store reference so the bridge callback can invalidate this view.
+              terminalViewRef = this
             }
+          },
+          update = { view ->
+            // Keep the view reference current.
+            terminalViewRef = view
+            // Re-attach if the session was recreated.
+            // Note: `mTermSession` is a public field in Termux's TerminalView Java API.
+            // There is no getter method — direct access is the intended usage pattern.
+            val session = bridge.terminalSession
+            if (session != null && view.mTermSession !== session) {
+              view.attachSession(session)
+            }
+          },
+        )
+      }
+    }
 
-            // Store reference so the bridge callback can invalidate this view.
-            terminalViewRef = this
-          }
-        },
-        update = { view ->
-          // Keep the view reference current.
-          terminalViewRef = view
-          // Re-attach if the session was recreated.
-          // Note: `mTermSession` is a public field in Termux's TerminalView Java API.
-          // There is no getter method — direct access is the intended usage pattern.
-          val session = bridge.terminalSession
-          if (session != null && view.mTermSession !== session) {
-            view.attachSession(session)
-          }
-        },
-      )
+    // ── Session-terminated banner ──────────────────────────────
+    // Shown when the PTY process exits, so the developer can see the exit
+    // code without the screen disappearing.  Cleared when the session is
+    // manually restarted via the restart button.
+    val terminationMsg = sessionTerminatedMsg
+    if (terminationMsg != null) {
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .background(absoluteBlack)
+          .padding(horizontal = 10.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Text(
+          text = terminationMsg,
+          color = neonGreen.copy(alpha = 0.7f),
+          fontFamily = FontFamily.Monospace,
+          fontSize = 12.sp,
+        )
+      }
     }
 
     // ── Bottom input row (quick command injection) ─────────────
@@ -268,6 +347,7 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
       // Clear / restart session.
       IconButton(
         onClick = {
+          sessionTerminatedMsg = null
           scope.launch(Dispatchers.IO) {
             bridge.destroySession()
             bridge.createSession(sessionManager.sandboxRoot)
@@ -286,35 +366,62 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
 
 // ── Bootstrap progress overlay ───────────────────────────────────────────
 //
-// Shown while EnvironmentInstaller is downloading/extracting the sysroot.
+// Shown while EnvironmentInstaller is downloading/extracting the sysroot,
+// AND when the install fails — so the user always gets a clear status message
+// and a Retry button instead of a silent degraded /system/bin/sh terminal.
 
 @Composable
-private fun BootstrapProgressOverlay(state: EnvironmentInstaller.State) {
+private fun BootstrapProgressOverlay(
+  state: EnvironmentInstaller.State,
+  onRetry: (() -> Unit)? = null,
+) {
   Box(
     modifier = Modifier
       .fillMaxSize()
       .background(absoluteBlack),
     contentAlignment = Alignment.Center,
   ) {
-    val message = when (state) {
-      is EnvironmentInstaller.State.Idle -> "Preparing Linux environment…"
-      is EnvironmentInstaller.State.Downloading ->
-        "Downloading bootstrap… ${state.percent}%"
-      is EnvironmentInstaller.State.Extracting -> "Extracting sysroot…"
-      is EnvironmentInstaller.State.FixingPermissions -> "Setting up environment…"
-      is EnvironmentInstaller.State.Failed ->
-        "Bootstrap failed: ${state.message}\n\nTerminal will use limited Android shell."
-      is EnvironmentInstaller.State.Ready -> "Ready!"
-    }
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+      val message = when (state) {
+        is EnvironmentInstaller.State.Idle -> "Preparing Linux environment…"
+        is EnvironmentInstaller.State.Downloading ->
+          "Downloading bootstrap (${state.percent}%)…\nThis only happens once."
+        is EnvironmentInstaller.State.Extracting -> "Extracting sysroot…"
+        is EnvironmentInstaller.State.FixingPermissions -> "Setting up environment…"
+        is EnvironmentInstaller.State.Failed ->
+          "Bootstrap failed:\n${state.message}\n\nTap Retry to try again."
+        is EnvironmentInstaller.State.Ready -> "Ready!"
+      }
 
-    Text(
-      text = message,
-      color = neonGreen,
-      fontFamily = FontFamily.Monospace,
-      fontSize = 16.sp,
-      textAlign = TextAlign.Center,
-      modifier = Modifier.padding(32.dp),
-    )
+      Text(
+        text = message,
+        color = if (state is EnvironmentInstaller.State.Failed) neonGreen.copy(alpha = 0.8f) else neonGreen,
+        fontFamily = FontFamily.Monospace,
+        fontSize = 16.sp,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.padding(32.dp),
+      )
+
+      // Show Retry button only when failed and a retry callback is provided.
+      if (state is EnvironmentInstaller.State.Failed && onRetry != null) {
+        Spacer(Modifier.height(16.dp))
+        Button(
+          onClick = onRetry,
+          colors = ButtonDefaults.buttonColors(
+            containerColor = neonGreen.copy(alpha = 0.15f),
+            contentColor = neonGreen,
+          ),
+        ) {
+          Icon(Icons.Default.Refresh, contentDescription = null)
+          Spacer(Modifier.width(8.dp))
+          Text(
+            text = "RETRY INSTALL",
+            fontFamily = FontFamily.Monospace,
+            fontSize = 15.sp,
+          )
+        }
+      }
+    }
   }
 }
 

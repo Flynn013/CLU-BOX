@@ -54,8 +54,8 @@ class TermuxSessionBridge(private val context: Context) {
     fun onTitleChanged(title: String)
     /** Called when a bell character is received. */
     fun onBell()
-    /** Called when the session finishes. */
-    fun onSessionFinished()
+    /** Called when the session finishes. [exitCode] is the process exit status. */
+    fun onSessionFinished(exitCode: Int)
   }
 
   private var callback: Callback? = null
@@ -79,8 +79,8 @@ class TermuxSessionBridge(private val context: Context) {
     }
 
     override fun onSessionFinished(finishedSession: TerminalSession) {
-      Log.d(TAG, "Terminal session finished")
-      callback?.onSessionFinished()
+      Log.d(TAG, "Terminal session finished (exit=${finishedSession.exitStatus})")
+      callback?.onSessionFinished(finishedSession.exitStatus)
     }
 
     override fun onBell(session: TerminalSession) {
@@ -158,6 +158,17 @@ class TermuxSessionBridge(private val context: Context) {
     private set
 
   /**
+   * `true` when [createSession] fell back to `/system/bin/sh` because the
+   * bootstrap `bash` was not yet executable.
+   *
+   * Observed by [MstrCtrlScreen] to trigger an automatic bridge restart once
+   * [EnvironmentInstaller] self-heals and the terminal goes online.
+   */
+  @Volatile
+  var usedFallbackShell: Boolean = false
+    private set
+
+  /**
    * Creates and starts a new PTY-backed shell session.
    *
    * The shell process is not started until the [com.termux.view.TerminalView]
@@ -168,59 +179,65 @@ class TermuxSessionBridge(private val context: Context) {
    * crash the entire application. On failure, [sessionInitFailed] is set
    * and a diagnostic message is stored in [sessionInitError].
    *
-   * @param sandboxRoot The directory to use as `$HOME` and initial cwd.
-   * @param shell       Path to the shell binary (default: `/system/bin/sh`).
+   * @param cwd Initial working directory for the shell process.
    */
-  fun createSession(sandboxRoot: File, shell: String = EnvironmentInstaller.shellPath(context)) {
+  fun createSession(cwd: File) {
     sessionInitFailed = false
     sessionInitError = null
 
     try {
-      Log.d(TAG, "Checkpoint 1: Preparing session (shell=$shell)")
+      // Resolve the best available shell. When proot is installed both proot and
+      // bash must be present; otherwise fall back directly to bash/sh/system-sh.
+      val shellPath = EnvironmentInstaller.shellPath(context)
+      val usingProot = EnvironmentInstaller.prootPath(context).let { it.exists() && it.canExecute() } &&
+                       EnvironmentInstaller.bashPath(context).let { it.exists() && it.canExecute() }
+      // isBash is true when proot wraps bash OR when bash is launched directly.
+      val isBash = usingProot || shellPath.endsWith("bash")
+      // Track whether we fell back to the stock Android shell so the UI can
+      // trigger an automatic restart once the bootstrap self-heals.
+      usedFallbackShell = !usingProot && shellPath == "/system/bin/sh"
+      Log.d(TAG, "Checkpoint 1: Preparing session (usingProot=$usingProot, isBash=$isBash)")
 
       if (terminalSession != null) {
         Log.w(TAG, "Session already exists — destroying old one first")
         destroySession()
       }
 
-      val cwd = sandboxRoot.absolutePath
-      val home = sandboxRoot.absolutePath
-
       Log.d(TAG, "Checkpoint 2: Building environment")
 
-      // Build the environment for the shell using the internal sysroot.
-      val binDir = EnvironmentInstaller.binDir(context)
-      val prefix = EnvironmentInstaller.prefixDir(context)
-      val basePath = "/system/bin:/system/xbin"
-      val effectivePath = if (binDir.isDirectory) "${binDir.absolutePath}:$basePath" else basePath
-
-      val env = mutableListOf(
-        "HOME=$home",
+      // Minimal, explicit environment for the proot-wrapped PTY session.
+      // Keeping this array small and deterministic avoids the $PATH=(null)
+      // issue that arises when the inherited process environment is absent or
+      // incomplete.  binDir is the host-side path; proot's bind-mount makes
+      // it visible under the Termux guest prefix too.
+      val filesDir = context.filesDir.absolutePath
+      File(context.filesDir, "tmp").mkdirs()
+      EnvironmentInstaller.homeDir(context).mkdirs()
+      val envArray = arrayOf(
+        "PROOT_TMP_DIR=$filesDir/tmp",
+        "PROOT_NO_SECCOMP=1",
+        "PROOT_NO_SYSVIPC=1",
+        // Verbose proot logging to stderr — helps diagnose boot failures.
+        "PROOT_VERBOSE=9",
+        "HOME=$filesDir/clu_file_box",
+        "PATH=$filesDir/bin:/system/bin",
         "TERM=xterm-256color",
-        "PATH=$effectivePath",
-        "COLORTERM=truecolor",
-        "LANG=en_US.UTF-8",
-        "TMPDIR=${context.cacheDir.absolutePath}",
-        // Visible prompt so the user gets immediate boot feedback.
-        "PS1=CLU/BOX \$ ",
       )
-      // Inject sysroot environment variables when the bootstrap prefix exists,
-      // giving the PTY shell access to bash, python, node, pkg, git, and native
-      // shared libraries.
-      if (prefix.isDirectory) {
-        env.add("PREFIX=${prefix.absolutePath}")
-        env.add("LD_LIBRARY_PATH=${EnvironmentInstaller.libDir(context).absolutePath}")
-      }
 
-      val args = arrayOf(shell)
+      // Build proot-wrapped (or direct) command list.
+      // Pass --login so bash reads /etc/profile and ~/.bash_profile.
+      // NOTE: --login is only valid for bash; sh and /system/bin/sh do not
+      // support it and will crash with "unknown option".
+      val shellArgs = if (isBash) arrayOf("--login") else emptyArray()
+      val cmd = EnvironmentInstaller.buildShellCommand(context, shellArgs)
 
-      Log.d(TAG, "Checkpoint 3: Allocating PTY via TerminalSession")
+      Log.d(TAG, "Checkpoint 3: Allocating PTY via TerminalSession (cmd[0]=${cmd.first()})")
 
       terminalSession = TerminalSession(
-        shell,    // executable
-        cwd,      // working directory
-        args,     // arguments
-        env.toTypedArray(),  // environment
+        cmd.first(),        // executable (proot when available, bash/sh otherwise)
+        cwd.absolutePath,   // working directory
+        cmd.toTypedArray(), // full args array (cmd[0] = program name as convention)
+        envArray,           // environment — explicit non-null array
         // Use the Termux library's default transcript size (typically 2000 rows).
         // This provides a reasonable scrollback buffer for CLU-BOX workflows.
         TerminalEmulator.DEFAULT_TERMINAL_TRANSCRIPT_ROWS,

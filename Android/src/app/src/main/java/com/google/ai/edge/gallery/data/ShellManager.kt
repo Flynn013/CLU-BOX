@@ -16,35 +16,72 @@
 
 package com.google.ai.edge.gallery.data
 
+import android.content.Context
 import android.util.Log
+import java.io.File
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 private const val TAG = "ShellManager"
 
 /** Timeout in seconds before a shell process is forcibly killed. */
-private const val TIMEOUT_SECONDS = 10L
+private const val TIMEOUT_SECONDS = 60L
 
 /** Maximum time (ms) to wait for reader threads to finish after the process exits. */
 private const val READER_THREAD_JOIN_TIMEOUT_MS = 5_000L
 
 /**
- * Executes a shell command via `sh -c` and returns the combined stdout + stderr output.
+ * Executes a shell command via the internal bash binary and returns the combined stdout + stderr output.
  *
  * A strict [TIMEOUT_SECONDS]-second timeout is enforced. If the process does not finish
  * in time it is destroyed and `"TIMEOUT ERROR"` is returned, preventing the app from hanging
  * on runaway commands (e.g. accidental infinite loops).
  *
+ * @param context Application context used to resolve the internal bash binary path.
  * @param command The shell command string to execute.
  * @return The raw terminal output (stdout followed by stderr), or `"TIMEOUT ERROR"`.
  */
-fun executeCommand(command: String): String {
+fun executeCommand(context: Context, command: String): String {
   return try {
     Log.d(TAG, "executeCommand: $command")
 
-    val process = ProcessBuilder("sh", "-c", command)
+    // Build the launch command: proot-wrapped when proot is available, otherwise
+    // a direct shell exec (fallback chain: bash → sh → /system/bin/sh).
+    val cmd = EnvironmentInstaller.buildShellCommand(context, arrayOf("-c", command))
+    val pb = ProcessBuilder(cmd)
       .redirectErrorStream(false)
-      .start()
+
+    // $HOME uses the Termux-compatible home directory so pkg/apt config files work.
+    val homeDir = EnvironmentInstaller.homeDir(context).also { it.mkdirs() }
+    val tmpDir  = EnvironmentInstaller.tmpDir(context).also  { it.mkdirs() }
+    val binDir  = EnvironmentInstaller.binDir(context)
+    val prefix  = EnvironmentInstaller.prefixDir(context)
+
+    // Build PATH: sysroot bin + applets (busybox) + stock Android fallback.
+    val appletsDir = File(binDir, "applets")
+    val effectivePath = buildString {
+      if (binDir.isDirectory) {
+        append(binDir.absolutePath)
+        if (appletsDir.isDirectory) append(":${appletsDir.absolutePath}")
+        append(":")
+      }
+      append("/system/bin:/system/xbin")
+    }
+
+    pb.environment()["HOME"]           = homeDir.absolutePath
+    pb.environment()["TMPDIR"]         = tmpDir.absolutePath
+    pb.environment()["LANG"]           = "en_US.UTF-8"
+    pb.environment()["SHELL"]          = EnvironmentInstaller.shellPath(context)
+    pb.environment()["PATH"]           = effectivePath
+    if (prefix.isDirectory) {
+      pb.environment()["PREFIX"]         = prefix.absolutePath
+      pb.environment()["TERMUX_PREFIX"]  = prefix.absolutePath
+    }
+    pb.environment()["PROOT_TMP_DIR"]    = File(context.filesDir, "tmp").also { it.mkdirs() }.absolutePath
+    pb.environment()["PROOT_NO_SECCOMP"] = "1"
+    pb.environment()["PROOT_NO_SYSVIPC"] = "1"
+
+    val process = pb.start()
 
     // Read stdout and stderr on background threads so the pipe buffers don't fill up
     // and deadlock the process before waitFor returns.

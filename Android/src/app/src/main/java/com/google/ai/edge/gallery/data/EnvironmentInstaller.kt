@@ -17,16 +17,20 @@
 package com.google.ai.edge.gallery.data
 
 import android.content.Context
+import android.os.Build
 import android.system.Os
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.zip.ZipInputStream
@@ -35,34 +39,92 @@ private const val TAG = "EnvironmentInstaller"
 
 /**
  * Bootstraps a self-contained Linux sysroot inside the app's private data
- * directory by downloading and extracting the official Termux `bootstrap-aarch64.zip`.
+ * directory by extracting the Termux `bootstrap-aarch64.zip`.
  *
- * After installation the sysroot lives at `context.filesDir/usr/` and provides
- * `bash`, `apt`/`pkg`, and the corresponding shared libraries — all without
- * requiring the external Termux app to be installed.
+ * **Source priority:**
+ * 1. Bundled asset at `assets/bootstrap-aarch64.zip` — used when the zip is
+ *    shipped inside the APK (avoids any network requirement).
+ * 2. Network download from the official Termux release — used as a fallback
+ *    when no bundled asset is present.
+ *
+ * After installation the sysroot lives directly inside `context.filesDir/`
+ * (i.e. `filesDir/bin/bash`, `filesDir/lib/`, …) and provides `bash`,
+ * `apt`/`pkg`, and the corresponding shared libraries — all without requiring
+ * the external Termux app to be installed.
  *
  * Typical lifecycle:
  * 1. [MstrCtrlScreen] or [TerminalSessionManager] calls [ensureInstalled].
  * 2. If the sysroot is already present the call is a no-op.
- * 3. Otherwise the bootstrap archive is downloaded, extracted, symlinks are
- *    created from `SYMLINKS.txt`, and file permissions are fixed.
+ * 3. Otherwise the bootstrap archive is copied from assets (or downloaded),
+ *    extracted, symlinks are created from `SYMLINKS.txt`, and file permissions
+ *    are fixed.
  * 4. Once [state] emits [State.Ready], the terminal can start.
  */
 object EnvironmentInstaller {
 
   /**
-   * URL of the official Termux bootstrap archive for aarch64.
+   * Determines the correct Termux bootstrap CPU architecture string for the
+   * running device by inspecting [Build.SUPPORTED_ABIS] in priority order.
    *
-   * This points to the latest release asset from the termux-packages repo.
-   * Update the URL if a newer bootstrap is published or if the release
-   * scheme changes.
+   * Mapping:
+   * - `arm64-v8a`  → `aarch64`  (64-bit ARM — all modern phones)
+   * - `armeabi-v7a`→ `arm`       (32-bit ARM — older phones)
+   * - `x86_64`     → `x86_64`   (64-bit x86 — emulators, ChromeOS)
+   * - `x86`        → `i686`     (32-bit x86 — old emulators)
+   *
+   * Falls back to `aarch64` when no match is found.
    */
-  private const val BOOTSTRAP_URL =
-    "https://github.com/termux/termux-packages/releases/latest/download/bootstrap-aarch64.zip"
+  private val bootstrapArch: String = when {
+    Build.SUPPORTED_ABIS.contains("arm64-v8a")   -> "aarch64"
+    Build.SUPPORTED_ABIS.contains("armeabi-v7a") -> "arm"
+    Build.SUPPORTED_ABIS.contains("x86_64")      -> "x86_64"
+    Build.SUPPORTED_ABIS.contains("x86")         -> "i686"
+    else                                          -> "aarch64"
+  }
+
+  /**
+   * Name of the bootstrap asset bundled in `app/src/main/assets/`.
+   * File must match the running device's CPU architecture.
+   */
+  private val BOOTSTRAP_ASSET_NAME: String = "bootstrap-$bootstrapArch.zip"
+
+  /**
+   * Name of the `proot` binary bundled in `app/src/main/assets/`.
+   *
+   * proot intercepts filesystem syscalls so the app's sysroot can be
+   * bind-mounted to the hardcoded Termux prefix expected by `apt`, `dpkg`,
+   * and every shell script with a `/data/data/com.termux/…` shebang — all
+   * without root privileges.
+   */
+  private const val PROOT_ASSET_NAME = "proot"
+
+  /**
+   * Primary download URL — official Termux bootstrap for the device arch.
+   * Uses the GitHub `latest` redirect so it always points to the newest release.
+   */
+  private val BOOTSTRAP_URL: String =
+    "https://github.com/termux/termux-packages/releases/latest/download/bootstrap-$bootstrapArch.zip"
+
+  /**
+   * Fallback download URL using a known-stable Termux release tag.
+   * Used when the `latest` redirect fails or returns a non-200 response.
+   * Update this tag when a newer stable bootstrap is published.
+   */
+  private val BOOTSTRAP_URL_FALLBACK: String =
+    "https://github.com/termux/termux-packages/releases/download/bootstrap-2024.12.16/bootstrap-$bootstrapArch.zip"
 
   /** SharedPreferences file used to track installation state across launches. */
   private const val PREFS_NAME = "env_installer_prefs"
   private const val KEY_INSTALLED = "bootstrap_installed"
+
+  /**
+   * Hard-coded Termux prefix expected by bundled binaries and shell scripts,
+   * e.g. `/data/data/com.termux/files/usr/bin/bash`.
+   *
+   * proot bind-mounts [prefixDir] onto this guest path at launch time so those
+   * compiled-in paths resolve natively without mutating extracted files.
+   */
+  private const val TERMUX_HARDCODED_PREFIX = "/data/data/com.termux/files/usr"
 
   /**
    * Separator used in Termux's `SYMLINKS.txt` — the UTF-8 leftward arrow (U+2190).
@@ -99,10 +161,29 @@ object EnvironmentInstaller {
   /** Observable installation state for UI progress indicators. */
   val state: StateFlow<State> = _state.asStateFlow()
 
+  /**
+   * Guards concurrent calls to [ensureInstalled].
+   *
+   * Without this mutex, two simultaneous callers (e.g. a UI LaunchedEffect
+   * and TerminalSessionManager.runPreFlightCheck) both pass the
+   * `isInstalled()` fast-path check, both download to the same
+   * `cacheDir/bootstrap-aarch64.zip` file concurrently, and the two
+   * interleaved writes corrupt the archive — causing extraction to fail
+   * with an invalid-zip error and leaving the environment permanently broken.
+   */
+  private val installMutex = Mutex()
+
   // ── Path helpers ───────────────────────────────────────────────────
 
-  /** Root of the internal sysroot: `context.filesDir/usr`. */
-  fun prefixDir(context: Context): File = File(context.filesDir, "usr")
+  /**
+   * Root of the internal sysroot: `context.filesDir` directly.
+   *
+   * The Termux bootstrap archive uses a flat layout — entries like `bin/bash`
+   * extract directly into `filesDir/bin/bash` rather than the `usr/`-prefixed
+   * layout used by the official Termux app.  `PREFIX` therefore equals
+   * `filesDir` itself.
+   */
+  fun prefixDir(context: Context): File = context.filesDir
 
   /** Bin directory containing executables (`$PREFIX/bin`). */
   fun binDir(context: Context): File = File(prefixDir(context), "bin")
@@ -110,11 +191,31 @@ object EnvironmentInstaller {
   /** Lib directory containing shared libraries (`$PREFIX/lib`). */
   fun libDir(context: Context): File = File(prefixDir(context), "lib")
 
+  /**
+   * The `$HOME` directory for Termux sessions: `context.filesDir/clu_file_box`.
+   *
+   * This is the shared sandbox root used by both the PTY terminal and the AI
+   * file-box workspace, matching [TerminalSessionManager.sandboxRoot].
+   */
+  fun homeDir(context: Context): File = File(context.filesDir, "clu_file_box")
+
+  /**
+   * The `$TMPDIR` for Termux sessions: `$PREFIX/tmp`.
+   *
+   * Placing tmp inside the sysroot ensures that temporary files created by
+   * package management scripts (e.g. `pkg`/`apt`) stay within a directory
+   * that bash and libc can find via the standard Termux conventions.
+   */
+  fun tmpDir(context: Context): File = File(prefixDir(context), "tmp")
+
   /** Absolute path to the internal `bash` binary. */
   fun bashPath(context: Context): File = File(binDir(context), "bash")
 
   /** Absolute path to the internal `sh` binary. */
   fun shPath(context: Context): File = File(binDir(context), "sh")
+
+  /** Absolute path to the internal `proot` binary. */
+  fun prootPath(context: Context): File = File(binDir(context), "proot")
 
   /**
    * Returns the best available shell path inside the bootstrapped sysroot.
@@ -133,6 +234,49 @@ object EnvironmentInstaller {
   }
 
   /**
+   * Builds the command list used to launch a shell process.
+   *
+   * When [prootPath] exists and is executable **and** `bash` is also available,
+   * the returned list wraps bash with proot so that syscall interception binds
+   * `filesDir` to `/data/data/com.termux/files/usr`. This allows `apt`, `dpkg`,
+   * and every shell script with a Termux shebang to run natively without any
+   * string-replacement patching.
+   *
+   * When proot is absent (not bundled or not yet installed) the list falls back
+   * to `[shellPath, *shellArgs]`, preserving the existing direct-exec behaviour.
+   *
+   * @param shellArgs Extra arguments forwarded to the shell, e.g. `"--login"`,
+   *                  or `"-c"` followed by a command string for non-interactive use.
+   * @return A non-empty list whose first element is the executable to launch.
+   */
+  fun buildShellCommand(context: Context, shellArgs: Array<String> = emptyArray()): List<String> {
+    val proot = prootPath(context)
+    val bash  = bashPath(context)
+    if (proot.exists() && proot.canExecute() && bash.exists() && bash.canExecute()) {
+      return buildList {
+        add(proot.absolutePath)
+        add("-0")                     // fake root — bypasses UID checks in apt/dpkg
+        add("-b")
+        add("${prefixDir(context).absolutePath}:$TERMUX_HARDCODED_PREFIX")
+        add("-b"); add("/dev")        // device nodes required by PTY
+        add("-b"); add("/proc")       // process info required by various tools
+        add("-w"); add(homeDir(context).absolutePath) // initial working directory
+        // Use the host path so the kernel can exec bash directly.
+        // proot intercepts all subsequent syscalls made by bash, so scripts
+        // with hard-coded Termux shebangs still resolve through the binding.
+        add(bash.absolutePath)
+        addAll(shellArgs)
+      }
+    }
+    // proot not available — launch the best direct shell fallback.
+    val shell = shellPath(context)
+    return buildList {
+      add(shell)
+      addAll(shellArgs)
+    }
+  }
+
+  /**
    * Returns `true` when the sysroot appears to be fully installed.
    *
    * Checks the persisted flag first (fast), then verifies that the key
@@ -148,77 +292,199 @@ object EnvironmentInstaller {
   // ── Public API ─────────────────────────────────────────────────────
 
   /**
-   * Ensures the Linux sysroot is installed. If already present this is a
-   * no-op that immediately sets [state] to [State.Ready].
+   * Clears all installation flags and re-runs the full bootstrap installation.
    *
-   * Must be called from a coroutine context. Runs heavy I/O on [Dispatchers.IO].
+   * Safe to call from the UI (e.g. from a "Retry" button in
+   * [BootstrapProgressOverlay]) when a previous [ensureInstalled] call failed.
+   * Deletes any partially-extracted sysroot so the extraction starts clean.
+   */
+  suspend fun retry(context: Context) {
+    Log.i(TAG, "retry: clearing installation state and re-bootstrapping")
+    // Reset observable state first so the UI immediately shows the overlay.
+    _state.value = State.Idle
+
+    // Clear all installation flags so ensureInstalled runs the full path.
+    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+      .edit()
+      .putBoolean(KEY_INSTALLED, false)
+      .apply()
+
+    // Delete the partially-extracted sysroot (if any) to start clean.
+    withContext(Dispatchers.IO) {
+      prefixDir(context).deleteRecursively()
+    }
+
+    ensureInstalled(context)
+  }
+
+  /**
+   * Ensures the Linux sysroot is installed, executable, and proot-ready.
+   *
+   * **Three work tiers handled in a single mutex-protected block:**
+   * 1. **Full install** — bootstrap archive is missing entirely: download (or copy
+   *    from bundled asset) and extract.
+   * 2. **Permission repair** — sysroot is present but bash lost its execute bit
+   *    (e.g. after an OTA update or storage-encryption re-key): re-run
+   *    [fixPermissions].
+   * 3. **proot installation** — copy the bundled static `proot` binary into
+   *    `$PREFIX/bin/proot` so shell launches can bind-mount [prefixDir] onto the
+   *    hardcoded Termux guest prefix.
+   *
+   * Must be called from a coroutine context. Heavy I/O runs on [Dispatchers.IO].
    */
   suspend fun ensureInstalled(context: Context) {
-    if (isInstalled(context)) {
-      _state.value = State.Ready
-      return
-    }
+    // Need to do some work. Acquire the mutex so that only one coroutine proceeds
+    // at a time (prevents concurrent download/extract races and double-installs).
+    installMutex.withLock {
+      withContext(Dispatchers.IO) {
+        try {
+          val shellReady = isInstalled(context) &&
+            (bashPath(context).canExecute() || shPath(context).canExecute())
 
-    withContext(Dispatchers.IO) {
-      try {
-        val zipFile = File(context.cacheDir, "bootstrap-aarch64.zip")
+          if (shellReady) {
+            installProot(context)
+            _state.value = State.Ready
+            return@withContext
+          }
 
-        // 1. Download
-        _state.value = State.Downloading(0)
-        downloadBootstrap(zipFile)
+          // ── Tier 1: Full install if the sysroot is missing ───────────────
+          if (!isInstalled(context)) {
+            val zipFile = File(context.cacheDir, BOOTSTRAP_ASSET_NAME)
 
-        // 2. Extract
-        _state.value = State.Extracting
-        extractBootstrap(zipFile, context.filesDir)
+            // Prefer bundled asset; fall back to network download.
+            val fromAsset = tryCopyFromAsset(context, zipFile)
+            if (!fromAsset) {
+              _state.value = State.Downloading(0)
+              downloadBootstrap(zipFile)
+            }
 
-        // 3. Symlinks + permissions
-        _state.value = State.FixingPermissions
-        processSymlinks(context.filesDir)
-        fixPermissions(context)
+            _state.value = State.Extracting
+            extractBootstrap(zipFile, context.filesDir)
 
-        // 4. Clean up
-        zipFile.delete()
+            _state.value = State.FixingPermissions
+            processSymlinks(context.filesDir)
+            fixPermissions(context)
 
-        // 5. Persist success
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-          .edit().putBoolean(KEY_INSTALLED, true).apply()
+            // Create runtime directories that Termux expects.
+            homeDir(context).mkdirs()
+            tmpDir(context).mkdirs()
+            // Create a proot-specific tmp dir directly under filesDir so that
+            // PROOT_TMP_DIR points to a location proot can always write to.
+            File(context.filesDir, "tmp").mkdirs()
 
-        _state.value = State.Ready
-        Log.i(TAG, "Bootstrap installed at ${prefixDir(context).absolutePath}")
-      } catch (e: Exception) {
-        Log.e(TAG, "Bootstrap installation failed", e)
-        _state.value = State.Failed(e.message ?: "Unknown error")
-      }
-    }
+            zipFile.delete()
+
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+              .edit().putBoolean(KEY_INSTALLED, true).apply()
+
+            Log.i(TAG, "Bootstrap extracted to ${prefixDir(context).absolutePath}")
+          }
+
+          // ── Tier 2: Permission repair ────────────────────────────────────
+          // The zip format does not preserve Unix permissions and Android OTA
+          // updates can strip execute bits. Re-apply 0755 whenever bash is
+          // not directly executable; this also covers first-run-after-extract.
+          if (!bashPath(context).canExecute() && !shPath(context).canExecute()) {
+            Log.i(TAG, "Repairing execute permissions on sysroot binaries")
+            _state.value = State.FixingPermissions
+            fixPermissions(context)
+          }
+
+          // ── Tier 3: proot installation ───────────────────────────────────
+          // Copy proot from assets into bin/ so syscall interception is
+          // available on the next shell launch. installProot is idempotent.
+          installProot(context)
+
+          _state.value = State.Ready
+          Log.i(TAG, "Bootstrap ready at ${prefixDir(context).absolutePath}")
+        } catch (e: Exception) {
+          Log.e(TAG, "Bootstrap installation failed", e)
+          _state.value = State.Failed(e.message ?: "Unknown error")
+        }
+      } // withContext(Dispatchers.IO)
+    } // installMutex.withLock
   }
 
   // ── Private helpers ────────────────────────────────────────────────
 
   /**
-   * Downloads the bootstrap archive to [destination], following HTTP redirects.
+   * Attempts to copy the bundled `assets/bootstrap-aarch64.zip` to [destination].
    *
-   * GitHub release assets redirect through multiple HTTPS→HTTPS hops; we
-   * handle up to 5 redirects manually to cover cross-host redirects that
-   * [HttpURLConnection.setInstanceFollowRedirects] may not follow.
+   * @return `true` if the asset was found and successfully copied, `false` if
+   *         the asset is not bundled (caller should fall back to downloading).
+   */
+  private fun tryCopyFromAsset(context: Context, destination: File): Boolean {
+    return try {
+      context.assets.open(BOOTSTRAP_ASSET_NAME).use { input ->
+        Log.d(TAG, "Copying bootstrap from bundled asset")
+        FileOutputStream(destination).use { output ->
+          input.copyTo(output)
+        }
+      }
+      Log.d(TAG, "Asset copy complete → ${destination.absolutePath}")
+      true
+    } catch (e: IOException) {
+      Log.d(TAG, "No bundled bootstrap asset found ($BOOTSTRAP_ASSET_NAME) — will download")
+      false
+    }
+  }
+
+  /**
+   * Downloads the bootstrap archive to [destination], trying the primary URL
+   * first and the [BOOTSTRAP_URL_FALLBACK] if the primary returns a non-200
+   * response or throws a network error.
+   *
+   * Follows HTTP redirects (up to 5 per attempt) and sends a User-Agent that
+   * identifies the request so GitHub/CDN does not rate-limit anonymous traffic.
    */
   private fun downloadBootstrap(destination: File) {
-    var currentUrl = URL(BOOTSTRAP_URL)
+    val urls = listOf(BOOTSTRAP_URL, BOOTSTRAP_URL_FALLBACK)
+    var lastException: Exception? = null
+
+    for ((index, url) in urls.withIndex()) {
+      try {
+        Log.d(TAG, "downloadBootstrap: attempt ${index + 1} from $url")
+        downloadFromUrl(url, destination)
+        Log.i(TAG, "downloadBootstrap: succeeded from $url")
+        return // success — no need to try fallback
+      } catch (e: Exception) {
+        Log.w(TAG, "downloadBootstrap: attempt ${index + 1} failed (${e.message})")
+        lastException = e
+        destination.delete() // clean up partial file before retry
+      }
+    }
+
+    throw lastException ?: RuntimeException("All download URLs exhausted")
+  }
+
+  /**
+   * Downloads from a single [urlString], following up to 5 HTTP redirects.
+   * Sets a User-Agent so GitHub CDN does not treat the request as a bot.
+   */
+  private fun downloadFromUrl(urlString: String, destination: File) {
+    var currentUrl = URL(urlString)
     var redirectCount = 0
     var connection: HttpURLConnection
 
-    // Manually follow redirects to handle cross-host HTTPS→HTTPS hops
-    // (e.g. github.com → objects.githubusercontent.com).
     while (true) {
-      if (redirectCount > 5) throw RuntimeException("Too many redirects")
-      Log.d("CLU_BOOTSTRAP", "Downloading from: $currentUrl")
+      if (redirectCount > 5) throw RuntimeException("Too many redirects ($redirectCount)")
+      Log.d(TAG, "downloadFromUrl: connecting to $currentUrl")
       connection = currentUrl.openConnection() as HttpURLConnection
       connection.instanceFollowRedirects = false
       connection.connectTimeout = 30_000
       connection.readTimeout = 60_000
+      // Identify the app to GitHub/CDN. Using a fixed product token avoids
+      // rate-limiting of anonymous requests; Build.VERSION.RELEASE and
+      // Build.MODEL give enough context for debugging without hard-coding a
+      // version number that would drift out of sync with BuildConfig.
+      connection.setRequestProperty(
+        "User-Agent",
+        "CLU-BOX (Android ${Build.VERSION.RELEASE}; ${Build.MODEL}) TermuxBootstrapInstaller",
+      )
       connection.connect()
 
       val responseCode = connection.responseCode
-      Log.d("CLU_BOOTSTRAP", "Response code: $responseCode from $currentUrl")
+      Log.d(TAG, "downloadFromUrl: HTTP $responseCode from $currentUrl")
 
       when (responseCode) {
         HttpURLConnection.HTTP_MOVED_TEMP,
@@ -229,18 +495,19 @@ object EnvironmentInstaller {
           val location = connection.getHeaderField("Location")
             ?: throw RuntimeException("Redirect without Location header")
           connection.disconnect()
-          Log.d("CLU_BOOTSTRAP", "Redirect #$redirectCount → $location")
+          Log.d(TAG, "downloadFromUrl: redirect #$redirectCount → $location")
           currentUrl = URL(location)
           redirectCount++
         }
 
         HttpURLConnection.HTTP_OK -> {
-          Log.d("CLU_BOOTSTRAP", "Download stream ready (${connection.contentLengthLong} bytes)")
+          Log.d(TAG, "downloadFromUrl: stream ready (${connection.contentLengthLong} bytes)")
           break
         }
+
         else -> {
           connection.disconnect()
-          throw RuntimeException("Download failed: HTTP $responseCode")
+          throw RuntimeException("Download failed: HTTP $responseCode from $currentUrl")
         }
       }
     }
@@ -264,7 +531,7 @@ object EnvironmentInstaller {
         }
       }
 
-      Log.d(TAG, "Downloaded $downloadedBytes bytes to ${destination.absolutePath}")
+      Log.d(TAG, "downloadFromUrl: downloaded $downloadedBytes bytes")
     } finally {
       connection.disconnect()
     }
@@ -273,8 +540,9 @@ object EnvironmentInstaller {
   /**
    * Extracts the bootstrap zip into [targetDir].
    *
-   * The zip typically contains `usr/bin/`, `usr/lib/`, etc. at its top level,
-   * so extraction to `context.filesDir` produces `context.filesDir/usr/bin/bash`.
+   * The zip uses a flat layout — entries like `bin/bash`, `lib/libc.so`,
+   * etc. sit directly at the archive root, so extraction to `context.filesDir`
+   * produces `context.filesDir/bin/bash`.
    */
   private fun extractBootstrap(zipFile: File, targetDir: File) {
     ZipInputStream(zipFile.inputStream().buffered()).use { zis ->
@@ -345,23 +613,19 @@ object EnvironmentInstaller {
   }
 
   /**
-   * Makes all files under `bin/` and `libexec/` executable.
+   * Makes all files under `bin/`, `lib/`, and `libexec/` executable (0755).
    *
-   * The bootstrap zip extracts to a flat structure (`filesDir/bin/`,
-   * `filesDir/libexec/`), **not** under a `usr/` prefix. The zip format
-   * does not preserve Unix permissions, so every binary needs an explicit
-   * `chmod 0755` after extraction.
+   * The bootstrap zip uses a flat layout (`filesDir/bin/`, `filesDir/lib/`, …).
+   * The zip format does not preserve Unix permissions, so every binary and
+   * shared library needs an explicit `chmod 0755` after extraction.
    *
-   * Uses [Os.chmod] for aggressive, world-executable permission setting
-   * to avoid Exit 126 ("Permission Denied") errors at runtime.
+   * Uses [Os.chmod] for world-executable permission setting to avoid Exit 126
+   * ("Permission Denied") and dynamic-linker failures at runtime.
    */
   private fun fixPermissions(context: Context) {
-    // Target the flat extraction layout: filesDir/bin/ and filesDir/libexec/.
     val dirs = listOf(
-      File(context.filesDir, "bin"),
-      File(context.filesDir, "libexec"),
-      // Also cover the usr/-prefixed paths in case the zip contains both layouts.
       binDir(context),
+      libDir(context),
       File(prefixDir(context), "libexec"),
     )
     var count = 0
@@ -378,5 +642,35 @@ object EnvironmentInstaller {
       }
     }
     Log.d(TAG, "Made $count files executable")
+  }
+
+  /**
+   * Copies the bundled `proot` binary from `assets/` into `$PREFIX/bin/proot`
+   * and marks it world-executable.
+   *
+   * proot uses `ptrace`-based syscall interception to bind-mount `filesDir` to
+   * `/data/data/com.termux/files/usr` so that `apt`, `dpkg`, and shell scripts
+   * with Termux shebangs run natively — no root required.
+   *
+   * This is a best-effort operation: if the asset is absent the function logs at
+   * debug level and returns silently, and shell launch falls back to direct exec.
+   */
+  private fun installProot(context: Context) {
+    val dest = prootPath(context)
+    if (dest.exists() && dest.canExecute()) return // already installed — fast path
+
+    try {
+      context.assets.open(PROOT_ASSET_NAME).use { input ->
+        dest.parentFile?.mkdirs()
+        FileOutputStream(dest).use { output -> input.copyTo(output) }
+      }
+      // Keep this world-executable to match the bootstrap requirement for the
+      // copied asset and avoid execute-bit regressions across shell launch paths.
+      dest.setExecutable(true, false)
+      Log.i(TAG, "installProot: proot installed at ${dest.absolutePath}")
+    } catch (e: IOException) {
+      // Asset not bundled — direct shell fallback remains available.
+      Log.d(TAG, "installProot: '$PROOT_ASSET_NAME' asset not found — proot disabled")
+    }
   }
 }

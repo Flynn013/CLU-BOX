@@ -1,11 +1,11 @@
 ---
 name: terminal-commander
-description: Execute shell commands in the CLU/BOX MSTR_CTRL terminal — run scripts, install packages, check file states, and debug code.
+description: Executes raw bash commands within the isolated aarch64 Termux clu_workspace sandbox. You MUST provide valid bash syntax. The environment is pre-configured with bash, git, pkg, and python. Do not attempt to use Windows CMD or raw Java logic.
 ---
 
 # Terminal Commander
 
-This skill gives the agent access to the MSTR_CTRL terminal — a PTY-backed shell session running inside the CLU/BOX sandbox. Use it to run shell commands, execute scripts, verify code, and install packages.
+This skill gives the agent access to the MSTR_CTRL terminal — a PTY-backed bash session running inside the isolated aarch64 Termux clu_workspace sandbox. The environment is pre-configured with bash, git, pkg, and python. You MUST provide valid bash syntax. Do not attempt to use Windows CMD or raw Java logic.
 
 ## Examples
 

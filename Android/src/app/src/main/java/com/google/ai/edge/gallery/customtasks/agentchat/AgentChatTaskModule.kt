@@ -79,12 +79,25 @@ class AgentChatTask @Inject constructor() : CustomTask {
   ) {
     agentTools.skillManagerViewModel.loadSkills {
       try {
+        // ── Agentic Context Router: set engine and select constraint ──────
+        agentTools.engine = if (model.runtimeType == RuntimeType.GEMINI_CLOUD) {
+          AgentEngine.CLOUD
+        } else {
+          AgentEngine.LOCAL
+        }
+        val engineConstraint = if (agentTools.engine == AgentEngine.CLOUD) {
+          AgentGovernor.CLOUD_CONSTRAINT
+        } else {
+          AgentGovernor.LOCAL_CONSTRAINT
+        }
         val helper = if (model.runtimeType == RuntimeType.GEMINI_CLOUD) {
           GeminiCloudModelHelper.cacheApiKey(context)
           GeminiCloudModelHelper
         } else {
           LlmChatModelHelper
         }
+        val basePrompt = agentTools.skillRegistry.buildFinalSystemPrompt(task.defaultSystemPrompt)
+        val finalPrompt = "$basePrompt\n\n$engineConstraint"
         helper.initialize(
           context = context,
           model = model,
@@ -92,9 +105,7 @@ class AgentChatTask @Inject constructor() : CustomTask {
           supportAudio = true,
           onDone = onDone,
           systemInstruction =
-            agentTools.skillManagerViewModel.getSystemPrompt(
-              agentTools.skillRegistry.buildFinalSystemPrompt(task.defaultSystemPrompt),
-            ),
+            agentTools.skillManagerViewModel.getSystemPrompt(finalPrompt),
           tools = listOf(tool(agentTools)),
           // Constrained decoding is intentionally DISABLED for Agent Chat.
           // General-purpose Gemma models (E2B/E4B) were not fine-tuned with the
