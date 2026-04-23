@@ -93,6 +93,7 @@ import com.google.ai.edge.gallery.ui.navigation.GalleryNavHost
 import com.google.ai.edge.gallery.data.TerminalSessionManager
 import com.google.ai.edge.gallery.data.SharedShellManager
 import com.google.ai.edge.gallery.ui.osmodules.BrainBoxModuleScreen
+import com.google.ai.edge.gallery.ui.osmodules.DiffBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.FileBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.MstrCtrlScreen
 import com.google.ai.edge.gallery.ui.theme.absoluteBlack
@@ -105,6 +106,7 @@ private enum class OsModule(val label: String, val icon: ImageVector) {
   CHAT_BOX("CHAT_BOX", Icons.Outlined.Chat),
   BRAIN_BOX("BRAIN_BOX", Icons.Outlined.Hub),
   FILE_BOX("FILE_BOX", Icons.Outlined.Code),
+  DIFF_BOX("DIFF_BOX", Icons.Outlined.Difference),
   MSTR_CTRL("MSTR_CTRL", Icons.Outlined.Terminal),
   SKILL_BOX("SKILL_BOX", Icons.Outlined.Psychology),
   VENDING_MACHINE("VENDING_MACHINE", Icons.Outlined.DashboardCustomize),
@@ -143,6 +145,9 @@ fun GalleryApp(
   agentTools.vectorEngine = remember(context) { com.google.ai.edge.gallery.data.brainbox.VectorEngine(context) }
   agentTools.terminalSessionManager = terminalSessionManager
   agentTools.sharedShellManager = sharedShellManager
+  // Share the GalleryApp-level singleton so the AI and the FILE_BOX editor see the
+  // same currentFilePath / cursorLine flows and drive the same FileObserver revision.
+  agentTools.fileBoxManager = fileBoxManager
 
   // Separate nav controllers so each module retains its own back stack.
   val chatNavController = rememberNavController()
@@ -288,7 +293,13 @@ fun GalleryApp(
                     dao = db.brainBoxDao(),
                     vectorEngine = remember(context) { com.google.ai.edge.gallery.data.brainbox.VectorEngine(context) },
                   )
-                  OsModule.FILE_BOX -> FileBoxScreen(fileBoxManager = fileBoxManager)
+                  OsModule.FILE_BOX -> FileBoxScreen(
+                    fileBoxManager = fileBoxManager,
+                    sharedShellManager = sharedShellManager,
+                  )
+                  OsModule.DIFF_BOX -> DiffBoxScreen(
+                    sessionManager = terminalSessionManager,
+                  )
                   OsModule.MSTR_CTRL -> MstrCtrlScreen(
                     sessionManager = terminalSessionManager,
                     sharedShellManager = sharedShellManager,
