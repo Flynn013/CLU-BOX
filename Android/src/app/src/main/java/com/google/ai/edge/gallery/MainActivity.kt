@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -68,6 +68,8 @@ class MainActivity : ComponentActivity() {
   private var contentSet: Boolean = false
 
   override fun onCreate(savedInstanceState: Bundle?) {
+    // BOOTLOADER FIX: Splash screen API must bind before the base activity locks its theme
+    val splashScreen = installSplashScreen()
     super.onCreate(savedInstanceState)
 
     // Debug: Dump all intent extras to see what FCM unloads
@@ -130,13 +132,7 @@ class MainActivity : ComponentActivity() {
       EnvironmentInstaller.ensureInstalled(this@MainActivity)
     }
 
-    // Show splash screen.
-    val splashScreen = installSplashScreen()
-
     // Set the content when the system-provided splash screen is not shown.
-    //
-    // This is necessary on some Android versions where the splash screen is optimized away (e.g.,
-    // after a force-quit) to ensure the main content is displayed immediately and correctly.
     lifecycleScope.launch {
       delay(1000)
       if (!splashScreenAboutToExit) {
@@ -145,17 +141,6 @@ class MainActivity : ComponentActivity() {
     }
 
     // Cross-fade transition from the splash screen to the main content.
-    //
-    // The logic performs the following key actions:
-    // 1. Synchronizes Timing: It calculates the remaining duration of the default icon
-    //    animation. It then delays its own animations to ensure the custom fade-out begins just
-    //    before the original icon animation would have finished.
-    // 2. Initiates a cross-fade:
-    //    - Fade out the splash screen.
-    //    - Fade in the main content.
-    // 3. Cleans up: An `onEnd` listener on the fade-out animator calls
-    //    `splashScreenView.remove()` to properly remove the splash screen from the view hierarchy
-    //    once it's fully transparent.
     splashScreen.setOnExitAnimationListener { splashScreenView ->
       splashScreenAboutToExit = true
 
@@ -184,7 +169,6 @@ class MainActivity : ComponentActivity() {
 
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
       // Fix for three-button nav not properly going edge-to-edge.
-      // See: https://issuetracker.google.com/issues/298296168
       window.isNavigationBarContrastEnforced = false
     }
     // Keep the screen on while the app is running for better demo experience.
