@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,6 +21,9 @@ import com.google.ai.edge.gallery.data.DataStoreRepository
 import com.google.ai.edge.gallery.ui.theme.ThemeSettings
 import com.google.firebase.FirebaseApp
 import dagger.hilt.android.HiltAndroidApp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltAndroidApp
@@ -31,8 +34,11 @@ class GalleryApplication : Application() {
   override fun onCreate() {
     super.onCreate()
 
-    // Load saved theme.
-    ThemeSettings.themeOverride.value = dataStoreRepository.readTheme()
+    // IO BYPASS: Shift the DataStore synchronous load off the Main Thread
+    // so the app bootloader doesn't choke out on cold start.
+    CoroutineScope(Dispatchers.IO).launch {
+      ThemeSettings.themeOverride.value = dataStoreRepository.readTheme()
+    }
 
     FirebaseApp.initializeApp(this)
   }
