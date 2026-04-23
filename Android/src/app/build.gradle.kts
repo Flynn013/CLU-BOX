@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,149 +15,131 @@
  */
 
 plugins {
-  alias(libs.plugins.android.application)
-  // Note: set apply to true to enable google-services (requires google-services.json).
-  alias(libs.plugins.google.services) apply false
-  alias(libs.plugins.kotlin.android)
-  alias(libs.plugins.kotlin.compose)
-  alias(libs.plugins.kotlin.serialization)
-  alias(libs.plugins.protobuf)
-  alias(libs.plugins.hilt.application)
-  alias(libs.plugins.oss.licenses)
-  alias(libs.plugins.ksp)
-  kotlin("kapt")
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.jetbrains.kotlin.android)
+    alias(libs.plugins.compose.compiler)
+    id("com.google.dagger.hilt.android")
+    id("com.google.devtools.ksp")
+    id("org.jetbrains.kotlin.plugin.serialization") version "1.9.22"
+    id("com.google.gms.google-services")
 }
 
 android {
-  namespace = "com.google.ai.edge.gallery"
-  compileSdk = 35
+    namespace = "com.google.ai.edge.gallery"
+    compileSdk = 35
 
-  // NDK version pinned to ensure reproducible builds when libproot.so / libbash.so
-  // are compiled from source using the Android NDK toolchain.
-  ndkVersion = "27.0.12077973"
+    defaultConfig {
+        applicationId = "com.google.ai.edge.gallery"
+        minSdk = 29
+        targetSdk = 35 // BUMPED: Native Smuggler bypass is dead. Targeting modern Android 15/16.
+        versionCode = 1
+        versionName = "1.0"
 
-  defaultConfig {
-    applicationId = "com.google.aiedge.gallery"
-    minSdk = 28
-    targetSdk = 28
-    versionCode = 23
-    versionName = "1.0.11"
-
-    // Restrict native library extraction to the ABIs that carry libproot.so / libbash.so.
-    // Add "x86_64" only if you have x86_64 builds of those binaries in jniLibs/.
-    ndk {
-      abiFilters += setOf("arm64-v8a", "x86_64")
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        
+        // Ensure the JNI libraries are packaged correctly for Chaquopy/Native modules
+        ndk {
+            abiFilters.add("arm64-v8a")
+        }
     }
 
-    // Needed for HuggingFace auth workflows.
-    // Use the scheme of the "Redirect URLs" in HuggingFace app.
-    manifestPlaceholders["appAuthRedirectScheme"] =
-        "REPLACE_WITH_YOUR_REDIRECT_SCHEME_IN_HUGGINGFACE_APP"
-    manifestPlaceholders["applicationName"] = "com.google.ai.edge.gallery.GalleryApplication"
-
-    testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-  }
-
-  buildTypes {
-    release {
-      isMinifyEnabled = false
-      proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      signingConfig = signingConfigs.getByName("debug")
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+            signingConfig = signingConfigs.getByName("debug")
+        }
+        debug {
+            isMinifyEnabled = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
     }
-  }
-  compileOptions {
-    sourceCompatibility = JavaVersion.VERSION_11
-    targetCompatibility = JavaVersion.VERSION_11
-  }
-  kotlinOptions {
-    jvmTarget = "11"
-    freeCompilerArgs += "-Xcontext-receivers"
-  }
-  buildFeatures {
-    compose = true
-    buildConfig = true
-  }
-  lint {
-    // targetSdk 28 is intentional (Termux W^X bypass); suppress the Play Store lint error.
-    disable += "ExpiredTargetSdkVersion"
-  }
-}
 
-kapt {
-  correctErrorTypes = true
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+    
+    buildFeatures {
+        compose = true
+    }
+    
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "META-INF/gradle/incremental.annotation.processors"
+        }
+    }
+
+    // PURGED: The `externalNativeBuild { cmake { ... } }` block is GONE. 
+    // We are no longer compiling legacy C binaries for Termux/PRoot.
 }
 
 dependencies {
-  implementation(libs.androidx.core.ktx)
-  implementation(libs.androidx.lifecycle.runtime.ktx)
-  implementation(libs.androidx.activity.compose)
-  implementation(platform(libs.androidx.compose.bom))
-  implementation(libs.androidx.ui)
-  implementation(libs.androidx.ui.graphics)
-  implementation(libs.androidx.ui.tooling.preview)
-  implementation(libs.androidx.material3)
-  implementation(libs.androidx.compose.navigation)
-  implementation(libs.kotlinx.serialization.json)
-  implementation(libs.kotlin.reflect)
-  implementation(libs.material.icon.extended)
-  implementation(libs.androidx.work.runtime)
-  implementation(libs.androidx.datastore)
-  implementation(libs.com.google.code.gson)
-  implementation(libs.androidx.lifecycle.process)
-  implementation(libs.androidx.security.crypto)
-  implementation(libs.androidx.webkit)
-  implementation(libs.litertlm)
-  implementation(libs.commonmark)
-  implementation(libs.richtext)
-  implementation(libs.tflite)
-  implementation(libs.tflite.gpu)
-  implementation(libs.tflite.support)
-  implementation(libs.camerax.core)
-  implementation(libs.camerax.camera2)
-  implementation(libs.camerax.lifecycle)
-  implementation(libs.camerax.view)
-  implementation(libs.openid.appauth)
-  implementation(libs.androidx.splashscreen)
-  implementation(libs.protobuf.javalite)
-  implementation(libs.hilt.android)
-  implementation(libs.hilt.navigation.compose)
-  implementation(libs.play.services.oss.licenses)
-  implementation(platform(libs.firebase.bom))
-  implementation(libs.firebase.analytics)
-  implementation(libs.firebase.messaging)
-  implementation(libs.androidx.exifinterface)
-  implementation(libs.moshi.kotlin)
-  kapt(libs.hilt.android.compiler)
-  ksp(libs.moshi.kotlin.codegen)
-  ksp(libs.room.compiler)
-  testImplementation(libs.junit)
-  androidTestImplementation(libs.androidx.junit)
-  androidTestImplementation(libs.androidx.espresso.core)
-  androidTestImplementation(platform(libs.androidx.compose.bom))
-  androidTestImplementation(libs.androidx.ui.test.junit4)
-  androidTestImplementation(libs.hilt.android.testing)
-  debugImplementation(libs.androidx.ui.tooling)
-  debugImplementation(libs.androidx.ui.test.manifest)
-  implementation(libs.mlkit.genai.prompt)
-  implementation(libs.room.runtime)
-  implementation(libs.room.ktx)
+    // AndroidX & Core
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.activity.compose)
+    
+    // Compose
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.ui)
+    implementation(libs.androidx.ui.graphics)
+    implementation(libs.androidx.ui.tooling.preview)
+    implementation(libs.androidx.material3)
+    implementation(libs.androidx.material.icons.extended)
+    
+    // Navigation
+    implementation(libs.androidx.navigation.compose)
+    implementation(libs.androidx.hilt.navigation.compose)
 
-  // ── MediaPipe Text Embedder (vector engine for BrainBox) ──
-  implementation(libs.mediapipe.tasks.text)
+    // CameraX
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
 
-  // ── Termux terminal emulator (PTY-backed shell sessions + TerminalView) ──
-  // Active: JitPack prebuilt — works out of the box without local Termux source.
-  // To switch to local modules, uncomment the two project() lines below and
-  // comment-out the JitPack line.  Requires libs/ modules declared in settings.gradle.kts.
-  //   implementation(project(":terminal-emulator"))
-  //   implementation(project(":termux-shared"))
-  // From JitPack — https://github.com/termux/termux-app/wiki/Termux-Libraries
-  implementation("com.termux.termux-app:terminal-view:0.118.0")
-  // Avoid Guava ListenableFuture classpath collision with Termux/shared deps.
-  implementation("com.google.guava:listenablefuture:9999.0-empty-to-avoid-conflict-with-guava")
-}
+    // ML Kit & LiteRT (The JNI inference engine)
+    implementation(libs.play.services.mlkit.text.recognition)
+    implementation(libs.play.services.mlkit.subject.segmentation)
+    implementation(libs.litert)
 
-protobuf {
-  protoc { artifact = "com.google.protobuf:protoc:4.26.1" }
-  generateProtoTasks { all().forEach { it.plugins { create("java") { option("lite") } } } }
+    // DataStore (For our async theme settings)
+    implementation(libs.androidx.datastore)
+    implementation(libs.protobuf.javalite)
+
+    // Hilt DI
+    implementation(libs.hilt.android)
+    ksp(libs.hilt.compiler)
+
+    // Firebase & Play Services
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.analytics)
+    implementation(libs.firebase.messaging)
+    implementation(libs.firebase.firestore)
+    
+    // UI Helpers & markdown
+    implementation(libs.coil.compose)
+    implementation(libs.accompanist.systemuicontroller)
+    implementation("com.github.jeziellago:compose-markdown:0.5.2") // For the Markdown skill renderer
+
+    // Testing
+    testImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.espresso.core)
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.ui.test.junit4)
+    debugImplementation(libs.androidx.ui.tooling)
+    debugImplementation(libs.androidx.ui.test.manifest)
 }
