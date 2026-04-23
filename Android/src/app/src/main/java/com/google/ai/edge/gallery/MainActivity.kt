@@ -52,7 +52,6 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import com.google.ai.edge.gallery.ui.theme.GalleryTheme
-import com.google.ai.edge.gallery.data.EnvironmentInstaller
 import com.google.ai.edge.litertlm.ExperimentalApi
 import com.google.ai.edge.litertlm.ExperimentalFlags
 import com.google.firebase.analytics.FirebaseAnalytics
@@ -68,18 +67,15 @@ class MainActivity : ComponentActivity() {
   private var contentSet: Boolean = false
 
   override fun onCreate(savedInstanceState: Bundle?) {
-    // BOOTLOADER FIX: Splash screen API must bind before the base activity locks its theme
     val splashScreen = installSplashScreen()
     super.onCreate(savedInstanceState)
 
-    // Debug: Dump all intent extras to see what FCM unloads
     intent.extras?.let { extras ->
       for (key in extras.keySet()) {
         Log.d(TAG, "onCreate Extra -> Key: $key, Value: ${extras.get(key)}")
       }
     }
 
-    // Convert FCM Console data extras to intent data for GalleryNavGraph to pick up
     intent.getStringExtra("deeplink")?.let { link ->
       Log.d(TAG, "onCreate: Found deeplink extra: $link")
       if (link.startsWith("http://") || link.startsWith("https://")) {
@@ -100,15 +96,12 @@ class MainActivity : ComponentActivity() {
           Surface(modifier = Modifier.fillMaxSize()) {
             GalleryApp(modelManagerViewModel = modelManagerViewModel)
 
-            // Fade out a "mask" that has the same color as the background of the splash screen
-            // to reveal the actual app content.
             var startMaskFadeout by remember { mutableStateOf(false) }
             LaunchedEffect(Unit) { startMaskFadeout = true }
             AnimatedVisibility(
               !startMaskFadeout,
               enter = fadeIn(animationSpec = snap(0)),
-              exit =
-                fadeOut(animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)),
+              exit = fadeOut(animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)),
             ) {
               Box(
                 modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
@@ -120,19 +113,13 @@ class MainActivity : ComponentActivity() {
 
       @OptIn(ExperimentalApi::class)
       ExperimentalFlags.enableBenchmark = false
-
       contentSet = true
     }
 
     modelManagerViewModel.loadModelAllowlist()
 
-    // Eagerly bootstrap the embedded Termux sysroot so the terminal
-    // is ready by the time the user opens MSTR_CTRL or Agent Chat.
-    lifecycleScope.launch {
-      EnvironmentInstaller.ensureInstalled(this@MainActivity)
-    }
+    // EnvironmentInstaller was purged here. We are no longer unpacking Termux natively.
 
-    // Set the content when the system-provided splash screen is not shown.
     lifecycleScope.launch {
       delay(1000)
       if (!splashScreenAboutToExit) {
@@ -140,7 +127,6 @@ class MainActivity : ComponentActivity() {
       }
     }
 
-    // Cross-fade transition from the splash screen to the main content.
     splashScreen.setOnExitAnimationListener { splashScreenView ->
       splashScreenAboutToExit = true
 
@@ -163,15 +149,11 @@ class MainActivity : ComponentActivity() {
 
     enableEdgeToEdge()
 
-    // Start the CLU/BOX foreground engine service to lower oom_adj score
-    // and keep inference processes alive when the screen is off.
     CluEngineService.start(this)
 
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-      // Fix for three-button nav not properly going edge-to-edge.
       window.isNavigationBarContrastEnforced = false
     }
-    // Keep the screen on while the app is running for better demo experience.
     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
   }
 
@@ -179,7 +161,6 @@ class MainActivity : ComponentActivity() {
     super.onNewIntent(intent)
     setIntent(intent)
 
-    // Debug: Dump all intent extras to see what FCM unloads
     intent.extras?.let { extras ->
       for (key in extras.keySet()) {
         Log.d(TAG, "onNewIntent Extra -> Key: $key, Value: ${extras.get(key)}")
@@ -199,7 +180,6 @@ class MainActivity : ComponentActivity() {
 
   override fun onResume() {
     super.onResume()
-
     firebaseAnalytics?.logEvent(
       FirebaseAnalytics.Event.APP_OPEN,
       bundleOf(
