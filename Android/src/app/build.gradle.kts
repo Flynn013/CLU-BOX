@@ -32,12 +32,22 @@ android {
   namespace = "com.google.ai.edge.gallery"
   compileSdk = 35
 
+  // NDK version pinned to ensure reproducible builds when libproot.so / libbash.so
+  // are compiled from source using the Android NDK toolchain.
+  ndkVersion = "27.0.12077973"
+
   defaultConfig {
     applicationId = "com.google.aiedge.gallery"
     minSdk = 28
     targetSdk = 28
     versionCode = 23
     versionName = "1.0.11"
+
+    // Restrict native library extraction to the ABIs that carry libproot.so / libbash.so.
+    // Add "x86_64" only if you have x86_64 builds of those binaries in jniLibs/.
+    ndk {
+      abiFilters += setOf("arm64-v8a", "x86_64")
+    }
 
     // Needed for HuggingFace auth workflows.
     // Use the scheme of the "Redirect URLs" in HuggingFace app.

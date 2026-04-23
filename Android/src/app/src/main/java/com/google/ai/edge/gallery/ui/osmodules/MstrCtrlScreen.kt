@@ -68,6 +68,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.google.ai.edge.gallery.data.EnvironmentInstaller
+import com.google.ai.edge.gallery.data.NativeShellBridge
 import com.google.ai.edge.gallery.data.SharedShellManager
 import com.google.ai.edge.gallery.data.TerminalSessionManager
 import com.google.ai.edge.gallery.data.TermuxSessionBridge
@@ -239,7 +240,7 @@ fun MstrCtrlScreen(
           logcatLines.clear()
           showLogcat = true
           scope.launch(Dispatchers.IO) {
-            readLogcat(logcatLines)
+            readLogcat(logcatLines, context)
           }
         },
         modifier = Modifier.size(36.dp),
@@ -598,11 +599,25 @@ private fun LogcatOverlay(
 
 /**
  * Reads the last 500 lines of logcat via [Runtime.exec] on a background thread
- * and appends each line to [output].  Must be called from a coroutine running
- * on [Dispatchers.IO] to avoid blocking the main thread.
+ * and appends each line to [output].  Prepends a [NativeShellBridge] diagnostic
+ * header so the `.so` binary status is always visible at the top of the overlay.
+ * Must be called from a coroutine running on [Dispatchers.IO].
  */
-private suspend fun readLogcat(output: MutableList<String>) {
+private suspend fun readLogcat(output: MutableList<String>, context: android.content.Context) {
   withContext(Dispatchers.IO) {
+    // ── NativeShellBridge diagnostic header ──────────────────────────────
+    // Prepend .so binary availability so developers can instantly see whether
+    // libproot.so / libbash.so are present and executable on this device.
+    try {
+      NativeShellBridge.diagnose(context).lines().forEach { line ->
+        output.add(line)
+      }
+      output.add("─".repeat(60))
+    } catch (e: Exception) {
+      output.add("[NativeShellBridge diagnose error: ${e.message}]")
+    }
+
+    // ── Logcat dump ───────────────────────────────────────────────────────
     try {
       val process = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "500"))
       process.inputStream.bufferedReader().use { reader ->

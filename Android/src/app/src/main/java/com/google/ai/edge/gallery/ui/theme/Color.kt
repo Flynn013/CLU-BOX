@@ -18,19 +18,24 @@ package com.google.ai.edge.gallery.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// CLU/BOX Cyberpunk Terminal Palette
-// Primary accent: neon green (#4ade80)
-// All backgrounds and surfaces: absolute black (#000000)
+// CLU/BOX Monochrome Brutalist Palette
+// Primary accent: white (#FFFFFF) on absolute black (#000000) with grey (#333333) accents.
+// The original neon-green name is kept for source compatibility; its value has been
+// updated to pure white so all existing references adopt the new brutalist look.
 
-val neonGreen = Color(0xFF4ade80)
-val absoluteBlack = Color(0xFF000000)
-val terminalDarkGrey = Color(0xFF0D0D0D)
-val terminalMidGrey = Color(0xFF1A1A1A)
-val terminalLightGrey = Color(0xFF2A2A2A)
-val terminalOutline = Color(0xFF3A3A3A)
-val terminalOnSurface = Color(0xFFE0E0E0)
-val terminalError = Color(0xFFFF5555)
-val terminalErrorContainer = Color(0xFF3D0000)
+val neonGreen = Color(0xFFFFFFFF)          // primary accent — white (was #4ade80)
+val absoluteBlack = Color(0xFF000000)       // all backgrounds
+val terminalDarkGrey = Color(0xFF111111)    // subtle surface tint
+val terminalMidGrey = Color(0xFF222222)     // card / surface container
+val terminalLightGrey = Color(0xFF333333)   // dividers, highlights (brutalist grey)
+val terminalOutline = Color(0xFF555555)     // border / outline mid-grey
+val terminalOnSurface = Color(0xFFFFFFFF)   // all body text — pure white
+val terminalError = Color(0xFFFF5555)       // error red (unchanged)
+val terminalErrorContainer = Color(0xFF3D0000) // error container (unchanged)
+
+// Additional explicit grey steps for fine-grained UI control.
+val brutalistGrey = Color(0xFF888888)       // secondary text / disabled state
+val brutalistDark = Color(0xFF333333)       // same as terminalLightGrey; canonical reference
 
 // Dark-only scheme — all light-mode values mirror dark for forced dark mode.
 
