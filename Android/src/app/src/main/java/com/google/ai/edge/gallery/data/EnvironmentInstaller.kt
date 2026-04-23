@@ -373,6 +373,7 @@ object EnvironmentInstaller {
             _state.value = State.FixingPermissions
             processSymlinks(context.filesDir)
             fixPermissions(context)
+            enforcePosixPermissions(context)
 
             // Create runtime directories that Termux expects.
             homeDir(context).mkdirs()
@@ -397,6 +398,7 @@ object EnvironmentInstaller {
             Log.i(TAG, "Repairing execute permissions on sysroot binaries")
             _state.value = State.FixingPermissions
             fixPermissions(context)
+            enforcePosixPermissions(context)
           }
 
           // ── Tier 3: proot installation ───────────────────────────────────
@@ -651,6 +653,38 @@ object EnvironmentInstaller {
       }
     }
     Log.d(TAG, "Made $count files executable")
+  }
+
+  /**
+   * Recursively enforces 0777 permissions (rwxrwxrwx) on every file and
+   * directory under the entire sysroot prefix via direct POSIX system calls.
+   *
+   * This is a "nuclear" permission restoration step that goes beyond the
+   * targeted [fixPermissions] call: it covers every file in the sysroot,
+   * including data files, config files, and any paths that may have had
+   * their execute bit silently stripped by an OTA update, a storage
+   * re-encryption event, or the Android backup/restore pipeline.
+   *
+   * **Must be called before [TerminalSession] is instantiated** so that the
+   * dynamic linker can map the bootstrap shared libraries at session start.
+   * Failing to do so causes `bash` to exit immediately with code 255.
+   */
+  fun enforcePosixPermissions(context: Context) {
+    val prefix = prefixDir(context)
+    if (!prefix.exists()) return
+    var success = 0
+    var failure = 0
+    prefix.walkTopDown().forEach { file ->
+      try {
+        // S_IRWXU | S_IRWXG | S_IRWXO = 0777 octal = 511 decimal = 0b111_111_111 binary
+        Os.chmod(file.absolutePath, 0b111_111_111)
+        success++
+      } catch (e: Exception) {
+        Log.e(TAG, "enforcePosixPermissions: chmod failed on ${file.absolutePath}", e)
+        failure++
+      }
+    }
+    Log.i(TAG, "enforcePosixPermissions: $success ok, $failure failed")
   }
 
   /**

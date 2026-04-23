@@ -198,6 +198,12 @@ class TermuxSessionBridge(private val context: Context) {
       usedFallbackShell = !usingProot && shellPath == "/system/bin/sh"
       Log.d(TAG, "Checkpoint 1: Preparing session (usingProot=$usingProot, isBash=$isBash)")
 
+      // Validate bash binary availability and log a critical diagnostic if missing.
+      val bashFile = EnvironmentInstaller.bashPath(context)
+      if (!bashFile.exists()) {
+        Log.e(TAG, "CRITICAL: bash binary not found at ${bashFile.absolutePath} — falling back to shell resolution")
+      }
+
       if (terminalSession != null) {
         Log.w(TAG, "Session already exists — destroying old one first")
         destroySession()
@@ -205,26 +211,47 @@ class TermuxSessionBridge(private val context: Context) {
 
       Log.d(TAG, "Checkpoint 2: Building environment")
 
-      // Minimal, explicit environment for the proot-wrapped PTY session.
-      // Keeping this array small and deterministic avoids the $PATH=(null)
-      // issue that arises when the inherited process environment is absent or
-      // incomplete.  binDir is the host-side path; proot's bind-mount makes
-      // it visible under the Termux guest prefix too.
+      // Enforce POSIX permissions on the entire sysroot before the dynamic
+      // linker is invoked.  A missing or stripped execute bit on any shared
+      // library causes bash to exit immediately with code 255.
+      EnvironmentInstaller.enforcePosixPermissions(context)
+
       val filesDir = context.filesDir.absolutePath
-      val matrixRoot = "$filesDir/matrix"
-      File("$matrixRoot/data/data/com.termux/files/usr").mkdirs()
-      File(context.filesDir, "tmp").mkdirs()
-      EnvironmentInstaller.homeDir(context).mkdirs()
-      val envArray = arrayOf(
-        "PROOT_TMP_DIR=$filesDir/tmp",
-        "PROOT_NO_SECCOMP=1",
-        "PROOT_NO_SYSVIPC=1",
-        // Verbose proot logging to stderr — helps diagnose boot failures.
-        "PROOT_VERBOSE=9",
-        "HOME=/data/data/com.termux/files/usr/clu_file_box",
-        "PATH=/data/data/com.termux/files/usr/bin:/system/bin",
-        "TERM=xterm-256color",
-      )
+
+      // Environment variable arrays differ between the proot-wrapped path (where
+      // guest paths inside the Matrix are relative to the Termux hardcoded prefix)
+      // and the direct-bash path (where real app paths must be used because no
+      // bind-mount exists to translate them).
+      val envArray: Array<String> = if (usingProot) {
+        // proot bind-mounts filesDir → /data/data/com.termux/files/usr, so all
+        // references inside the session use the Termux guest prefix.
+        arrayOf(
+          "PROOT_TMP_DIR=$filesDir/tmp",
+          "PROOT_NO_SECCOMP=1",
+          "PROOT_NO_SYSVIPC=1",
+          // Verbose proot logging to stderr — helps diagnose boot failures.
+          "PROOT_VERBOSE=9",
+          "PREFIX=/data/data/com.termux/files/usr",
+          "HOME=/data/data/com.termux/files/usr/clu_file_box",
+          "PATH=/data/data/com.termux/files/usr/bin:/system/bin:/system/xbin",
+          "LD_LIBRARY_PATH=/data/data/com.termux/files/usr/lib",
+          "LANG=en_US.UTF-8",
+          "TERM=xterm-256color",
+        )
+      } else {
+        // Direct bash execution — all paths must point to the real app data dir
+        // (com.google.aiedge.gallery), not the non-existent Termux guest prefix.
+        val homePath = "$filesDir/clu_file_box"
+        File(homePath).mkdirs()
+        arrayOf(
+          "PREFIX=$filesDir",
+          "HOME=$homePath",
+          "PATH=$filesDir/bin:/system/bin:/system/xbin",
+          "LD_LIBRARY_PATH=$filesDir/lib",
+          "LANG=en_US.UTF-8",
+          "TERM=xterm-256color",
+        )
+      }
 
       // Build proot-wrapped (or direct) command list.
       // Pass --login so bash reads /etc/profile and ~/.bash_profile.
