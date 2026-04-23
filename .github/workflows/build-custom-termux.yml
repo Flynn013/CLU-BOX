@@ -1,0 +1,113 @@
+# build-custom-termux.yml
+#
+# Builds a custom Termux bootstrap archive re-targeted at CLU/BOX's package name
+# (com.google.aiedge.gallery) instead of the default com.termux.  The resulting
+# bootstrap-aarch64.zip can be dropped into app/src/main/assets/ and loaded by
+# EnvironmentInstaller at runtime.
+#
+# Trigger: manually via "Run workflow" in the GitHub Actions UI.
+# Output:  bootstrap-aarch64.zip uploaded as a workflow artifact.
+
+name: Build Custom Termux Bootstrap
+
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: "Target architecture"
+        required: true
+        default: "aarch64"
+        type: choice
+        options:
+          - aarch64
+          - arm
+          - x86_64
+          - i686
+
+jobs:
+  build-bootstrap:
+    name: Build ${{ inputs.arch }} bootstrap for CLU/BOX
+    runs-on: ubuntu-latest
+
+    env:
+      # ── CLU/BOX package name — replaces the hardcoded com.termux prefix  ──
+      # All C/C++ binaries in the Termux bootstrap will have their compiled-in
+      # paths rewritten from /data/data/com.termux to /data/data/com.google.aiedge.gallery.
+      TERMUX_APP_PACKAGE: "com.google.aiedge.gallery"
+      TARGET_ARCH: ${{ inputs.arch }}
+
+    steps:
+      # ── 1. Checkout the official Termux packages repository ──────────────
+      - name: Checkout termux-packages
+        uses: actions/checkout@v4
+        with:
+          repository: termux/termux-packages
+          ref: master
+          # Full history is not needed; a shallow clone is sufficient.
+          fetch-depth: 1
+
+      # ── 2. Set up Docker (the Termux build system runs inside a container) ─
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ── 3. Pull the official Termux build Docker image ───────────────────
+      - name: Pull Termux Docker image
+        run: |
+          docker pull termux/package-builder:latest
+
+      # ── 4. Build the bootstrap zip ───────────────────────────────────────
+      # The termux-packages scripts honour TERMUX_APP_PACKAGE when set, which
+      # causes all compiled-in paths (shebangs, library rpaths, config dirs) to
+      # point to our CLU/BOX package name rather than com.termux.
+      - name: Build bootstrap-${{ env.TARGET_ARCH }}.zip
+        run: |
+          docker run --rm \
+            --volume "${{ github.workspace }}:/home/builder/termux-packages" \
+            --env TERMUX_APP_PACKAGE="${{ env.TERMUX_APP_PACKAGE }}" \
+            --env TERMUX_ARCH="${{ env.TARGET_ARCH }}" \
+            termux/package-builder:latest \
+            bash -c "
+              set -euo pipefail
+              cd /home/builder/termux-packages
+
+              # Export the custom package name so every sub-make picks it up.
+              export TERMUX_APP_PACKAGE='${TERMUX_APP_PACKAGE}'
+              export TERMUX_ARCH='${TARGET_ARCH}'
+
+              echo '==> Building Termux bootstrap for package: '\"'$TERMUX_APP_PACKAGE'\"
+              echo '==> Target arch: '\"'$TARGET_ARCH'\"
+
+              # Run the official bootstrap build script.
+              # This compiles bash, coreutils, openssl, python, node, git, pkg, etc.
+              ./scripts/build-bootstrap.sh \
+                --arch \"${TARGET_ARCH}\" \
+                --output bootstrap-${TARGET_ARCH}.zip
+
+              echo '==> Build complete: bootstrap-${TARGET_ARCH}.zip'
+            "
+
+      # ── 5. Upload the bootstrap zip as a GitHub Actions artifact ─────────
+      # Download it from the Actions run page and place it in:
+      #   Android/src/app/src/main/assets/bootstrap-aarch64.zip
+      # EnvironmentInstaller will detect and install it on first app launch.
+      - name: Upload bootstrap artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bootstrap-${{ env.TARGET_ARCH }}
+          path: bootstrap-${{ env.TARGET_ARCH }}.zip
+          retention-days: 30
+
+      # ── 6. Print a usage reminder ─────────────────────────────────────────
+      - name: Usage reminder
+        run: |
+          echo ""
+          echo "╔══════════════════════════════════════════════════════════════╗"
+          echo "║  CLU/BOX Custom Bootstrap — build complete                  ║"
+          echo "╠══════════════════════════════════════════════════════════════╣"
+          echo "║  1. Download bootstrap-${{ env.TARGET_ARCH }}.zip from the Artifacts section.  ║"
+          echo "║  2. Copy it to:                                              ║"
+          echo "║       Android/src/app/src/main/assets/                      ║"
+          echo "║  3. EnvironmentInstaller will auto-install it on first boot. ║"
+          echo "║                                                              ║"
+          echo "║  Package name baked in: ${{ env.TERMUX_APP_PACKAGE }}  ║"
+          echo "╚══════════════════════════════════════════════════════════════╝"

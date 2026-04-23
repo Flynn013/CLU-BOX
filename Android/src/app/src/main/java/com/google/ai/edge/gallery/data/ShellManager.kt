@@ -51,33 +51,24 @@ fun executeCommand(context: Context, command: String): String {
     val pb = ProcessBuilder(cmd)
       .redirectErrorStream(false)
 
-    // $HOME uses the Termux-compatible home directory so pkg/apt config files work.
-    val homeDir = EnvironmentInstaller.homeDir(context).also { it.mkdirs() }
-    val tmpDir  = EnvironmentInstaller.tmpDir(context).also  { it.mkdirs() }
-    val binDir  = EnvironmentInstaller.binDir(context)
-    val prefix  = EnvironmentInstaller.prefixDir(context)
+    // $HOME uses the guest Matrix path so pkg/apt config files resolve correctly.
+    val filesDir = context.filesDir.absolutePath
+    File("$filesDir/matrix/data/data/com.termux/files/usr").mkdirs()
+    File(context.filesDir, "tmp").mkdirs()
+    val tmpDir   = EnvironmentInstaller.tmpDir(context).also  { it.mkdirs() }
+    val prefix   = EnvironmentInstaller.prefixDir(context)
 
-    // Build PATH: sysroot bin + applets (busybox) + stock Android fallback.
-    val appletsDir = File(binDir, "applets")
-    val effectivePath = buildString {
-      if (binDir.isDirectory) {
-        append(binDir.absolutePath)
-        if (appletsDir.isDirectory) append(":${appletsDir.absolutePath}")
-        append(":")
-      }
-      append("/system/bin:/system/xbin")
-    }
-
-    pb.environment()["HOME"]           = homeDir.absolutePath
+    pb.environment()["HOME"]           = "/data/data/com.termux/files/usr/clu_file_box"
     pb.environment()["TMPDIR"]         = tmpDir.absolutePath
     pb.environment()["LANG"]           = "en_US.UTF-8"
     pb.environment()["SHELL"]          = EnvironmentInstaller.shellPath(context)
-    pb.environment()["PATH"]           = effectivePath
+    pb.environment()["PATH"]           = "/data/data/com.termux/files/usr/bin:/system/bin"
+    pb.environment()["TERM"]           = "xterm-256color"
     if (prefix.isDirectory) {
       pb.environment()["PREFIX"]         = prefix.absolutePath
       pb.environment()["TERMUX_PREFIX"]  = prefix.absolutePath
     }
-    pb.environment()["PROOT_TMP_DIR"]    = File(context.filesDir, "tmp").also { it.mkdirs() }.absolutePath
+    pb.environment()["PROOT_TMP_DIR"]    = "$filesDir/tmp"
     pb.environment()["PROOT_NO_SECCOMP"] = "1"
     pb.environment()["PROOT_NO_SYSVIPC"] = "1"
 

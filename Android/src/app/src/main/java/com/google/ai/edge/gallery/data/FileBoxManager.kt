@@ -107,8 +107,9 @@ class FileBoxManager(context: Context) {
   val revision: StateFlow<Int> = _revision.asStateFlow()
 
   /** Recursive FileObserver that watches the entire clu_file_box tree. */
+  @Suppress("DEPRECATION") // File-based constructor requires API 29; use path String for minSdk 28
   private val fileObserver: FileObserver = object : FileObserver(
-    root,
+    root.absolutePath,
     CREATE or DELETE or MODIFY or MOVED_FROM or MOVED_TO or CLOSE_WRITE,
   ) {
     override fun onEvent(event: Int, path: String?) {

@@ -175,7 +175,7 @@ val lightCustomColors =
     errorTextColor = terminalError,
     newFeatureContainerColor = terminalMidGrey,
     newFeatureTextColor = neonGreen,
-    bgStarColor = Color(0x194ade80),
+    bgStarColor = Color(0x19FFFFFF),
     promoBannerBgBrush =
       Brush.linearGradient(
         colorStops =

@@ -342,10 +342,27 @@ class AgentTools() : ToolSet {
   /** Optional reference to the MSTR_CTRL terminal session for shell tools. */
   var terminalSessionManager: com.google.ai.edge.gallery.data.TerminalSessionManager? = null
 
-  /** Lazily initialized FileBoxManager for file workspace operations. */
-  val fileBoxManager: com.google.ai.edge.gallery.data.FileBoxManager by lazy {
+  /**
+   * Optional reference to the shared singleton PTY session.
+   *
+   * When set, [Shell_Execute] commands are also injected into the live MSTR_CTRL
+   * terminal so the user can watch the AI's actions in real time.  The AI can
+   * also call [com.google.ai.edge.gallery.data.SharedShellManager.readScreen]
+   * to observe the output directly from the shared session buffer.
+   */
+  var sharedShellManager: com.google.ai.edge.gallery.data.SharedShellManager? = null
+
+  /**
+   * FileBoxManager for file workspace operations.
+   *
+   * Defaults to a lazily-constructed local instance, but the GalleryApp wires this
+   * to the application-level singleton so that the AI and the FILE_BOX editor share
+   * the same [com.google.ai.edge.gallery.data.FileBoxManager.currentFilePath] and
+   * [com.google.ai.edge.gallery.data.FileBoxManager.cursorLine] state flows, as well
+   * as the single [android.os.FileObserver] that drives automatic tree refreshes.
+   */
+  var fileBoxManager: com.google.ai.edge.gallery.data.FileBoxManager =
     com.google.ai.edge.gallery.data.FileBoxManager(context)
-  }
 
   /** Lazily initialized OracleManager for offline .zim search. */
   val oracleManager: com.google.ai.edge.gallery.data.OracleManager by lazy {
@@ -356,8 +373,11 @@ class AgentTools() : ToolSet {
    * Directory used by [capOutputWithSpill] to persist large tool outputs
    * that exceed [MAX_OUTPUT_CHARS]. Sits inside the FILE_BOX root so the
    * LLM can paginate it with `fileBoxReadLines` or search with `brainBoxGrep`.
+   *
+   * Evaluated at access time (not cached) so that re-assigning [fileBoxManager]
+   * to the GalleryApp singleton is reflected here automatically.
    */
-  internal val spillDir: java.io.File by lazy { fileBoxManager.root }
+  internal val spillDir: java.io.File get() = fileBoxManager.root
 
   private val _actionChannel = Channel<AgentAction>(Channel.UNLIMITED)
   val actionChannel: ReceiveChannel<AgentAction> = _actionChannel
@@ -1379,6 +1399,10 @@ class AgentTools() : ToolSet {
       } else {
         com.google.ai.edge.gallery.data.executeCommand(context, safeCmd)
       }
+
+      // Mirror the command to the shared MSTR_CTRL session so the user can
+      // observe AI-driven shell actions in real time.
+      sharedShellManager?.injectCommand(safeCmd)
 
       _actionChannel.send(
         SkillProgressAgentAction(

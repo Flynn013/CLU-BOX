@@ -253,18 +253,27 @@ object EnvironmentInstaller {
     val proot = prootPath(context)
     val bash  = bashPath(context)
     if (proot.exists() && proot.canExecute() && bash.exists() && bash.canExecute()) {
+      val filesDir = context.filesDir.absolutePath
+      val matrixRoot = "$filesDir/matrix"
+      // Pre-build the fake rootfs structure so proot has a valid destination to bind to.
+      File("$matrixRoot/data/data/com.termux/files/usr").mkdirs()
+      File("$filesDir/tmp").mkdirs()
       return buildList {
         add(proot.absolutePath)
-        add("-0")                     // fake root — bypasses UID checks in apt/dpkg
-        add("-b")
-        add("${prefixDir(context).absolutePath}:$TERMUX_HARDCODED_PREFIX")
-        add("-b"); add("/dev")        // device nodes required by PTY
-        add("-b"); add("/proc")       // process info required by various tools
-        add("-w"); add(homeDir(context).absolutePath) // initial working directory
-        // Use the host path so the kernel can exec bash directly.
-        // proot intercepts all subsequent syscalls made by bash, so scripts
-        // with hard-coded Termux shebangs still resolve through the binding.
-        add(bash.absolutePath)
+        add("-0")                        // fake root — bypasses UID checks in apt/dpkg
+        add("-r"); add(matrixRoot)       // chroot into our isolated fake filesystem
+        add("-b"); add("/system")        // bind native Android OS bins
+        add("-b"); add("/apex")          // bind modern Android Bionic libraries
+        add("-b"); add("/vendor")        // bind hardware libraries
+        add("-b"); add("/linkerconfig")  // bind Android 10+ linker configs
+        add("-b"); add("/dev")           // device nodes required by PTY
+        add("-b"); add("/proc")          // process info required by various tools
+        // Inject our Termux engine: host filesDir appears as the Termux prefix inside Matrix.
+        add("-b"); add("$filesDir:$TERMUX_HARDCODED_PREFIX")
+        // Initial working directory inside the Matrix (guest path).
+        add("-w"); add("$TERMUX_HARDCODED_PREFIX/clu_file_box")
+        // Execute bash via its guest path — proot resolves it through the bind above.
+        add("$TERMUX_HARDCODED_PREFIX/bin/bash")
         addAll(shellArgs)
       }
     }
@@ -364,6 +373,7 @@ object EnvironmentInstaller {
             _state.value = State.FixingPermissions
             processSymlinks(context.filesDir)
             fixPermissions(context)
+            enforcePosixPermissions(context)
 
             // Create runtime directories that Termux expects.
             homeDir(context).mkdirs()
@@ -388,6 +398,7 @@ object EnvironmentInstaller {
             Log.i(TAG, "Repairing execute permissions on sysroot binaries")
             _state.value = State.FixingPermissions
             fixPermissions(context)
+            enforcePosixPermissions(context)
           }
 
           // ── Tier 3: proot installation ───────────────────────────────────
@@ -642,6 +653,38 @@ object EnvironmentInstaller {
       }
     }
     Log.d(TAG, "Made $count files executable")
+  }
+
+  /**
+   * Recursively enforces 0777 permissions (rwxrwxrwx) on every file and
+   * directory under the entire sysroot prefix via direct POSIX system calls.
+   *
+   * This is a "nuclear" permission restoration step that goes beyond the
+   * targeted [fixPermissions] call: it covers every file in the sysroot,
+   * including data files, config files, and any paths that may have had
+   * their execute bit silently stripped by an OTA update, a storage
+   * re-encryption event, or the Android backup/restore pipeline.
+   *
+   * **Must be called before [TerminalSession] is instantiated** so that the
+   * dynamic linker can map the bootstrap shared libraries at session start.
+   * Failing to do so causes `bash` to exit immediately with code 255.
+   */
+  fun enforcePosixPermissions(context: Context) {
+    val prefix = prefixDir(context)
+    if (!prefix.exists()) return
+    var success = 0
+    var failure = 0
+    prefix.walkTopDown().forEach { file ->
+      try {
+        // S_IRWXU | S_IRWXG | S_IRWXO = 0777 octal = 511 decimal = 0b111_111_111 binary
+        Os.chmod(file.absolutePath, 0b111_111_111)
+        success++
+      } catch (e: Exception) {
+        Log.e(TAG, "enforcePosixPermissions: chmod failed on ${file.absolutePath}", e)
+        failure++
+      }
+    }
+    Log.i(TAG, "enforcePosixPermissions: $success ok, $failure failed")
   }
 
   /**

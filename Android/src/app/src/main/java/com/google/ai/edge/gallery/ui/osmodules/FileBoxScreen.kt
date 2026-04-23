@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -76,6 +77,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.ai.edge.gallery.data.FileBoxManager
 import com.google.ai.edge.gallery.data.FileNode
+import com.google.ai.edge.gallery.data.SharedShellManager
 import com.google.ai.edge.gallery.data.exportDirectoryAsZip
 import com.google.ai.edge.gallery.ui.theme.absoluteBlack
 import com.google.ai.edge.gallery.ui.theme.neonGreen
@@ -86,9 +88,16 @@ import java.io.File
  *
  * Shows a hierarchical file tree. Tapping a file opens it in an editable text field.
  * A top-level "Export Project" button zips a root directory to Downloads.
+ *
+ * @param sharedShellManager When provided, the "▶ TERM" button is available for each
+ *   selected file; tapping it injects a `cd <parent-dir>` command into the live PTY
+ *   terminal so the user can immediately run the selected file from MSTR_CTRL.
  */
 @Composable
-fun FileBoxScreen(fileBoxManager: FileBoxManager) {
+fun FileBoxScreen(
+  fileBoxManager: FileBoxManager,
+  sharedShellManager: SharedShellManager? = null,
+) {
   val context = LocalContext.current
   // Bump to force recomposition after file writes/deletes.
   var refreshKey by remember { mutableIntStateOf(0) }
@@ -169,6 +178,26 @@ fun FileBoxScreen(fileBoxManager: FileBoxManager) {
           Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
           Spacer(Modifier.width(4.dp))
           Text("Delete", fontFamily = FontFamily.Monospace, fontSize = 14.sp)
+        }
+      }
+
+      // ▶ TERM — cd to the selected file's directory in the live PTY terminal.
+      // Only shown when a file is selected AND the SharedShellManager is wired in.
+      val termPath = selectedFilePath
+      if (termPath != null && sharedShellManager != null) {
+        val parentRelative = File(termPath).parent ?: "."
+        OutlinedButton(
+          onClick = {
+            // Resolve the absolute path inside the sandbox root for the cd command.
+            val absParent = File(fileBoxManager.root, parentRelative).absolutePath
+            sharedShellManager.injectCommand("cd \"$absParent\" && ls -la")
+            Toast.makeText(context, "Opened '$parentRelative' in MSTR_CTRL", Toast.LENGTH_SHORT).show()
+          },
+          colors = ButtonDefaults.outlinedButtonColors(contentColor = neonGreen),
+        ) {
+          Icon(Icons.Default.Terminal, contentDescription = null, modifier = Modifier.size(16.dp))
+          Spacer(Modifier.width(4.dp))
+          Text("▶ TERM", fontFamily = FontFamily.Monospace, fontSize = 14.sp)
         }
       }
 

@@ -32,30 +32,34 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -64,6 +68,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.google.ai.edge.gallery.data.EnvironmentInstaller
+import com.google.ai.edge.gallery.data.NativeShellBridge
+import com.google.ai.edge.gallery.data.SharedShellManager
 import com.google.ai.edge.gallery.data.TerminalSessionManager
 import com.google.ai.edge.gallery.data.TermuxSessionBridge
 import com.google.ai.edge.gallery.ui.theme.absoluteBlack
@@ -94,7 +100,10 @@ import kotlinx.coroutines.withContext
  * • Bottom input row for quick command injection.
  */
 @Composable
-fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
+fun MstrCtrlScreen(
+  sessionManager: TerminalSessionManager,
+  sharedShellManager: SharedShellManager,
+) {
   val context = LocalContext.current
   val scope = rememberCoroutineScope()
   var inputText by remember { mutableStateOf("") }
@@ -120,6 +129,13 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
   // Null while the session is alive; set to the exit-code banner on death.
   var sessionTerminatedMsg by remember { mutableStateOf<String?>(null) }
 
+  // ── Logcat viewer state ───────────────────────────────────────
+  // Whether the full-screen logcat overlay is visible.
+  var showLogcat by remember { mutableStateOf(false) }
+  // Lines captured from the last logcat run (mutableStateListOf so the
+  // composable recomposes when lines are appended).
+  val logcatLines = remember { mutableStateListOf<String>() }
+
   // If the bootstrap is not yet ready (including failed — user gets a retry button
   // instead of a silent degraded /system/bin/sh terminal), show the overlay.
   if (bootstrapState !is EnvironmentInstaller.State.Ready) {
@@ -136,29 +152,25 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
   // when new output arrives from the PTY.
   var terminalViewRef by remember { mutableStateOf<TerminalView?>(null) }
 
-  // Create the Termux PTY bridge and session eagerly so the session
-  // is ready before the AndroidView factory runs.  Previously this was
-  // in a LaunchedEffect which ran *after* the first composition,
-  // causing the TerminalView factory to see a null session.
-  //
-  // The createSession call is wrapped inside TermuxSessionBridge with a
-  // blast-shield try-catch, so even if PTY init fails due to W^X or
-  // native-lib errors the bridge object is still valid (sessionInitFailed
-  // will be true and terminalSession will be null).
-  val bridge = remember {
-    TermuxSessionBridge(context).also { b ->
-      b.createSession(sessionManager.sandboxRoot)
-      if (b.sessionInitFailed) {
-        Log.e("MstrCtrlScreen", "PTY init failed: ${b.sessionInitError}")
-      }
-    }
-  }  // Start the legacy session manager (pre-flight + agent tools).
+  // Use the application-level singleton bridge from SharedShellManager.
+  // This keeps the PTY session alive when the user switches to another module
+  // and returns — no shell restart, no lost history.
+  // The session was already created in SharedShellManager.init; we only
+  // attach/detach the TerminalView here.
+  val bridge = sharedShellManager.bridge
+  if (bridge.sessionInitFailed) {
+    Log.e("MstrCtrlScreen", "PTY init failed: ${bridge.sessionInitError}")
+  }
+
+  // Start the legacy session manager (pre-flight + agent tools).
   LaunchedEffect(Unit) {
     sessionManager.startSession()
   }
 
   // Wire up the bridge callback to invalidate the TerminalView whenever
   // new text arrives from the PTY.  Re-wires when the view ref changes.
+  // Note: setCallback replaces the default SharedShellManager callback, so
+  // we also call sharedShellManager.bridge's internal screen-version bump.
   LaunchedEffect(terminalViewRef) {
     bridge.setCallback(object : TermuxSessionBridge.Callback {
       override fun onTextChanged() {
@@ -179,11 +191,6 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
     })
   }
 
-  // Clean up PTY on disposal.
-  DisposableEffect(Unit) {
-    onDispose { bridge.destroySession() }
-  }
-
   // Auto-upgrade: when the bootstrap self-heals and the terminal goes ONLINE,
   // restart the bridge if it was started with the /system/bin/sh fallback.
   // This replaces the stuck /system/bin/sh session with a proper bash session
@@ -191,11 +198,19 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
   LaunchedEffect(terminalOnline) {
     if (terminalOnline && bridge.usedFallbackShell) {
       withContext(Dispatchers.IO) {
-        bridge.destroySession()
-        bridge.createSession(sessionManager.sandboxRoot)
+        sharedShellManager.restartSession()
       }
       bridgeRestartCount++ // Triggers AndroidView re-attachment with the new bash session.
     }
+  }
+
+  // ── Logcat full-screen overlay ────────────────────────────────
+  if (showLogcat) {
+    LogcatOverlay(
+      lines = logcatLines,
+      onDismiss = { showLogcat = false },
+    )
+    return
   }
 
   Column(
@@ -204,7 +219,7 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
       .background(absoluteBlack)
       .imePadding(),
   ) {
-    // ── Status bar: TERMINAL ONLINE indicator ──────────────────
+    // ── Status bar: TERMINAL ONLINE indicator + Logcat toggle ──
     Row(
       modifier = Modifier
         .fillMaxWidth()
@@ -217,7 +232,25 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
         color = if (terminalOnline) neonGreen else neonGreen.copy(alpha = 0.4f),
         fontFamily = FontFamily.Monospace,
         fontSize = 12.sp,
+        modifier = Modifier.weight(1f),
       )
+      // Logcat toggle button — opens the diagnostic log viewer.
+      IconButton(
+        onClick = {
+          logcatLines.clear()
+          showLogcat = true
+          scope.launch(Dispatchers.IO) {
+            readLogcat(logcatLines, context)
+          }
+        },
+        modifier = Modifier.size(36.dp),
+      ) {
+        Icon(
+          Icons.Default.Terminal,
+          contentDescription = "View Logcat",
+          tint = neonGreen.copy(alpha = 0.7f),
+        )
+      }
     }
     // ── Termux TerminalView (main content area) ────────────────
     Box(
@@ -294,7 +327,52 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
       }
     }
 
-    // ── Bottom input row (quick command injection) ─────────────
+    // ── Extra Keys Control Row ─────────────────────────────────
+    // Buttons that write raw POSIX control sequences directly to the
+    // TerminalSession's input stream, bypassing the soft keyboard.
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .background(absoluteBlack)
+        .padding(horizontal = 4.dp, vertical = 2.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      val session = bridge.terminalSession
+      val keyButtonColors = ButtonDefaults.buttonColors(
+        containerColor = neonGreen.copy(alpha = 0.12f),
+        contentColor = neonGreen,
+      )
+      val keyButtonMod = Modifier.padding(horizontal = 2.dp)
+      val keyLabelStyle = TextStyle(
+        fontFamily = FontFamily.Monospace,
+        fontSize = 12.sp,
+        color = neonGreen,
+      )
+      Button(onClick = { session?.write("\r") }, colors = keyButtonColors, modifier = keyButtonMod,
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 4.dp)) {
+        Text("ENTER", style = keyLabelStyle)
+      }
+      Button(onClick = { session?.write("\u0003") }, colors = keyButtonColors, modifier = keyButtonMod,
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 4.dp)) {
+        Text("CTRL+C", style = keyLabelStyle)
+      }
+      Button(onClick = { session?.write("\u001B[A") }, colors = keyButtonColors, modifier = keyButtonMod,
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 4.dp)) {
+        Text("▲", style = keyLabelStyle)
+      }
+      Button(onClick = { session?.write("\u001B[B") }, colors = keyButtonColors, modifier = keyButtonMod,
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 4.dp)) {
+        Text("▼", style = keyLabelStyle)
+      }
+      Button(onClick = { session?.write("\u001B") }, colors = keyButtonColors, modifier = keyButtonMod,
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 4.dp)) {
+        Text("ESC", style = keyLabelStyle)
+      }
+    }
+
+    // ── Manual Execution Bridge (OutlinedTextField + SEND) ────
+    // Completely bypasses the AI — user types a command and hits SEND to
+    // write it directly to the session's input stream.
     Row(
       modifier = Modifier
         .fillMaxWidth()
@@ -302,55 +380,63 @@ fun MstrCtrlScreen(sessionManager: TerminalSessionManager) {
         .padding(horizontal = 8.dp, vertical = 6.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {
-      Text(
-        "$",
-        color = neonGreen,
-        fontFamily = FontFamily.Monospace,
-        fontSize = 18.sp,
-        modifier = Modifier.padding(end = 6.dp),
-      )
-
-      BasicTextField(
+      OutlinedTextField(
         value = inputText,
         onValueChange = { inputText = it },
-        modifier = Modifier
-          .weight(1f)
-          .padding(vertical = 4.dp),
+        modifier = Modifier.weight(1f),
         textStyle = TextStyle(
           fontFamily = FontFamily.Monospace,
-          fontSize = 18.sp,
+          fontSize = 15.sp,
           color = neonGreen,
         ),
-        cursorBrush = SolidColor(neonGreen),
+        placeholder = {
+          Text(
+            "Enter command…",
+            style = TextStyle(
+              fontFamily = FontFamily.Monospace,
+              fontSize = 15.sp,
+              color = neonGreen.copy(alpha = 0.35f),
+            ),
+          )
+        },
+        colors = OutlinedTextFieldDefaults.colors(
+          focusedBorderColor = neonGreen,
+          unfocusedBorderColor = neonGreen.copy(alpha = 0.4f),
+          cursorColor = neonGreen,
+          focusedTextColor = neonGreen,
+          unfocusedTextColor = neonGreen,
+        ),
         singleLine = true,
       )
 
-      Spacer(Modifier.width(4.dp))
+      Spacer(Modifier.width(6.dp))
 
-      // Send button — injects command into the PTY.
-      IconButton(
+      Button(
         onClick = {
           val cmd = inputText.trim()
           if (cmd.isNotEmpty()) {
             inputText = ""
-            bridge.sendCommand(cmd)
+            bridge.terminalSession?.write("$cmd\r")
           }
         },
+        colors = ButtonDefaults.buttonColors(
+          containerColor = neonGreen.copy(alpha = 0.15f),
+          contentColor = neonGreen,
+        ),
       ) {
-        Icon(
-          Icons.AutoMirrored.Filled.Send,
-          contentDescription = "Execute",
-          tint = neonGreen,
+        Text(
+          "SEND",
+          fontFamily = FontFamily.Monospace,
+          fontSize = 14.sp,
         )
       }
 
-      // Clear / restart session.
+      // Restart session button.
       IconButton(
         onClick = {
           sessionTerminatedMsg = null
           scope.launch(Dispatchers.IO) {
-            bridge.destroySession()
-            bridge.createSession(sessionManager.sandboxRoot)
+            sharedShellManager.restartSession()
           }
         },
       ) {
@@ -421,6 +507,127 @@ private fun BootstrapProgressOverlay(
           )
         }
       }
+    }
+  }
+}
+
+// ── Logcat full-screen overlay ────────────────────────────────────────────
+//
+// Displays the last 500 lines of logcat in a scrollable monospace list.
+// Launched asynchronously so it never blocks the main UI thread.
+
+@Composable
+private fun LogcatOverlay(
+  lines: List<String>,
+  onDismiss: () -> Unit,
+) {
+  val listState = rememberLazyListState()
+
+  // Auto-scroll to the bottom when new lines arrive.
+  LaunchedEffect(lines.size) {
+    if (lines.isNotEmpty()) {
+      listState.animateScrollToItem(lines.size - 1)
+    }
+  }
+
+  Column(
+    modifier = Modifier
+      .fillMaxSize()
+      .background(absoluteBlack),
+  ) {
+    // Title bar with close button.
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .background(absoluteBlack)
+        .padding(horizontal = 10.dp, vertical = 4.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Text(
+        text = "● LOGCAT DIAGNOSTIC",
+        color = neonGreen,
+        fontFamily = FontFamily.Monospace,
+        fontSize = 13.sp,
+        modifier = Modifier.weight(1f),
+      )
+      Button(
+        onClick = onDismiss,
+        colors = ButtonDefaults.buttonColors(
+          containerColor = neonGreen.copy(alpha = 0.12f),
+          contentColor = neonGreen,
+        ),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+      ) {
+        Text("CLOSE", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+      }
+    }
+
+    if (lines.isEmpty()) {
+      Box(
+        modifier = Modifier
+          .fillMaxSize()
+          .padding(32.dp),
+        contentAlignment = Alignment.Center,
+      ) {
+        Text(
+          text = "Reading logcat…",
+          color = neonGreen.copy(alpha = 0.5f),
+          fontFamily = FontFamily.Monospace,
+          fontSize = 14.sp,
+        )
+      }
+    } else {
+      LazyColumn(
+        state = listState,
+        modifier = Modifier
+          .fillMaxSize()
+          .padding(horizontal = 6.dp),
+      ) {
+        items(lines) { line ->
+          Text(
+            text = line,
+            color = neonGreen.copy(alpha = 0.85f),
+            fontFamily = FontFamily.Monospace,
+            fontSize = 10.sp,
+            softWrap = false,
+          )
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Reads the last 500 lines of logcat via [Runtime.exec] on a background thread
+ * and appends each line to [output].  Prepends a [NativeShellBridge] diagnostic
+ * header so the `.so` binary status is always visible at the top of the overlay.
+ * Must be called from a coroutine running on [Dispatchers.IO].
+ */
+private suspend fun readLogcat(output: MutableList<String>, context: android.content.Context) {
+  withContext(Dispatchers.IO) {
+    // ── NativeShellBridge diagnostic header ──────────────────────────────
+    // Prepend .so binary availability so developers can instantly see whether
+    // libproot.so / libbash.so are present and executable on this device.
+    try {
+      NativeShellBridge.diagnose(context).lines().forEach { line ->
+        output.add(line)
+      }
+      output.add("─".repeat(60))
+    } catch (e: Exception) {
+      output.add("[NativeShellBridge diagnose error: ${e.message}]")
+    }
+
+    // ── Logcat dump ───────────────────────────────────────────────────────
+    try {
+      val process = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "500"))
+      process.inputStream.bufferedReader().use { reader ->
+        reader.lineSequence().forEach { line ->
+          output.add(line)
+        }
+      }
+      process.waitFor()
+    } catch (e: Exception) {
+      output.add("[ERROR reading logcat: ${e.message}]")
     }
   }
 }

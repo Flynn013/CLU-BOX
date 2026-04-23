@@ -156,26 +156,18 @@ class TerminalSessionManager(private val context: Context) {
     try {
       // Resolve internal sysroot paths via EnvironmentInstaller.
       val prefix = EnvironmentInstaller.prefixDir(context)
-      val binDir = EnvironmentInstaller.binDir(context)
       val shell = EnvironmentInstaller.shellPath(context)
 
-      // Build PATH: include internal bin and applets dirs only if the bootstrap is installed.
-      // $PREFIX/bin/applets contains Termux busybox applets required by pkg and other scripts.
       Log.d(TAG, "Checkpoint 2: Building environment (PREFIX=${prefix.absolutePath})")
-      val appletsDir = File(binDir, "applets")
-      val effectivePath = buildString {
-        if (binDir.isDirectory) {
-          append(binDir.absolutePath)
-          if (appletsDir.isDirectory) append(":${appletsDir.absolutePath}")
-          append(":")
-        }
-        append("/system/bin:/system/xbin")
-      }
+      // Pre-build the Matrix fake rootfs structure so proot has a valid destination.
+      val matrixRoot = "${context.filesDir.absolutePath}/matrix"
+      File("$matrixRoot/data/data/com.termux/files/usr").mkdirs()
+      File(context.filesDir, "tmp").mkdirs()
 
       val env = mutableMapOf(
-        "HOME" to EnvironmentInstaller.homeDir(context).also { it.mkdirs() }.absolutePath,
+        "HOME" to "/data/data/com.termux/files/usr/clu_file_box",
         "TERM" to "xterm-256color",
-        "PATH" to effectivePath,
+        "PATH" to "/data/data/com.termux/files/usr/bin:/system/bin",
         "TMPDIR" to EnvironmentInstaller.tmpDir(context).also { it.mkdirs() }.absolutePath,
         "LANG" to "en_US.UTF-8",
         "SHELL" to EnvironmentInstaller.shellPath(context),
@@ -191,7 +183,6 @@ class TerminalSessionManager(private val context: Context) {
       }
       // proot needs a writable tmp directory inside our private storage to build
       // its fake rootfs; disable seccomp so it runs on kernels with strict policies.
-      File(context.filesDir, "tmp").mkdirs()
       env["PROOT_TMP_DIR"] = File(context.filesDir, "tmp").absolutePath
       env["PROOT_NO_SECCOMP"] = "1"
       env["PROOT_NO_SYSVIPC"] = "1"
@@ -454,28 +445,22 @@ class TerminalSessionManager(private val context: Context) {
         .directory(sandboxRoot)
         .redirectErrorStream(false)
 
-      pb.environment()["HOME"] = EnvironmentInstaller.homeDir(context).also { it.mkdirs() }.absolutePath
-      pb.environment()["TMPDIR"] = EnvironmentInstaller.tmpDir(context).also { it.mkdirs() }.absolutePath
-      pb.environment()["LANG"] = "en_US.UTF-8"
-      pb.environment()["SHELL"] = EnvironmentInstaller.shellPath(context)
-      // Inject internal sysroot environment so bash/python/node/pkg are visible.
-      val binDir = EnvironmentInstaller.binDir(context)
-      val prefix = EnvironmentInstaller.prefixDir(context)
-      if (binDir.isDirectory) {
-        val appletsDir = File(binDir, "applets")
-        val basePath = pb.environment()["PATH"] ?: "/system/bin:/system/xbin"
-        val fullPath = buildString {
-          append(binDir.absolutePath)
-          if (appletsDir.isDirectory) append(":${appletsDir.absolutePath}")
-          append(":$basePath")
-        }
-        pb.environment()["PATH"] = fullPath
-        pb.environment()["PREFIX"] = prefix.absolutePath
-        // Required for Termux-patched apt/dpkg to find config at our prefix.
-        pb.environment()["TERMUX_PREFIX"] = prefix.absolutePath
-      }
+      val filesDir = context.filesDir.absolutePath
+      File("$filesDir/matrix/data/data/com.termux/files/usr").mkdirs()
       File(context.filesDir, "tmp").mkdirs()
-      pb.environment()["PROOT_TMP_DIR"] = File(context.filesDir, "tmp").absolutePath
+      pb.environment()["HOME"]           = "/data/data/com.termux/files/usr/clu_file_box"
+      pb.environment()["TMPDIR"]         = EnvironmentInstaller.tmpDir(context).also { it.mkdirs() }.absolutePath
+      pb.environment()["LANG"]           = "en_US.UTF-8"
+      pb.environment()["SHELL"]          = EnvironmentInstaller.shellPath(context)
+      pb.environment()["PATH"]           = "/data/data/com.termux/files/usr/bin:/system/bin"
+      pb.environment()["TERM"]           = "xterm-256color"
+      val prefix = EnvironmentInstaller.prefixDir(context)
+      if (prefix.isDirectory) {
+        pb.environment()["PREFIX"]         = prefix.absolutePath
+        // Required for Termux-patched apt/dpkg to find config at our prefix.
+        pb.environment()["TERMUX_PREFIX"]  = prefix.absolutePath
+      }
+      pb.environment()["PROOT_TMP_DIR"]    = "$filesDir/tmp"
       pb.environment()["PROOT_NO_SECCOMP"] = "1"
       pb.environment()["PROOT_NO_SYSVIPC"] = "1"
 
@@ -542,28 +527,22 @@ class TerminalSessionManager(private val context: Context) {
         .directory(sandboxRoot)
         .redirectErrorStream(false)
 
-      pb.environment()["HOME"] = EnvironmentInstaller.homeDir(context).also { it.mkdirs() }.absolutePath
-      pb.environment()["TMPDIR"] = EnvironmentInstaller.tmpDir(context).also { it.mkdirs() }.absolutePath
-      pb.environment()["LANG"] = "en_US.UTF-8"
-      pb.environment()["SHELL"] = EnvironmentInstaller.shellPath(context)
-      // Inject internal sysroot environment so bash/python/node/pkg are visible.
-      val binDir = EnvironmentInstaller.binDir(context)
-      val prefix = EnvironmentInstaller.prefixDir(context)
-      if (binDir.isDirectory) {
-        val appletsDir = File(binDir, "applets")
-        val basePath = pb.environment()["PATH"] ?: "/system/bin:/system/xbin"
-        val fullPath = buildString {
-          append(binDir.absolutePath)
-          if (appletsDir.isDirectory) append(":${appletsDir.absolutePath}")
-          append(":$basePath")
-        }
-        pb.environment()["PATH"] = fullPath
-        pb.environment()["PREFIX"] = prefix.absolutePath
-        // Required for Termux-patched apt/dpkg to find config at our prefix.
-        pb.environment()["TERMUX_PREFIX"] = prefix.absolutePath
-      }
+      val filesDir2 = context.filesDir.absolutePath
+      File("$filesDir2/matrix/data/data/com.termux/files/usr").mkdirs()
       File(context.filesDir, "tmp").mkdirs()
-      pb.environment()["PROOT_TMP_DIR"] = File(context.filesDir, "tmp").absolutePath
+      pb.environment()["HOME"]           = "/data/data/com.termux/files/usr/clu_file_box"
+      pb.environment()["TMPDIR"]         = EnvironmentInstaller.tmpDir(context).also { it.mkdirs() }.absolutePath
+      pb.environment()["LANG"]           = "en_US.UTF-8"
+      pb.environment()["SHELL"]          = EnvironmentInstaller.shellPath(context)
+      pb.environment()["PATH"]           = "/data/data/com.termux/files/usr/bin:/system/bin"
+      pb.environment()["TERM"]           = "xterm-256color"
+      val prefix2 = EnvironmentInstaller.prefixDir(context)
+      if (prefix2.isDirectory) {
+        pb.environment()["PREFIX"]         = prefix2.absolutePath
+        // Required for Termux-patched apt/dpkg to find config at our prefix.
+        pb.environment()["TERMUX_PREFIX"]  = prefix2.absolutePath
+      }
+      pb.environment()["PROOT_TMP_DIR"]    = "$filesDir2/tmp"
       pb.environment()["PROOT_NO_SECCOMP"] = "1"
       pb.environment()["PROOT_NO_SYSVIPC"] = "1"
 

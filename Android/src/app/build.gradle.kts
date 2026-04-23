@@ -32,12 +32,22 @@ android {
   namespace = "com.google.ai.edge.gallery"
   compileSdk = 35
 
+  // NDK version pinned to ensure reproducible builds when libproot.so / libbash.so
+  // are compiled from source using the Android NDK toolchain.
+  ndkVersion = "27.0.12077973"
+
   defaultConfig {
     applicationId = "com.google.aiedge.gallery"
     minSdk = 28
     targetSdk = 28
     versionCode = 23
     versionName = "1.0.11"
+
+    // Restrict native library extraction to the ABIs that carry libproot.so / libbash.so.
+    // Add "x86_64" only if you have x86_64 builds of those binaries in jniLibs/.
+    ndk {
+      abiFilters += setOf("arm64-v8a", "x86_64")
+    }
 
     // Needed for HuggingFace auth workflows.
     // Use the scheme of the "Redirect URLs" in HuggingFace app.
@@ -136,6 +146,11 @@ dependencies {
   implementation(libs.mediapipe.tasks.text)
 
   // ── Termux terminal emulator (PTY-backed shell sessions + TerminalView) ──
+  // Active: JitPack prebuilt — works out of the box without local Termux source.
+  // To switch to local modules, uncomment the two project() lines below and
+  // comment-out the JitPack line.  Requires libs/ modules declared in settings.gradle.kts.
+  //   implementation(project(":terminal-emulator"))
+  //   implementation(project(":termux-shared"))
   // From JitPack — https://github.com/termux/termux-app/wiki/Termux-Libraries
   implementation("com.termux.termux-app:terminal-view:0.118.0")
   // Avoid Guava ListenableFuture classpath collision with Termux/shared deps.
