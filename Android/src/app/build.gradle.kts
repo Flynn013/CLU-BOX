@@ -15,12 +15,11 @@
  */
 
 plugins {
-    alias(libs.plugins.androidApplication)
-    alias(libs.plugins.jetbrainsKotlinAndroid)
-    alias(libs.plugins.compose.compiler)
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
     id("com.google.dagger.hilt.android")
     id("com.google.devtools.ksp")
-    id("org.jetbrains.kotlin.plugin.serialization") version "1.9.22"
+    id("org.jetbrains.kotlin.plugin.serialization")
     id("com.google.gms.google-services")
 }
 
@@ -31,13 +30,12 @@ android {
     defaultConfig {
         applicationId = "com.google.ai.edge.gallery"
         minSdk = 29
-        targetSdk = 35 // BUMPED: Native execution bypass is dead. This stops the Android 16 MTE crashes.
+        targetSdk = 35 
         versionCode = 1
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         
-        // This ensures the JNI libraries are packaged correctly for Chaquopy/Native modules
         ndk {
             abiFilters.add("arm64-v8a")
         }
@@ -80,8 +78,6 @@ android {
             excludes += "META-INF/gradle/incremental.annotation.processors"
         }
     }
-
-    // THE GHOST IS GONE: The externalNativeBuild block for C++ Termux/CMake has been permanently erased.
 }
 
 dependencies {
