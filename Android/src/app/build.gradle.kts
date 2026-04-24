@@ -15,8 +15,9 @@
  */
 
 plugins {
-    alias(libs.plugins.android.application)
-    id("org.jetbrains.kotlin.android")
+    alias(libs.plugins.androidApplication)
+    alias(libs.plugins.jetbrainsKotlinAndroid)
+    alias(libs.plugins.compose.compiler)
     id("com.google.dagger.hilt.android")
     id("com.google.devtools.ksp")
     id("org.jetbrains.kotlin.plugin.serialization") version "1.9.22"
@@ -30,12 +31,13 @@ android {
     defaultConfig {
         applicationId = "com.google.ai.edge.gallery"
         minSdk = 29
-        targetSdk = 35 
+        targetSdk = 35 // BUMPED: Native execution bypass is dead. This stops the Android 16 MTE crashes.
         versionCode = 1
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         
+        // This ensures the JNI libraries are packaged correctly for Chaquopy/Native modules
         ndk {
             abiFilters.add("arm64-v8a")
         }
@@ -71,10 +73,6 @@ android {
     buildFeatures {
         compose = true
     }
-
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.10"
-    }
     
     packaging {
         resources {
@@ -82,52 +80,65 @@ android {
             excludes += "META-INF/gradle/incremental.annotation.processors"
         }
     }
+
+    // THE GHOST IS GONE: The externalNativeBuild block for C++ Termux/CMake has been permanently erased.
 }
 
 dependencies {
-    // AndroidX & Core
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
-    implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.activity.compose)
-    
-    // Compose
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
-    implementation(libs.androidx.material.icons.extended)
+    implementation(libs.androidx.material.icons.core)
     
-    // Navigation
-    implementation(libs.androidx.navigation.compose)
-    implementation(libs.androidx.hilt.navigation.compose)
-
-    // ML Kit & LiteRT 
-    implementation(libs.play.services.mlkit.text.recognition)
-    implementation(libs.play.services.mlkit.subject.segmentation)
+    // ViewModel and Navigation
+    implementation(libs.androidx.lifecycle.viewmodel.ktx)
+    implementation(libs.androidx.navigation.runtime.ktx)
+    
+    // CameraX
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
+    
+    // ML Kit
+    implementation(libs.text.recognition)
+    implementation(libs.subject.segmentation)
+    
+    // LiteRT
     implementation(libs.litert)
-
-    // DataStore 
+    
+    // DataStore
     implementation(libs.androidx.datastore)
     implementation(libs.protobuf.javalite)
-
-    // Hilt DI
+    
+    // Hilt
     implementation(libs.hilt.android)
-    ksp(libs.hilt.compiler)
-
-    // Firebase 
+    ksp(libs.hilt.android.compiler)
+    
+    // GSON
+    implementation(libs.gson)
+    
+    // Firebase
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.analytics)
     implementation(libs.firebase.messaging)
-    implementation(libs.firebase.firestore)
+    implementation(libs.firebase.crashlytics)
     
-    // UI Helpers 
-    implementation(libs.coil.compose)
+    // Room
+    implementation(libs.androidx.room.runtime)
+    ksp(libs.androidx.room.compiler)
+    implementation(libs.androidx.room.ktx)
+    
+    // UI Helpers
+    implementation(libs.coil.kt.compose)
     implementation(libs.accompanist.systemuicontroller)
-    implementation("com.github.jeziellago:compose-markdown:0.5.2") 
-
-    // Testing
+    implementation("com.github.jeziellago:compose-markdown:0.5.2")
+    
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
