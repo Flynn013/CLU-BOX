@@ -31,13 +31,12 @@ android {
     defaultConfig {
         applicationId = "com.google.ai.edge.gallery"
         minSdk = 29
-        targetSdk = 35 // BUMPED: Native Smuggler bypass is dead. Targeting modern Android 15/16.
+        targetSdk = 35 
         versionCode = 1
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         
-        // Ensure the JNI libraries are packaged correctly for Chaquopy/Native modules
         ndk {
             abiFilters.add("arm64-v8a")
         }
@@ -80,9 +79,6 @@ android {
             excludes += "META-INF/gradle/incremental.annotation.processors"
         }
     }
-
-    // PURGED: The `externalNativeBuild { cmake { ... } }` block is GONE. 
-    // We are no longer compiling legacy C binaries for Termux/PRoot.
 }
 
 dependencies {
@@ -104,18 +100,12 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.hilt.navigation.compose)
 
-    // CameraX
-    implementation(libs.androidx.camera.core)
-    implementation(libs.androidx.camera.camera2)
-    implementation(libs.androidx.camera.lifecycle)
-    implementation(libs.androidx.camera.view)
-
-    // ML Kit & LiteRT (The JNI inference engine)
+    // ML Kit & LiteRT 
     implementation(libs.play.services.mlkit.text.recognition)
     implementation(libs.play.services.mlkit.subject.segmentation)
     implementation(libs.litert)
 
-    // DataStore (For our async theme settings)
+    // DataStore 
     implementation(libs.androidx.datastore)
     implementation(libs.protobuf.javalite)
 
@@ -123,16 +113,16 @@ dependencies {
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
 
-    // Firebase & Play Services
+    // Firebase 
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.analytics)
     implementation(libs.firebase.messaging)
     implementation(libs.firebase.firestore)
     
-    // UI Helpers & markdown
+    // UI Helpers 
     implementation(libs.coil.compose)
     implementation(libs.accompanist.systemuicontroller)
-    implementation("com.github.jeziellago:compose-markdown:0.5.2") // For the Markdown skill renderer
+    implementation("com.github.jeziellago:compose-markdown:0.5.2") 
 
     // Testing
     testImplementation(libs.junit)
