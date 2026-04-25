@@ -21,7 +21,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
     id("com.google.dagger.hilt.android")
     id("com.google.devtools.ksp")
-    id("com.google.gms.google-services")
+    // FIREBASE PURGED: google-services plugin removed
 }
 
 android {
@@ -78,7 +78,6 @@ android {
 }
 
 dependencies {
-    // Core & Compose (Valid TOML Aliases)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
@@ -88,7 +87,6 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
 
-    // HARDCODED BYPASS: Replaced failing TOML aliases with explicit Maven coordinates
     implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.3")
     implementation("androidx.navigation:navigation-runtime-ktx:2.7.7")
@@ -102,7 +100,6 @@ dependencies {
     implementation("com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1")
     
     implementation("com.google.ai.edge.litert:litert:1.0.1")
-    
     implementation("com.google.code.gson:gson:2.10.1")
     
     implementation("androidx.room:room-runtime:2.6.1")
@@ -112,17 +109,13 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.6.0")
     implementation("com.google.accompanist:accompanist-systemuicontroller:0.34.0")
 
-    // Intact TOML Aliases
     implementation(libs.androidx.datastore)
     implementation(libs.protobuf.javalite)
     
     implementation(libs.hilt.android)
     ksp(libs.hilt.android.compiler)
     
-    implementation(platform(libs.firebase.bom))
-    implementation(libs.firebase.analytics)
-    implementation(libs.firebase.messaging)
-    implementation("com.google.firebase:firebase-crashlytics") // String fallback inside BOM
+    // FIREBASE PURGED: BOM, Analytics, Crashlytics, and Messaging dependencies removed
     
     implementation("com.github.jeziellago:compose-markdown:0.5.2")
     
