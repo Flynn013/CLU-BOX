@@ -17,9 +17,10 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.kotlin.plugin.serialization")
     id("com.google.dagger.hilt.android")
     id("com.google.devtools.ksp")
-    id("org.jetbrains.kotlin.plugin.serialization")
     id("com.google.gms.google-services")
 }
 
@@ -64,10 +65,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-    
     buildFeatures {
         compose = true
     }
@@ -81,6 +78,7 @@ android {
 }
 
 dependencies {
+    // Core & Compose (Valid TOML Aliases)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
@@ -89,50 +87,43 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
-    implementation(libs.androidx.material.icons.core)
+
+    // HARDCODED BYPASS: Replaced failing TOML aliases with explicit Maven coordinates
+    implementation("androidx.compose.material:material-icons-core")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.3")
+    implementation("androidx.navigation:navigation-runtime-ktx:2.7.7")
     
-    // ViewModel and Navigation
-    implementation(libs.androidx.lifecycle.viewmodel.ktx)
-    implementation(libs.androidx.navigation.runtime.ktx)
+    implementation("androidx.camera:camera-core:1.3.4")
+    implementation("androidx.camera:camera-camera2:1.3.4")
+    implementation("androidx.camera:camera-lifecycle:1.3.4")
+    implementation("androidx.camera:camera-view:1.3.4")
     
-    // CameraX
-    implementation(libs.androidx.camera.core)
-    implementation(libs.androidx.camera.camera2)
-    implementation(libs.androidx.camera.lifecycle)
-    implementation(libs.androidx.camera.view)
+    implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.0")
+    implementation("com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1")
     
-    // ML Kit
-    implementation(libs.text.recognition)
-    implementation(libs.subject.segmentation)
+    implementation("com.google.ai.edge.litert:litert:1.0.1")
     
-    // LiteRT
-    implementation(libs.litert)
+    implementation("com.google.code.gson:gson:2.10.1")
     
-    // DataStore
+    implementation("androidx.room:room-runtime:2.6.1")
+    ksp("androidx.room:room-compiler:2.6.1")
+    implementation("androidx.room:room-ktx:2.6.1")
+    
+    implementation("io.coil-kt:coil-compose:2.6.0")
+    implementation("com.google.accompanist:accompanist-systemuicontroller:0.34.0")
+
+    // Intact TOML Aliases
     implementation(libs.androidx.datastore)
     implementation(libs.protobuf.javalite)
     
-    // Hilt
     implementation(libs.hilt.android)
     ksp(libs.hilt.android.compiler)
     
-    // GSON
-    implementation(libs.gson)
-    
-    // Firebase
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.analytics)
     implementation(libs.firebase.messaging)
-    implementation(libs.firebase.crashlytics)
+    implementation("com.google.firebase:firebase-crashlytics") // String fallback inside BOM
     
-    // Room
-    implementation(libs.androidx.room.runtime)
-    ksp(libs.androidx.room.compiler)
-    implementation(libs.androidx.room.ktx)
-    
-    // UI Helpers
-    implementation(libs.coil.kt.compose)
-    implementation(libs.accompanist.systemuicontroller)
     implementation("com.github.jeziellago:compose-markdown:0.5.2")
     
     testImplementation(libs.junit)
