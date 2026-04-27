@@ -17,41 +17,106 @@
 package com.google.ai.edge.gallery.customtasks.agentchat
 
 import android.util.Log
+import com.google.ai.edge.gallery.data.brainbox.GraphDatabase
+import com.google.ai.edge.gallery.data.scdlbox.ScdlBoxEntity
+import com.google.ai.edge.gallery.data.scdlbox.ScdlBoxManager
 import org.json.JSONObject
+import java.util.UUID
 
 private const val TAG = "DelegateSkill"
 
 /**
- * CluSkill implementation for delegating sub-tasks to the autonomous agent loop.
+ * CluSkill that allows the agent to offload a sub-task to a background process.
  *
- * Calling this skill sets [AgentTools.pendingTaskDescription], which the autonomous
- * supervisor in [AgentChatScreen] picks up after the current inference turn completes
- * and re-triggers inference with the delegated task as the next input.
+ * Two delegation modes are supported:
  *
- * This implements "delegation" by queuing the next work item in the agentic loop
- * without requiring user interaction — the model can spawn follow-up tasks autonomously.
+ * ### In-session delegation (default — `isBackground = false`)
+ * Sets [AgentTools.pendingTaskDescription] so the autonomous supervisor in
+ * [AgentChatScreen] silently re-triggers inference with the task description
+ * on the next turn.  The agent can "hand off" to itself and immediately move
+ * to the next step while the supervisor handles the continuation.
  *
- * @param agentTools The [AgentTools] instance to set the pending task on.
+ * ### Background delegation (`isBackground = true`)
+ * Creates a persistent [ScdlBoxEntity] in the Room database and schedules it
+ * as a [PeriodicWorkRequest][androidx.work.PeriodicWorkRequest] via
+ * [ScdlBoxManager].  This is a truly asynchronous dispatch — the task will
+ * be executed by the SCDL_BOX WorkManager engine on its next scheduled
+ * interval, even after the current chat session has ended.
+ *
+ * Background tasks are surfaced in the MSTR_CTRL LogBox so the operator
+ * can track execution without needing an active chat session.
+ *
+ * @param agentTools The [AgentTools] instance providing context access.
  */
 class DelegateSkill(private val agentTools: AgentTools) : CluSkill {
 
   override val name: String = "delegate"
 
   override val description: String =
-    "Queues a follow-up sub-task for the autonomous loop. Use to chain multi-step work."
+    "Offloads a sub-task. " +
+      "Set isBackground=false (default) to chain it in the current agentic loop. " +
+      "Set isBackground=true to schedule it as a persistent SCDL_BOX WorkManager background task " +
+      "that runs even after this session ends."
 
   override val jsonSchema: String =
-    """{"name":"delegate","parameters":{"task":{"type":"string"}},"required":["task"]}"""
+    """{"name":"delegate","parameters":{
+      "task":{"type":"string"},
+      "isBackground":{"type":"boolean"},
+      "isShellCommand":{"type":"boolean"},
+      "intervalMinutes":{"type":"number"}
+    },"required":["task"]}"""
 
   override val fewShotExample: String =
     """delegate(task="Run the unit tests and report any failures")"""
 
   override suspend fun execute(args: JSONObject): String {
-    val task = args.optString("task", "")
-    if (task.isBlank()) return "Error: 'task' argument is required"
+    val task = args.optString("task", "").trim()
+    if (task.isBlank()) return "[Error: 'task' argument is required]"
 
-    agentTools.pendingTaskDescription = task
-    Log.d(TAG, "Delegated sub-task: $task")
-    return "Sub-task queued: $task"
+    val isBackground = args.optBoolean("isBackground", false)
+
+    return if (isBackground) {
+      scheduleBackgroundTask(task, args)
+    } else {
+      // In-session: queue for the autonomous supervisor loop.
+      agentTools.pendingTaskDescription = task
+      Log.d(TAG, "In-session delegation: $task")
+      "[Delegate] Sub-task queued for next autonomous iteration: $task"
+    }
+  }
+
+  // ── Background scheduling via SCDL_BOX ───────────────────────────────────
+
+  private suspend fun scheduleBackgroundTask(task: String, args: JSONObject): String {
+    val ctx = agentTools.context
+      ?: return "[Error: Android context not available for background scheduling]"
+
+    val isShellCommand = args.optBoolean("isShellCommand", false)
+    val intervalMinutes = args.optLong("intervalMinutes", 60L).coerceAtLeast(15L)
+
+    val entity = ScdlBoxEntity(
+      id = UUID.randomUUID().toString(),
+      title = "Delegated: ${task.take(60)}",
+      description = "Auto-created by agent delegation",
+      payload = task,
+      isShellCommand = isShellCommand,
+      intervalMinutes = intervalMinutes,
+      isEnabled = true,
+    )
+
+    return try {
+      val db = GraphDatabase.getInstance(ctx)
+      db.scdlBoxDao().insert(entity)
+      ScdlBoxManager(ctx).schedule(entity)
+      Log.d(TAG, "Background task scheduled: ${entity.id} — '${entity.title}'")
+      "[SCDL_BOX] Background task scheduled: '${entity.title}' " +
+        "| Runs every ${entity.intervalMinutes}m " +
+        "| isShell=$isShellCommand " +
+        "| id=${entity.id}"
+    } catch (e: Exception) {
+      Log.e(TAG, "Failed to schedule background task", e)
+      "[Error: Failed to schedule background task — ${e.message}]"
+    }
   }
 }
+

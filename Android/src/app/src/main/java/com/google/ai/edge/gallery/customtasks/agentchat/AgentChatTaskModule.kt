@@ -87,19 +87,17 @@ class AgentChatTask @Inject constructor() : CustomTask {
         } else {
           AgentEngine.LOCAL
         }
-        val engineConstraint = if (agentTools.engine == AgentEngine.CLOUD) {
-          AgentGovernor.CLOUD_CONSTRAINT
-        } else {
-          AgentGovernor.LOCAL_CONSTRAINT
-        }
         val helper = if (model.runtimeType == RuntimeType.GEMINI_CLOUD) {
           GeminiCloudModelHelper.cacheApiKey(context)
           GeminiCloudModelHelper
         } else {
           LlmChatModelHelper
         }
-        val basePrompt = agentTools.skillRegistry.buildFinalSystemPrompt(task.defaultSystemPrompt)
-        val finalPrompt = "$basePrompt\n\n$engineConstraint"
+        val finalPrompt = SystemPromptManager.build(
+          engine = agentTools.engine,
+          basePrompt = task.defaultSystemPrompt,
+          skillRegistry = agentTools.skillRegistry,
+        )
         helper.initialize(
           context = context,
           model = model,

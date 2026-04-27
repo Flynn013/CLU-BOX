@@ -21,7 +21,8 @@ import java.io.File
 import org.json.JSONObject
 
 private const val TAG = "TodoSkill"
-private const val TODO_FILE = "clu_todo_list.txt"
+/** Filename inside the `clu_file_box/` sandbox.  Visible to the agent via fileBoxReadLines. */
+private const val TODO_FILE = "agent_plan.md"
 
 /**
  * CluSkill implementation for a file-backed Plan/To-Do checklist system.
@@ -42,7 +43,8 @@ class TodoSkill(private val agentTools: AgentTools) : CluSkill {
   override val name: String = "todo"
 
   override val description: String =
-    "Manages a persistent to-do checklist. Actions: add, done, list, clear."
+    "Manages a persistent to-do / plan checklist stored in agent_plan.md. Actions: add, done, list, clear. " +
+      "Call with action='list' at the start of any complex multi-step request to recall the current plan."
 
   override val jsonSchema: String =
     """{"name":"todo","parameters":{"action":{"type":"string","enum":["add","done","list","clear"]},"item":{"type":"string"}},"required":["action"]}"""
