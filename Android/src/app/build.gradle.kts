@@ -113,7 +113,6 @@ dependencies {
     implementation(libs.room.runtime)
     ksp(libs.room.compiler)
     implementation(libs.room.ktx)
-    implementation(libs.androidx.security.crypto)
 
     implementation(libs.androidx.work.runtime)
 

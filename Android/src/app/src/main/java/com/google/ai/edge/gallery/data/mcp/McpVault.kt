@@ -19,7 +19,7 @@ package com.google.ai.edge.gallery.data.mcp
 import android.content.Context
 import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
+import androidx.security.crypto.MasterKeys
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -38,14 +38,11 @@ private const val KEY_SERVERS = "servers"
  */
 class McpVault(context: Context) {
 
-  private val masterKey =
-    MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
-
   private val prefs =
     EncryptedSharedPreferences.create(
-      context,
       PREFS_FILE,
-      masterKey,
+      MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC),
+      context.applicationContext,
       EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
       EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
     )
