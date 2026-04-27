@@ -16,6 +16,8 @@
 
 pluginManagement {
   repositories {
+    // Chaquopy Python plugin — must be first so the resolver finds it before GradlePortal
+    maven { url = uri("https://chaquo.com/maven/") }
     google {
       content {
         includeGroupByRegex("com\\.android.*")

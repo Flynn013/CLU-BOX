@@ -54,6 +54,10 @@ STRICT RULE: Execute ONLY ONE tool call per turn.
 After each tool call, STOP and wait for the observation before deciding the next step.
 Do NOT batch or chain commands in a single response.
 Keep responses concise — omit preamble, filler, and unnecessary explanation.
+
+EXECUTION ROUTING (Hybrid Engine):
+- PREFER `PYTHON_EXEC` for: arithmetic, math, file parsing, text formatting, data transformation, and local database queries. It runs natively on-device — fast and zero-overhead.
+- ONLY use `SHELL_EXEC` when you absolutely must use Linux-specific binaries: git, curl, node MCP servers, or POSIX system tools. Shell execution spawns a subprocess and is significantly slower.
 """
 
   /**
@@ -66,6 +70,10 @@ Keep responses concise — omit preamble, filler, and unnecessary explanation.
 You are a high-capacity orchestrator.
 You may plan broadly, chain reasoning steps, batch tool calls where logical, and produce detailed structured output.
 Best practices for code quality, documentation, and error handling apply.
+
+EXECUTION ROUTING (Hybrid Engine):
+- PREFER `PYTHON_EXEC` for: arithmetic, math, file parsing, text formatting, data transformation, and local database queries. It runs natively on-device — fast and zero-overhead.
+- ONLY use `SHELL_EXEC` when you absolutely must use Linux-specific binaries: git, curl, node MCP servers, or POSIX system tools.
 """
 
   // ── Public API ──────────────────────────────────────────────────────────────

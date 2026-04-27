@@ -22,6 +22,8 @@ plugins {
     id("com.google.dagger.hilt.android")
     id("com.google.devtools.ksp")
     id("com.google.protobuf")
+    id("com.chaquo.python")
+    id("com.google.android.gms.oss-licenses-plugin")
     // FIREBASE PURGED: google-services plugin removed
 }
 
@@ -68,6 +70,7 @@ android {
     
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     
     packaging {
@@ -97,6 +100,7 @@ dependencies {
     implementation(libs.androidx.material3)
 
     implementation("androidx.compose.material:material-icons-core")
+    implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.3")
     implementation(libs.androidx.compose.navigation)
     implementation("androidx.navigation:navigation-runtime-ktx:2.7.7")
@@ -110,6 +114,7 @@ dependencies {
     implementation("com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1")
     
     implementation("com.google.ai.edge.litert:litert:1.0.1")
+    implementation(libs.litertlm)
     implementation("com.google.code.gson:gson:2.10.1")
     
     implementation(libs.room.runtime)
@@ -127,6 +132,16 @@ dependencies {
     implementation(libs.hilt.android)
     ksp(libs.hilt.android.compiler)
     implementation(libs.hilt.navigation.compose)
+
+    // OAuth / OpenID Connect for model download auth
+    implementation(libs.openid.appauth)
+
+    // OSS license viewer
+    implementation(libs.play.services.oss.licenses)
+
+    // Termux terminal-emulator + terminal-view (JitPack)
+    implementation("com.github.termux.termux-app:terminal-emulator:v0.118.1")
+    implementation("com.github.termux.termux-app:terminal-view:v0.118.1")
     
     // FIREBASE PURGED: BOM, Analytics, Crashlytics, and Messaging dependencies removed
     
@@ -154,4 +169,17 @@ protobuf {
             }
         }
     }
+}
+
+// ── Chaquopy — Python 3.11 for on-device execution ──────────────────────────
+chaquopy {
+    defaultConfig {
+        version = "3.11"
+        // buildPython resolves automatically from PATH on CI (python3)
+        pip {
+            // No pip packages required for core OS-level logic.
+            // Add packages here as needed, e.g.: install("requests")
+        }
+    }
+    productFlavors { }
 }
