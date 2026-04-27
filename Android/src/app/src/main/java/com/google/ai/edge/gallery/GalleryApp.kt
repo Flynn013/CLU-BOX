@@ -99,6 +99,7 @@ import com.google.ai.edge.gallery.ui.osmodules.FileBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.MstrCtrlScreen
 import com.google.ai.edge.gallery.ui.theme.absoluteBlack
 import com.google.ai.edge.gallery.ui.theme.neonGreen
+import com.google.ai.edge.gallery.ui.theme.terminalLightGrey
 import com.google.ai.edge.gallery.ui.theme.terminalMidGrey
 import kotlinx.coroutines.launch
 
@@ -157,7 +158,7 @@ fun GalleryApp(
     drawerState = drawerState,
     drawerContent = {
       ModalDrawerSheet(
-        modifier = Modifier.width(280.dp).fillMaxHeight(),
+        modifier = Modifier.width(288.dp).fillMaxHeight(),
         drawerContainerColor = absoluteBlack,
       ) {
         Column(
@@ -166,30 +167,30 @@ fun GalleryApp(
             .background(absoluteBlack)
             .verticalScroll(rememberScrollState()),
         ) {
-          // Drawer header
+          // Drawer header — elevated surface with bottom divider
           Box(
             modifier = Modifier
               .fillMaxWidth()
               .background(terminalMidGrey)
-              .padding(horizontal = 20.dp, vertical = 24.dp),
+              .padding(horizontal = 20.dp, vertical = 28.dp),
           ) {
-            Column {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
               Text(
                 "CLU/BOX",
-                style = MaterialTheme.typography.headlineMedium,
+                style = MaterialTheme.typography.headlineLarge,
                 color = neonGreen,
                 fontFamily = FontFamily.Monospace,
               )
               Text(
                 "OS v0.5 — offline AI",
-                style = MaterialTheme.typography.labelSmall,
-                color = neonGreen.copy(alpha = 0.7f),
+                style = MaterialTheme.typography.bodySmall,
+                color = neonGreen.copy(alpha = 0.55f),
                 fontFamily = FontFamily.Monospace,
               )
             }
           }
 
-          Spacer(Modifier.height(8.dp))
+          Spacer(Modifier.height(4.dp))
 
           // Module items.
           OsModule.entries.forEach { module ->
@@ -273,17 +274,16 @@ fun GalleryApp(
                 Row(
                   modifier = Modifier
                     .fillMaxWidth()
-                    .background(absoluteBlack)
+                    .background(terminalMidGrey)
                     .windowInsetsPadding(WindowInsets.statusBars)
-                    .padding(horizontal = 4.dp, vertical = 4.dp),
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
                   verticalAlignment = Alignment.CenterVertically,
                 ) {
                   Text(
                     activeModule.label,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleSmall,
                     color = neonGreen,
                     fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.padding(start = 12.dp),
                   )
                 }
               },
@@ -407,18 +407,19 @@ fun GalleryApp(
 
 @Composable
 private fun DrawerItem(module: OsModule, selected: Boolean, onClick: () -> Unit) {
-  val bgColor = if (selected) terminalMidGrey else Color.Transparent
-  val textColor = if (selected) neonGreen else MaterialTheme.colorScheme.onSurface
+  val bgColor = if (selected) terminalLightGrey else Color.Transparent
+  val textColor = if (selected) neonGreen else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+  val iconTint = if (selected) neonGreen else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
 
   Row(
     modifier = Modifier
       .fillMaxWidth()
       .background(bgColor)
       .clickable(onClick = onClick)
-      .padding(horizontal = 20.dp, vertical = 14.dp),
+      .padding(horizontal = 20.dp, vertical = 16.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
-    Icon(module.icon, contentDescription = module.label, tint = textColor)
+    Icon(module.icon, contentDescription = module.label, tint = iconTint, modifier = Modifier.size(20.dp))
     Spacer(Modifier.width(16.dp))
     Text(
       module.label,

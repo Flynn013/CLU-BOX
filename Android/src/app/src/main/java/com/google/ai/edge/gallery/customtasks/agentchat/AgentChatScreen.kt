@@ -175,7 +175,7 @@ fun AgentChatScreen(
   val autonomousLoopScope = rememberCoroutineScope()
   var showGeminiApiKeyDialog by remember { mutableStateOf(false) }
 
-  // Monitor selected model — prompt for API key when Cloud Node is selected without one.
+  // Monitor selected model — prompt for API key when CLOUD_CLU model is selected without one.
   val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
   val selectedModel = modelManagerUiState.selectedModel
   LaunchedEffect(selectedModel) {

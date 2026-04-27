@@ -119,17 +119,16 @@ fun GlobalModelManager(
   openDrawer: (() -> Unit)? = null,
 ) {
   val uiState by viewModel.uiState.collectAsState()
+  // LOCAL_CLU: on-device LiteRT-LM models.
   val localModels = remember { mutableStateListOf<Model>() }
-  val cloudModels = remember { mutableStateListOf<Model>() }
-  val bespokeModels = remember { mutableStateListOf<Model>() }
+  // LOCAL_CLU: locally-imported model files.
   val importedModels = remember { mutableStateListOf<Model>() }
-  // Gemini Cloud models added by the user via the GEMINI tab (persisted in DataStore).
+  // CLOUD_CLU: Gemini Cloud models added by the user (persisted in DataStore).
   val geminiModels = remember { mutableStateListOf<Model>() }
   val taskCandidates = remember { mutableStateListOf<Task>() }
   var modelForTaskCandidate by remember { mutableStateOf<Model?>(null) }
   var showTaskSelectorBottomSheet by remember { mutableStateOf(false) }
   var showImportModelSheet by remember { mutableStateOf(false) }
-  var showAddApiModelDialog by remember { mutableStateOf(false) }
   var showUnsupportedFileTypeDialog by remember { mutableStateOf(false) }
   var showUnsupportedWebModelDialog by remember { mutableStateOf(false) }
   val selectedLocalModelFileUri = remember { mutableStateOf<Uri?>(null) }
@@ -142,9 +141,9 @@ fun GlobalModelManager(
   val snackbarHostState = remember { SnackbarHostState() }
   val modelItemExpandedStates = remember { mutableStateMapOf<String, Boolean>() }
 
-  // VENDING_MACHINE tab state: 0=LOCAL, 1=CLOUD, 2=BESPOKE, 3=GEMINI
+  // VENDING_MACHINE tab state: 0=LOCAL_CLU, 1=CLOUD_CLU
   var selectedTab by remember { mutableIntStateOf(0) }
-  val tabTitles = listOf("LOCAL", "CLOUD", "BESPOKE", "GEMINI")
+  val tabTitles = listOf("LOCAL_CLU", "CLOUD_CLU")
 
   val promoId = "gm4_banner"
   var showPromo by remember { mutableStateOf(false) }
@@ -187,23 +186,20 @@ fun GlobalModelManager(
     val sortedModels = allModelsSet.toList().sortedBy { it.displayName.ifEmpty { it.name } }
 
     // Split into VENDING_MACHINE tabs:
-    // LOCAL: LiteRT-LM models (on-device) + imported
-    // CLOUD: AICore / system-level Gemini Cloud (from allowlist)
-    // BESPOKE: Manually-added API models
-    // GEMINI: User-added Gemini Cloud API models (from DataStore via GEMINI tab)
+    // LOCAL_CLU: LiteRT-LM on-device models + locally-imported files
+    // CLOUD_CLU: User-added Gemini Cloud API models (via API key in CLOUD_CLU tab)
+    // AICore/BESPOKE/MANUAL_API models are excluded from the CLU/BOX vending machine.
     val persistedGeminiIds = viewModel.dataStoreRepository.readGeminiCloudModels().map { it.modelId }.toSet()
     localModels.clear()
-    cloudModels.clear()
-    bespokeModels.clear()
     importedModels.clear()
     geminiModels.clear()
     for (model in sortedModels) {
       when {
-        model.runtimeType == RuntimeType.MANUAL_API -> bespokeModels.add(model)
         model.runtimeType == RuntimeType.GEMINI_CLOUD && persistedGeminiIds.contains(model.name) ->
           geminiModels.add(model)
-        model.runtimeType == RuntimeType.AICORE ||
-          model.runtimeType == RuntimeType.GEMINI_CLOUD -> cloudModels.add(model)
+        model.runtimeType == RuntimeType.GEMINI_CLOUD ||
+          model.runtimeType == RuntimeType.AICORE ||
+          model.runtimeType == RuntimeType.MANUAL_API -> { /* excluded from vending machine */ }
         model.imported -> importedModels.add(model)
         else -> localModels.add(model)
       }
@@ -248,7 +244,7 @@ fun GlobalModelManager(
               )
               Text(
                 text =
-                  "${stringResource(R.string.drawer_models_label)} (${localModels.size + cloudModels.size + bespokeModels.size + importedModels.size})",
+                  "${stringResource(R.string.drawer_models_label)} (${localModels.size + importedModels.size + geminiModels.size})",
                 color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.titleMedium,
                 fontFamily = FontFamily.Monospace,
@@ -282,7 +278,7 @@ fun GlobalModelManager(
       )
     },
     floatingActionButton = {
-      // Context-sensitive FAB: import local model on LOCAL tab, add API model on BESPOKE tab.
+      // Context-sensitive FAB: import local model on LOCAL_CLU tab only.
       if (selectedTab == 0) {
         val cdImportModelFab = stringResource(R.string.cd_import_model_button)
         SmallFloatingActionButton(
@@ -290,15 +286,6 @@ fun GlobalModelManager(
           containerColor = MaterialTheme.colorScheme.secondaryContainer,
           contentColor = MaterialTheme.colorScheme.secondary,
           modifier = Modifier.semantics { contentDescription = cdImportModelFab },
-        ) {
-          Icon(Icons.Filled.Add, contentDescription = null)
-        }
-      } else if (selectedTab == 2) {
-        SmallFloatingActionButton(
-          onClick = { showAddApiModelDialog = true },
-          containerColor = MaterialTheme.colorScheme.secondaryContainer,
-          contentColor = MaterialTheme.colorScheme.secondary,
-          modifier = Modifier.semantics { contentDescription = "Add API Model" },
         ) {
           Icon(Icons.Filled.Add, contentDescription = null)
         }
@@ -355,7 +342,7 @@ fun GlobalModelManager(
             PaddingValues(top = 16.dp, bottom = innerPadding.calculateBottomPadding() + 80.dp),
         ) {
           when (selectedTab) {
-            // ── Tab 0: LOCAL ─────────────────────────────────────
+            // ── Tab 0: LOCAL_CLU ─────────────────────────────────
             0 -> {
               item(key = "promo") {
                 AnimatedVisibility(
@@ -368,6 +355,18 @@ fun GlobalModelManager(
                       showPromo = false
                       viewModel.dataStoreRepository.addViewedPromoId(promoId = promoId)
                     }
+                  )
+                }
+              }
+
+              if (localModels.isEmpty() && importedModels.isEmpty()) {
+                item(key = "local_empty") {
+                  Text(
+                    "No local models downloaded yet.\nTap a model to download it, or tap + to import a local file.",
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(32.dp),
                   )
                 }
               }
@@ -386,7 +385,7 @@ fun GlobalModelManager(
                 )
               }
 
-              // Imported models in the LOCAL tab.
+              // Imported models in the LOCAL_CLU tab.
               if (importedModels.isNotEmpty()) {
                 item(key = "imported_models_label") {
                   Text(
@@ -412,64 +411,8 @@ fun GlobalModelManager(
               }
             }
 
-            // ── Tab 1: CLOUD ─────────────────────────────────────
+            // ── Tab 1: CLOUD_CLU ─────────────────────────────────
             1 -> {
-              if (cloudModels.isEmpty()) {
-                item(key = "cloud_empty") {
-                  Text(
-                    "No cloud models available.\nCloud models (AICore / System Gemini) require a compatible Pixel device.",
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.padding(32.dp),
-                  )
-                }
-              }
-              items(cloudModels) { model ->
-                val expanded = modelItemExpandedStates.getOrDefault(model.name, true)
-                ModelItem(
-                  model = model,
-                  task = null,
-                  modelManagerViewModel = viewModel,
-                  onModelClicked = handleClickModel,
-                  onBenchmarkClicked = onBenchmarkClicked,
-                  expanded = expanded,
-                  showBenchmarkButton = false,
-                  onExpanded = { modelItemExpandedStates[model.name] = it },
-                )
-              }
-            }
-
-            // ── Tab 2: BESPOKE ───────────────────────────────────
-            2 -> {
-              if (bespokeModels.isEmpty()) {
-                item(key = "bespoke_empty") {
-                  Text(
-                    "No bespoke models added yet.\nTap + to add an API model (Google Gemini, OpenAI-compatible, etc.)",
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.padding(32.dp),
-                  )
-                }
-              }
-              items(bespokeModels) { model ->
-                val expanded = modelItemExpandedStates.getOrDefault(model.name, true)
-                ModelItem(
-                  model = model,
-                  task = null,
-                  modelManagerViewModel = viewModel,
-                  onModelClicked = handleClickModel,
-                  onBenchmarkClicked = onBenchmarkClicked,
-                  expanded = expanded,
-                  showBenchmarkButton = false,
-                  onExpanded = { modelItemExpandedStates[model.name] = it },
-                )
-              }
-            }
-
-            // ── Tab 3: GEMINI ────────────────────────────────────────
-            3 -> {
               item(key = "gemini_api_tab") {
                 GeminiApiTab(
                   viewModel = viewModel,
@@ -479,16 +422,16 @@ fun GlobalModelManager(
                       displayName = displayName,
                     )
                     scope.launch {
-                      snackbarHostState.showSnackbar("Gemini model '$displayName' added to chat")
+                      snackbarHostState.showSnackbar("Cloud model '$displayName' added to chat")
                     }
                   },
                 )
               }
               // Show already-added Gemini models so they can be selected / navigated to.
               if (geminiModels.isNotEmpty()) {
-                item(key = "gemini_models_label") {
+                item(key = "cloud_models_label") {
                   Text(
-                    "Added Gemini Models",
+                    "Active Cloud Models",
                     color = neonGreen,
                     style = MaterialTheme.typography.labelLarge,
                     fontFamily = FontFamily.Monospace,
@@ -697,24 +640,6 @@ fun GlobalModelManager(
         Button(onClick = { showUnsupportedWebModelDialog = false }) {
           Text(stringResource(R.string.ok))
         }
-      },
-    )
-  }
-
-  // Add API Model dialog (BESPOKE tab).
-  if (showAddApiModelDialog) {
-    AddApiModelDialog(
-      onDismiss = { showAddApiModelDialog = false },
-      onModelAdded = { label, baseUrl, apiKey, modelId, contextWindowSize ->
-        viewModel.addBespokeApiModel(
-          modelLabel = label,
-          baseUrl = baseUrl,
-          apiKey = apiKey,
-          modelId = modelId,
-          contextWindowSize = contextWindowSize,
-        )
-        showAddApiModelDialog = false
-        scope.launch { snackbarHostState.showSnackbar("API model '$label' added") }
       },
     )
   }

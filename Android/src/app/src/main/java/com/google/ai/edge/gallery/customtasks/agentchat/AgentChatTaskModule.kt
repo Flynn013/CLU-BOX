@@ -48,8 +48,8 @@ class AgentChatTask @Inject constructor() : CustomTask {
       iconVectorResourceId = R.drawable.agent,
       newFeature = true,
       models = mutableListOf(),
-      description = "Chat with on-device AI using CLU/BOX skills and BrainBox memory",
-      shortDescription = "CLU/BOX agentic chat interface",
+      description = "Chat with LOCAL_CLU (Gemma 4) or CLOUD_CLU (Gemini API) using agentic skills and BrainBox memory",
+      shortDescription = "CLU/BOX agentic chat — LOCAL_CLU & CLOUD_CLU",
       docUrl = "https://github.com/Flynn013/CLU-BOX",
       sourceCodeUrl =
         "https://github.com/Flynn013/CLU-BOX",

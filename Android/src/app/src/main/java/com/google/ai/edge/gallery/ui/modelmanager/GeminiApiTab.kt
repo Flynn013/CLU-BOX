@@ -128,7 +128,7 @@ fun GeminiApiTab(
         modifier = Modifier.size(20.dp),
       )
       Text(
-        "Gemini Cloud API",
+        "CLOUD_CLU — Gemini API",
         style = MaterialTheme.typography.titleMedium,
         fontFamily = FontFamily.Monospace,
         color = neonGreen,
@@ -136,7 +136,7 @@ fun GeminiApiTab(
     }
 
     Text(
-      "Enter your Google AI Studio API key to fetch and select Gemini models for use in chat.",
+      "Enter your Google AI Studio API key to fetch and add Gemini cloud models to the agentic chat.",
       style = MaterialTheme.typography.bodySmall,
       color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
     )
@@ -276,7 +276,7 @@ fun GeminiApiTab(
               modifier = Modifier.fillMaxWidth(),
             ) {
               Text(
-                "Add \"${selModel.displayName}\" to Chat",
+                "Add \"${selModel.displayName}\" to CLOUD_CLU",
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Bold,
               )
@@ -289,7 +289,7 @@ fun GeminiApiTab(
     // ── Already-added models summary ─────────────────────────────────────
     if (availableModels.isEmpty() && addedModelIds.isNotEmpty()) {
       Text(
-        "${addedModelIds.size} Gemini model(s) already added to chat. Fetch models to add more.",
+        "${addedModelIds.size} Gemini model(s) active in CLOUD_CLU. Fetch models to add more.",
         style = MaterialTheme.typography.bodySmall,
         fontFamily = FontFamily.Monospace,
         color = neonGreen.copy(alpha = 0.8f),
