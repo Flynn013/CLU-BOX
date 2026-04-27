@@ -85,7 +85,7 @@
   <target android:name="logo_group">
     <aapt:attr name="android:animation">
       <set xmlns:android="http://schemas.android.com/apk/res/android"
-          android:ordering="simultaneous">
+          android:ordering="together">
         <objectAnimator
             android:propertyName="scaleX"
             android:duration="700"
