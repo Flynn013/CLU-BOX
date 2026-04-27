@@ -47,9 +47,11 @@ private const val MAX_LOG_LINES = 500
  * on [Dispatchers.IO] and [stopStream] destroys it to save CPU when the
  * LOG_BOX view is hidden.
  *
- * @param tagFilters Optional list of `TAG:level` pairs (e.g. `"NativeShellBridge:V"`).
- *   When non-null, all other tags are silenced via `*:S` and only the listed
- *   tags are captured.  When null (default) the full logcat stream is shown.
+ * @param tagFilters Optional list of logcat tag+level specifiers in the form `"TAG:level"`
+ *   (e.g. `"NativeShellBridge:V"`, `"TermuxSessionBridge:D"`).  Each entry must follow the
+ *   `TAG:level` format recognised by `logcat`; malformed entries are passed as-is and logcat
+ *   will silently ignore them.  When non-null, all other tags are silenced via `*:S` and only
+ *   the listed tags are captured.  When null (default) the full logcat stream is shown.
  */
 class LogBoxManager(
   private val context: Context,

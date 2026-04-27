@@ -142,7 +142,8 @@ fun AddOrEditSkillBottomSheet(
 
   val curSkill = skill
   // View-only for built-in skills; editable for custom skills and new skill creation.
-  val isNewSkill = skillIndex >= uiState.skills.size
+  // A null skill (curSkill == null) means this is a new skill being created.
+  val isNewSkill = curSkill == null
   val viewingMode = !isNewSkill && (curSkill?.builtIn == true)
 
   var showDeleteSkillDialog by remember { mutableStateOf(false) }
