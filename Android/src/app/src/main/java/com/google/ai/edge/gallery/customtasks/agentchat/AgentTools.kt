@@ -18,8 +18,6 @@ package com.google.ai.edge.gallery.customtasks.agentchat
 
 import android.content.Context
 import android.util.Log
-import com.google.ai.edge.gallery.common.AskInfoAgentAction
-import com.google.ai.edge.gallery.common.CallJsAgentAction
 import com.google.ai.edge.gallery.common.SkillProgressAgentAction
 import com.google.ai.edge.gallery.data.TerminalSessionManager
 import com.google.ai.edge.gallery.data.brainbox.BrainBoxDao

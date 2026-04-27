@@ -48,6 +48,8 @@ class SkillRegistry(agentTools: AgentTools) {
       FileBoxWriteSkill(agentTools),
       FileBoxReadLinesSkill(agentTools),
       BrainBoxGrepSkill(agentTools),
+      TodoSkill(agentTools),
+      DelegateSkill(agentTools),
     )
 
     // Merge with metadata-only entries for all other @Tool methods.
