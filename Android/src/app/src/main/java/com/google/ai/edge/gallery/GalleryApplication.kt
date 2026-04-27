@@ -18,8 +18,6 @@ package com.google.ai.edge.gallery
 
 import android.app.Application
 import android.util.Log
-import com.chaquo.python.Python
-import com.chaquo.python.android.AndroidPlatform
 import com.google.ai.edge.gallery.data.DataStoreRepository
 import com.google.ai.edge.gallery.data.python.PythonBridge
 import com.google.ai.edge.gallery.ui.theme.ThemeSettings

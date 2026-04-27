@@ -58,8 +58,11 @@ object PythonBridge {
    * Calling this a second time is a no-op.
    */
   fun initialize(context: Context) {
-    if (ready) return
+    if (ready) return // volatile fast-path: avoids locking on every subsequent call
     synchronized(this) {
+      // Second check inside the lock — standard double-checked locking (DCL).
+      // `ready` is @Volatile so the write on the last line is visible to all threads
+      // immediately after we exit this block.
       if (ready) return
       if (!Python.isStarted()) {
         Python.start(AndroidPlatform(context.applicationContext))

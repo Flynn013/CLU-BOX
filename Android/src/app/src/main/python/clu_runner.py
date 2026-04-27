@@ -21,7 +21,16 @@ import traceback
 
 
 def run(code: str):
-    """Execute *code* and return (stdout, stderr) as plain strings."""
+    """Execute *code* and return (stdout, stderr) as plain strings.
+
+    The isolated namespace ``{}`` prevents scripts from polluting the
+    interpreter's global state between calls (e.g. clobbering imported
+    modules or global variables).  It does **not** restrict OS-level access:
+    scripts can still import the standard library, read/write the filesystem
+    inside the app's sandbox, or make network calls.  This is intentional —
+    CLU/BOX agents need those capabilities.  The Android OS sandbox (SELinux,
+    app UID isolation) provides the outer security boundary.
+    """
     old_out, old_err = sys.stdout, sys.stderr
     buf_out = io.StringIO()
     buf_err = io.StringIO()

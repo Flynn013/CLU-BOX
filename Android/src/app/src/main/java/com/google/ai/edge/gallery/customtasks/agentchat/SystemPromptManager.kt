@@ -38,42 +38,28 @@ package com.google.ai.edge.gallery.customtasks.agentchat
  */
 object SystemPromptManager {
 
+  // ── Shared routing guidance (injected into both preambles) ────────────────
+
+  private const val HYBRID_ROUTING_GUIDANCE = """
+EXECUTION ROUTING (Hybrid Engine):
+- PREFER `PYTHON_EXEC` for: arithmetic, math, file parsing, text formatting, data transformation, and local database queries. It runs natively on-device — fast and zero-overhead.
+- ONLY use `SHELL_EXEC` when you absolutely must use Linux-specific binaries: git, curl, node MCP servers, or POSIX system tools. Shell execution spawns a subprocess and is significantly slower."""
+
   // ── Engine-mode preambles ──────────────────────────────────────────────────
 
-  /**
-   * LOCAL mode: strict sequential execution.
-   *
-   * Injected when a LiteRT/on-device model is active.  The instruction
-   * addresses the most common failure mode of small models: hallucinating
-   * multiple simultaneous tool calls.  Only the **first** call in any
-   * turn will be executed; additional calls are silently dropped to protect
-   * the device context window.
-   */
-  private const val LOCAL_MODE_PREAMBLE = """[ENGINE: LOCAL — On-Device LiteRT/Gemma]
+  private val LOCAL_MODE_PREAMBLE = """[ENGINE: LOCAL — On-Device LiteRT/Gemma]
 STRICT RULE: Execute ONLY ONE tool call per turn.
 After each tool call, STOP and wait for the observation before deciding the next step.
 Do NOT batch or chain commands in a single response.
 Keep responses concise — omit preamble, filler, and unnecessary explanation.
-
-EXECUTION ROUTING (Hybrid Engine):
-- PREFER `PYTHON_EXEC` for: arithmetic, math, file parsing, text formatting, data transformation, and local database queries. It runs natively on-device — fast and zero-overhead.
-- ONLY use `SHELL_EXEC` when you absolutely must use Linux-specific binaries: git, curl, node MCP servers, or POSIX system tools. Shell execution spawns a subprocess and is significantly slower.
+$HYBRID_ROUTING_GUIDANCE
 """
 
-  /**
-   * CLOUD mode: high-capacity orchestrator.
-   *
-   * Injected when a Gemini Cloud API model is active.  Cloud models can
-   * handle wider context and longer structured reasoning chains.
-   */
-  private const val CLOUD_MODE_PREAMBLE = """[ENGINE: CLOUD — Gemini API High-Capacity]
+  private val CLOUD_MODE_PREAMBLE = """[ENGINE: CLOUD — Gemini API High-Capacity]
 You are a high-capacity orchestrator.
 You may plan broadly, chain reasoning steps, batch tool calls where logical, and produce detailed structured output.
 Best practices for code quality, documentation, and error handling apply.
-
-EXECUTION ROUTING (Hybrid Engine):
-- PREFER `PYTHON_EXEC` for: arithmetic, math, file parsing, text formatting, data transformation, and local database queries. It runs natively on-device — fast and zero-overhead.
-- ONLY use `SHELL_EXEC` when you absolutely must use Linux-specific binaries: git, curl, node MCP servers, or POSIX system tools.
+$HYBRID_ROUTING_GUIDANCE
 """
 
   // ── Public API ──────────────────────────────────────────────────────────────
