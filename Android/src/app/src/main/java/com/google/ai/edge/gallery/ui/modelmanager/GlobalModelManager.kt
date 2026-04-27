@@ -145,12 +145,6 @@ fun GlobalModelManager(
   var selectedTab by remember { mutableIntStateOf(0) }
   val tabTitles = listOf("LOCAL_CLU", "CLOUD_CLU")
 
-  val promoId = "gm4_banner"
-  var showPromo by remember { mutableStateOf(false) }
-  LaunchedEffect(Unit) {
-    showPromo = !viewModel.dataStoreRepository.hasViewedPromo(promoId = promoId)
-  }
-
   val filePickerLauncher: ActivityResultLauncher<Intent> =
     rememberLauncherForActivityResult(
       contract = ActivityResultContracts.StartActivityForResult()
@@ -344,21 +338,6 @@ fun GlobalModelManager(
           when (selectedTab) {
             // ── Tab 0: LOCAL_CLU ─────────────────────────────────
             0 -> {
-              item(key = "promo") {
-                AnimatedVisibility(
-                  visible = showPromo,
-                  enter = fadeIn() + slideInVertically(initialOffsetY = { -it / 2 }) + expandVertically(),
-                  exit = fadeOut() + shrinkVertically(),
-                ) {
-                  PromoBannerGm4(
-                    onDismiss = {
-                      showPromo = false
-                      viewModel.dataStoreRepository.addViewedPromoId(promoId = promoId)
-                    }
-                  )
-                }
-              }
-
               if (localModels.isEmpty() && importedModels.isEmpty()) {
                 item(key = "local_empty") {
                   Text(

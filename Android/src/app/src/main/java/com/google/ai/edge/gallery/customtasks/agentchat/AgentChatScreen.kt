@@ -17,7 +17,6 @@
 package com.google.ai.edge.gallery.customtasks.agentchat
 
 import android.content.Context
-import android.os.Bundle
 import android.util.Log
 import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
@@ -72,7 +71,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
-import com.google.ai.edge.gallery.GalleryEvent
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.common.AskInfoAgentAction
 import com.google.ai.edge.gallery.common.CallJsAgentAction
@@ -81,7 +79,6 @@ import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.RuntimeType
 import com.google.ai.edge.gallery.data.Task
-import com.google.ai.edge.gallery.firebaseAnalytics
 import com.google.ai.edge.gallery.ui.common.BaseGalleryWebViewClient
 import com.google.ai.edge.gallery.ui.common.GalleryWebView
 import com.google.ai.edge.gallery.ui.common.buildTrackableUrlAnnotatedString
