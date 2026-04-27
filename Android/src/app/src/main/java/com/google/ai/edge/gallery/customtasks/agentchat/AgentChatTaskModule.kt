@@ -77,7 +77,9 @@ class AgentChatTask @Inject constructor() : CustomTask {
     model: Model,
     onDone: (String) -> Unit,
   ) {
-    agentTools.skillManagerViewModel.loadSkills {
+    val smvm = agentTools.skillManagerViewModel
+      ?: run { onDone("SkillManagerViewModel not attached"); return }
+    smvm.loadSkills {
       try {
         // ── Agentic Context Router: set engine and select constraint ──────
         agentTools.engine = if (model.runtimeType == RuntimeType.GEMINI_CLOUD) {
@@ -104,8 +106,7 @@ class AgentChatTask @Inject constructor() : CustomTask {
           supportImage = true,
           supportAudio = true,
           onDone = onDone,
-          systemInstruction =
-            agentTools.skillManagerViewModel.getSystemPrompt(finalPrompt),
+          systemInstruction = smvm.getSystemPrompt(finalPrompt),
           tools = listOf(tool(agentTools)),
           // Constrained decoding is intentionally DISABLED for Agent Chat.
           // General-purpose Gemma models (E2B/E4B) were not fine-tuned with the
