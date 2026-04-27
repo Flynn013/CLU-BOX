@@ -56,14 +56,15 @@ class DelegateSkill(private val agentTools: AgentTools) : CluSkill {
     "Offloads a sub-task. " +
       "Set isBackground=false (default) to chain it in the current agentic loop. " +
       "Set isBackground=true to schedule it as a persistent SCDL_BOX WorkManager background task " +
-      "that runs even after this session ends."
+      "that runs even after this session ends. " +
+      "intervalMinutes sets the repeat interval (minimum 15, enforced by WorkManager)."
 
   override val jsonSchema: String =
     """{"name":"delegate","parameters":{
       "task":{"type":"string"},
       "isBackground":{"type":"boolean"},
       "isShellCommand":{"type":"boolean"},
-      "intervalMinutes":{"type":"number"}
+      "intervalMinutes":{"type":"number","description":"Repeat interval in minutes. Minimum 15 (enforced by WorkManager)."}
     },"required":["task"]}"""
 
   override val fewShotExample: String =

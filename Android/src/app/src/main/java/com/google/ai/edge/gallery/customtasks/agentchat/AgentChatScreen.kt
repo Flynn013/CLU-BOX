@@ -203,7 +203,7 @@ fun AgentChatScreen(
       // Ask the loop manager whether we should retry or halt.
       val shouldRetry = loopManager.onError(errorMessage ?: "Unknown inference error")
       if (shouldRetry) {
-        Log.w(TAG, "Inference error — retrying (attempt ${AgentLoopManager.MAX_RETRIES - 1} left)")
+        Log.w(TAG, "Inference error — retrying (${AgentLoopManager.MAX_RETRIES - loopManager.errorCount} attempt(s) left)")
         // Inject a SYSTEM re-evaluation message so the model understands what
         // went wrong and can try a different approach on the next turn.
         val model = modelManagerViewModel.uiState.value.selectedModel
