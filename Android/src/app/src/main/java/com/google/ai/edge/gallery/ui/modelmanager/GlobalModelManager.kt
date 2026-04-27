@@ -123,6 +123,8 @@ fun GlobalModelManager(
   val cloudModels = remember { mutableStateListOf<Model>() }
   val bespokeModels = remember { mutableStateListOf<Model>() }
   val importedModels = remember { mutableStateListOf<Model>() }
+  // Gemini Cloud models added by the user via the GEMINI tab (persisted in DataStore).
+  val geminiModels = remember { mutableStateListOf<Model>() }
   val taskCandidates = remember { mutableStateListOf<Task>() }
   var modelForTaskCandidate by remember { mutableStateOf<Model?>(null) }
   var showTaskSelectorBottomSheet by remember { mutableStateOf(false) }
@@ -140,9 +142,9 @@ fun GlobalModelManager(
   val snackbarHostState = remember { SnackbarHostState() }
   val modelItemExpandedStates = remember { mutableStateMapOf<String, Boolean>() }
 
-  // VENDING_MACHINE tab state: 0=LOCAL, 1=CLOUD, 2=BESPOKE
+  // VENDING_MACHINE tab state: 0=LOCAL, 1=CLOUD, 2=BESPOKE, 3=GEMINI
   var selectedTab by remember { mutableIntStateOf(0) }
-  val tabTitles = listOf("LOCAL", "CLOUD", "BESPOKE")
+  val tabTitles = listOf("LOCAL", "CLOUD", "BESPOKE", "GEMINI")
 
   val promoId = "gm4_banner"
   var showPromo by remember { mutableStateOf(false) }
@@ -186,15 +188,20 @@ fun GlobalModelManager(
 
     // Split into VENDING_MACHINE tabs:
     // LOCAL: LiteRT-LM models (on-device) + imported
-    // CLOUD: AICore / Gemini Cloud (system-level)
+    // CLOUD: AICore / system-level Gemini Cloud (from allowlist)
     // BESPOKE: Manually-added API models
+    // GEMINI: User-added Gemini Cloud API models (from DataStore via GEMINI tab)
+    val persistedGeminiIds = viewModel.dataStoreRepository.readGeminiCloudModels().map { it.modelId }.toSet()
     localModels.clear()
     cloudModels.clear()
     bespokeModels.clear()
     importedModels.clear()
+    geminiModels.clear()
     for (model in sortedModels) {
       when {
         model.runtimeType == RuntimeType.MANUAL_API -> bespokeModels.add(model)
+        model.runtimeType == RuntimeType.GEMINI_CLOUD && persistedGeminiIds.contains(model.name) ->
+          geminiModels.add(model)
         model.runtimeType == RuntimeType.AICORE ||
           model.runtimeType == RuntimeType.GEMINI_CLOUD -> cloudModels.add(model)
         model.imported -> importedModels.add(model)
@@ -447,6 +454,49 @@ fun GlobalModelManager(
                 }
               }
               items(bespokeModels) { model ->
+                val expanded = modelItemExpandedStates.getOrDefault(model.name, true)
+                ModelItem(
+                  model = model,
+                  task = null,
+                  modelManagerViewModel = viewModel,
+                  onModelClicked = handleClickModel,
+                  onBenchmarkClicked = onBenchmarkClicked,
+                  expanded = expanded,
+                  showBenchmarkButton = false,
+                  onExpanded = { modelItemExpandedStates[model.name] = it },
+                )
+              }
+            }
+
+            // ── Tab 3: GEMINI ────────────────────────────────────────
+            3 -> {
+              item(key = "gemini_api_tab") {
+                GeminiApiTab(
+                  viewModel = viewModel,
+                  onModelAdded = { modelId, displayName ->
+                    viewModel.addGeminiCloudModel(
+                      modelId = modelId,
+                      displayName = displayName,
+                    )
+                    scope.launch {
+                      snackbarHostState.showSnackbar("Gemini model '$displayName' added to chat")
+                    }
+                  },
+                )
+              }
+              // Show already-added Gemini models so they can be selected / navigated to.
+              if (geminiModels.isNotEmpty()) {
+                item(key = "gemini_models_label") {
+                  Text(
+                    "Added Gemini Models",
+                    color = neonGreen,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
+                  )
+                }
+              }
+              items(geminiModels) { model ->
                 val expanded = modelItemExpandedStates.getOrDefault(model.name, true)
                 ModelItem(
                   model = model,

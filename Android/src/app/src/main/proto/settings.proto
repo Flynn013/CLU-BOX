@@ -73,6 +73,16 @@ message BespokeModel {
   int32 context_window = 4;
 }
 
+// A user-selected Gemini Cloud API model (GEMINI tab in VENDING_MACHINE).
+message GeminiCloudModel {
+  // User-visible label (e.g. "Gemini 2.0 Flash").
+  string model_label = 1;
+  // The Gemini model ID (e.g. "gemini-2.0-flash").
+  string model_id = 2;
+  // Display name from the Gemini API (e.g. "Gemini 2.0 Flash").
+  string display_name = 3;
+}
+
 message Settings {
   Theme theme = 1;
   AccessTokenData access_token_data = 2;  // deprecated
@@ -99,6 +109,9 @@ message Settings {
 
   // Manually-added API models (BESPOKE tab in VENDING_MACHINE).
   repeated BespokeModel bespoke_model = 15;
+
+  // User-selected Gemini Cloud API models (GEMINI tab in VENDING_MACHINE).
+  repeated GeminiCloudModel gemini_cloud_model = 16;
 }
 
 message UserData {

@@ -21,6 +21,7 @@ import com.google.ai.edge.gallery.proto.AccessTokenData
 import com.google.ai.edge.gallery.proto.BenchmarkResult
 import com.google.ai.edge.gallery.proto.BenchmarkResults
 import com.google.ai.edge.gallery.proto.BespokeModel
+import com.google.ai.edge.gallery.proto.GeminiCloudModel
 import com.google.ai.edge.gallery.proto.Cutout
 import com.google.ai.edge.gallery.proto.CutoutCollection
 import com.google.ai.edge.gallery.proto.ImportedModel
@@ -69,6 +70,10 @@ interface DataStoreRepository {
   fun saveBespokeModels(bespokeModels: List<BespokeModel>)
 
   fun readBespokeModels(): List<BespokeModel>
+
+  fun saveGeminiCloudModels(models: List<GeminiCloudModel>)
+
+  fun readGeminiCloudModels(): List<GeminiCloudModel>
 
   fun isTosAccepted(): Boolean
 
@@ -251,6 +256,21 @@ class DefaultDataStoreRepository(
     return runBlocking {
       val settings = dataStore.data.first()
       settings.bespokeModelList
+    }
+  }
+
+  override fun saveGeminiCloudModels(models: List<GeminiCloudModel>) {
+    runBlocking {
+      dataStore.updateData { settings ->
+        settings.toBuilder().clearGeminiCloudModel().addAllGeminiCloudModel(models).build()
+      }
+    }
+  }
+
+  override fun readGeminiCloudModels(): List<GeminiCloudModel> {
+    return runBlocking {
+      val settings = dataStore.data.first()
+      settings.geminiCloudModelList
     }
   }
 

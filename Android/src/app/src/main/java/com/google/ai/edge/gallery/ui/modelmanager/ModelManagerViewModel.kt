@@ -53,6 +53,7 @@ import com.google.ai.edge.gallery.data.ValueType
 import com.google.ai.edge.gallery.data.createLlmChatConfigs
 import com.google.ai.edge.gallery.proto.AccessTokenData
 import com.google.ai.edge.gallery.proto.BespokeModel
+import com.google.ai.edge.gallery.proto.GeminiCloudModel
 import com.google.ai.edge.gallery.proto.ImportedModel
 import com.google.ai.edge.gallery.proto.Theme
 import com.google.ai.edge.gallery.runtime.aicore.AICoreModelHelper
@@ -819,6 +820,86 @@ constructor(
   }
 
   /**
+   * Creates a [Model] object for a Gemini Cloud API model.
+   *
+   * The model's [Model.name] is set to the Gemini model ID (e.g. "gemini-2.0-flash") so that
+   * [GeminiCloudModelHelper] can use it directly as the endpoint model identifier.
+   */
+  private fun createGeminiCloudModelObject(modelId: String, displayName: String): Model {
+    val model = Model(
+      name = modelId,
+      displayName = displayName.ifBlank { modelId },
+      info = "Gemini Cloud API model — $modelId\n\nRuns in the cloud via the Google Generative Language API. Requires a valid Gemini API key.",
+      url = "",
+      sizeInBytes = 0L,
+      downloadFileName = "_",
+      version = "_",
+      isLlm = true,
+      runtimeType = RuntimeType.GEMINI_CLOUD,
+      showBenchmarkButton = false,
+      showRunAgainButton = false,
+      configs = createLlmChatConfigs(
+        defaultMaxToken = 8192,
+        defaultMaxContextLength = 1_000_000,
+      ),
+    )
+    model.preProcess()
+    return model
+  }
+
+  /**
+   * Adds a Gemini Cloud API model to the LLM tasks and persists it in DataStore.
+   *
+   * The model's name is the Gemini model ID (e.g. "gemini-2.0-flash"), which is used by
+   * [GeminiCloudModelHelper] to construct the correct REST endpoint URL.
+   */
+  fun addGeminiCloudModel(modelId: String, displayName: String) {
+    Log.d(TAG, "Adding Gemini Cloud model: $modelId ($displayName)")
+
+    // Persist to DataStore.
+    val existing = dataStoreRepository.readGeminiCloudModels().toMutableList()
+    existing.removeAll { it.modelId == modelId }
+    existing.add(
+      GeminiCloudModel.newBuilder()
+        .setModelLabel(displayName.ifBlank { modelId })
+        .setModelId(modelId)
+        .setDisplayName(displayName)
+        .build()
+    )
+    dataStoreRepository.saveGeminiCloudModels(existing)
+
+    val model = createGeminiCloudModelObject(modelId = modelId, displayName = displayName)
+
+    // Add to LLM tasks (chat + agent chat + prompt lab).
+    val setOfTasks = mutableSetOf(
+      BuiltInTaskId.LLM_CHAT,
+      BuiltInTaskId.LLM_AGENT_CHAT,
+      BuiltInTaskId.LLM_PROMPT_LAB,
+    )
+    for (task in getTasksByIds(ids = setOfTasks)) {
+      val existingIndex = task.models.indexOfFirst { it.name == modelId }
+      if (existingIndex >= 0) task.models.removeAt(existingIndex)
+      task.models.add(model)
+      task.updateTrigger.value = System.currentTimeMillis()
+    }
+
+    // Update status maps — Gemini cloud models need no download.
+    val modelDownloadStatus = uiState.value.modelDownloadStatus.toMutableMap()
+    val modelInstances = uiState.value.modelInitializationStatus.toMutableMap()
+    modelDownloadStatus[model.name] = ModelDownloadStatus(status = ModelDownloadStatusType.SUCCEEDED)
+    modelInstances[model.name] = ModelInitializationStatus(status = ModelInitializationStatusType.NOT_INITIALIZED)
+
+    _uiState.update {
+      uiState.value.copy(
+        tasks = uiState.value.tasks.toList(),
+        modelDownloadStatus = modelDownloadStatus,
+        modelInitializationStatus = modelInstances,
+        modelImportingUpdateTrigger = System.currentTimeMillis(),
+      )
+    }
+  }
+
+  /**
    * Restores previously-persisted BESPOKE models from DataStore.
    * Called during ViewModel initialization so models survive app restarts.
    */
@@ -1404,6 +1485,22 @@ constructor(
       tasks.get(key = BuiltInTaskId.LLM_AGENT_CHAT)?.models?.add(model)
       modelDownloadStatus[model.name] =
         ModelDownloadStatus(status = ModelDownloadStatusType.SUCCEEDED)
+    }
+
+    // Load persisted GEMINI CLOUD models.
+    for (geminiModel in dataStoreRepository.readGeminiCloudModels()) {
+      Log.d(TAG, "Restoring Gemini cloud model: ${geminiModel.modelId}")
+      val model = createGeminiCloudModelObject(
+        modelId = geminiModel.modelId,
+        displayName = geminiModel.displayName.ifBlank { geminiModel.modelId },
+      )
+      tasks.get(key = BuiltInTaskId.LLM_CHAT)?.models?.add(model)
+      tasks.get(key = BuiltInTaskId.LLM_AGENT_CHAT)?.models?.add(model)
+      tasks.get(key = BuiltInTaskId.LLM_PROMPT_LAB)?.models?.add(model)
+      modelDownloadStatus[model.name] =
+        ModelDownloadStatus(status = ModelDownloadStatusType.SUCCEEDED)
+      modelInstances[model.name] =
+        ModelInitializationStatus(status = ModelInitializationStatusType.NOT_INITIALIZED)
     }
 
     val textInputHistory = dataStoreRepository.readTextInputHistory()

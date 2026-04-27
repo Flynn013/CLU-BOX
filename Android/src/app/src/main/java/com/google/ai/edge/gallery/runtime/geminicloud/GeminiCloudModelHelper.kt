@@ -49,7 +49,9 @@ import kotlinx.coroutines.launch
 
 private const val TAG = "GeminiCloudModelHelper"
 private const val API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
-private const val GEMINI_MODEL = "gemini-2.0-flash"
+// NOTE: The model ID is now taken from model.name at runtime (set when the model is created).
+// This constant is kept only as a fallback for legacy/test code paths.
+private const val GEMINI_MODEL_FALLBACK = "gemini-2.0-flash"
 private const val MAX_FUNCTION_CALL_ROUNDS = 10
 
 /**
@@ -355,7 +357,11 @@ object GeminiCloudModelHelper : LlmModelHelper {
     // set on the model.
     val apiKey = getApiKeyFromModel(model) ?: throw IllegalStateException("API key missing")
 
-    val url = URL("$API_BASE/$GEMINI_MODEL:generateContent?key=$apiKey")
+    // Use the model's name as the Gemini model ID (e.g. "gemini-2.0-flash").
+    // Fall back to the legacy constant only if the name looks like a path or is empty.
+    val geminiModelId = model.name.takeIf { it.isNotBlank() && !it.contains('/') }
+      ?: GEMINI_MODEL_FALLBACK
+    val url = URL("$API_BASE/$geminiModelId:generateContent?key=$apiKey")
     val requestBody = buildRequestBody(instance)
 
     val conn = url.openConnection() as HttpURLConnection
