@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import java.util.concurrent.ConcurrentHashMap
 
 private const val TAG = "McpConnectionManager"
 
@@ -48,7 +49,7 @@ class McpConnectionManager(private val context: Context) {
   private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
   /** Active (bridge, client) pairs, keyed by server name. */
-  private val activeConnections = mutableMapOf<String, Pair<NativeMcpBridge, McpClient>>()
+  private val activeConnections = ConcurrentHashMap<String, Pair<NativeMcpBridge, McpClient>>()
 
   private val _statuses = MutableStateFlow<List<McpConnectionStatus>>(emptyList())
 

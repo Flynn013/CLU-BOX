@@ -119,9 +119,12 @@ class NativeMcpBridge {
 
   /** Terminates the subprocess and releases all I/O resources. */
   fun stop() {
+    try { outputStream?.flush() } catch (_: Exception) {}
+    try { outputStream?.close() } catch (_: Exception) {}
+    try { reader?.close() } catch (_: Exception) {}
     reader = null
     outputStream = null
-    process?.destroy()
+    process?.destroyForcibly()
     process = null
     Log.d(TAG, "MCP server process stopped")
   }

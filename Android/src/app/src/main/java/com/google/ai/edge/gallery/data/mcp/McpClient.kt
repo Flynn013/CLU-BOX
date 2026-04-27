@@ -18,9 +18,12 @@ package com.google.ai.edge.gallery.data.mcp
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.atomic.AtomicInteger
 
 private const val TAG = "McpClient"
 private const val READ_TIMEOUT_MS = 15_000L
@@ -41,9 +44,9 @@ private const val READ_TIMEOUT_MS = 15_000L
  */
 class McpClient(private val bridge: NativeMcpBridge) {
 
-  private var nextId = 1
+  private val idCounter = AtomicInteger(1)
 
-  private fun nextId(): Int = nextId++
+  private fun nextId(): Int = idCounter.getAndIncrement()
 
   // ── Core JSON-RPC transport ────────────────────────────────────────────────
 
@@ -59,23 +62,29 @@ class McpClient(private val bridge: NativeMcpBridge) {
       val request = JsonRpcRequest(id, method, params)
       bridge.sendLine(request.toJson())
 
-      val deadline = System.currentTimeMillis() + READ_TIMEOUT_MS
-      while (System.currentTimeMillis() < deadline) {
-        val line = bridge.readLine() ?: break
-        if (line.isBlank()) continue
-        val response = JsonRpcResponse.fromJson(line) ?: continue
-        if (response.id == id) {
-          if (response.error != null) {
-            Log.e(TAG, "$method error: ${response.error}")
-            return@withContext null
+      // withTimeoutOrNull + runInterruptible ensures the blocking readLine() is interrupted
+      // when the timeout expires, preventing the coroutine from hanging indefinitely.
+      withTimeoutOrNull(READ_TIMEOUT_MS) {
+        var result: JSONObject? = null
+        while (result == null) {
+          val line = runInterruptible { bridge.readLine() } ?: break
+          if (line.isBlank()) continue
+          val response = JsonRpcResponse.fromJson(line) ?: continue
+          if (response.id == id) {
+            if (response.error != null) {
+              Log.e(TAG, "$method error: ${response.error}")
+              break
+            }
+            result = response.result
+          } else {
+            // Notification or out-of-order message — log and skip.
+            Log.d(TAG, "Skipping unexpected message: ${line.take(120)}")
           }
-          return@withContext response.result
         }
-        // Notification or out-of-order message — log and skip.
-        Log.d(TAG, "Skipping unexpected message: ${line.take(120)}")
+        result
+      }.also { result ->
+        if (result == null) Log.e(TAG, "$method timed out or failed after ${READ_TIMEOUT_MS}ms")
       }
-      Log.e(TAG, "$method timed out after ${READ_TIMEOUT_MS}ms")
-      null
     }
 
   // ── MCP protocol methods ───────────────────────────────────────────────────

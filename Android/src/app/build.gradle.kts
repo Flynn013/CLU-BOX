@@ -21,6 +21,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
     id("com.google.dagger.hilt.android")
     id("com.google.devtools.ksp")
+    id("com.google.protobuf")
     // FIREBASE PURGED: google-services plugin removed
 }
 
@@ -97,6 +98,7 @@ dependencies {
 
     implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.3")
+    implementation(libs.androidx.compose.navigation)
     implementation("androidx.navigation:navigation-runtime-ktx:2.7.7")
     
     implementation("androidx.camera:camera-core:1.3.4")
@@ -124,6 +126,7 @@ dependencies {
     
     implementation(libs.hilt.android)
     ksp(libs.hilt.android.compiler)
+    implementation(libs.hilt.navigation.compose)
     
     // FIREBASE PURGED: BOM, Analytics, Crashlytics, and Messaging dependencies removed
     
@@ -136,4 +139,19 @@ dependencies {
     androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
+}
+
+protobuf {
+    protoc {
+        artifact = "com.google.protobuf:protoc:4.26.1"
+    }
+    generateProtoTasks {
+        all().forEach { task ->
+            task.builtins {
+                create("java") {
+                    option("lite")
+                }
+            }
+        }
+    }
 }

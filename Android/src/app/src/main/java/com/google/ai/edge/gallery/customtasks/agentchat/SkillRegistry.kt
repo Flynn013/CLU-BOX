@@ -19,6 +19,7 @@ package com.google.ai.edge.gallery.customtasks.agentchat
 import android.util.Log
 import org.json.JSONException
 import org.json.JSONObject
+import java.util.concurrent.ConcurrentHashMap
 
 private const val TAG = "SkillRegistry"
 
@@ -40,7 +41,7 @@ private const val TAG = "SkillRegistry"
 class SkillRegistry(agentTools: AgentTools) {
 
   /** All registered skills, keyed by [CluSkill.name] for O(1) lookup. */
-  private val skills: LinkedHashMap<String, CluSkill> = LinkedHashMap()
+  private val skills: ConcurrentHashMap<String, CluSkill> = ConcurrentHashMap()
 
   init {
     // Register the explicitly ported skills with full CluSkill implementations.
