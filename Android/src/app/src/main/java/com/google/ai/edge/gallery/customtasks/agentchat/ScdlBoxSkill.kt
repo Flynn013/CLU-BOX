@@ -146,7 +146,7 @@ class ScdlBoxSkill(private val agentTools: AgentTools) : CluSkill {
         val toggled = existing.copy(isEnabled = newEnabled)
         manager.onTaskUpdated(toggled, wasEnabled = existing.isEnabled)
         val state = if (newEnabled) "enabled" else "disabled"
-        "[SCDL_BOX] Task '${ existing.title}' is now $state"
+        "[SCDL_BOX] Task '${existing.title}' is now $state"
       }
 
       else -> "[Error: Unknown action '$action'. Valid actions: CREATE, UPDATE, DELETE, TOGGLE]"
