@@ -73,7 +73,10 @@ android {
         buildConfig = true
     }
     
-    packaging {
+    // Note: 'packaging {}' is unavailable when Chaquopy is applied (it wraps the Android
+    // extension with BaseExtension which exposes the legacy 'packagingOptions' alias).
+    @Suppress("Deprecation")
+    packagingOptions {
         jniLibs {
             // Force physical extraction of .so files from the APK so that
             // ProcessBuilder can execute libproot.so / libbash.so directly.
@@ -92,6 +95,7 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.splashscreen)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.android.lifecycle.runtime.compose)
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
@@ -99,23 +103,24 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
 
-    implementation("androidx.compose.material:material-icons-core")
+    // material-icons-extended includes all core icons — no need to declare core separately.
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.3")
     implementation(libs.androidx.compose.navigation)
-    implementation("androidx.navigation:navigation-runtime-ktx:2.7.7")
+    // navigation-runtime-ktx is a transitive dependency of compose.navigation; explicit entry removed.
     
-    implementation("androidx.camera:camera-core:1.3.4")
-    implementation("androidx.camera:camera-camera2:1.3.4")
-    implementation("androidx.camera:camera-lifecycle:1.3.4")
-    implementation("androidx.camera:camera-view:1.3.4")
+    // CameraX — use catalog-managed versions (1.4.2) rather than hardcoded 1.3.4
+    implementation(libs.camerax.core)
+    implementation(libs.camerax.camera2)
+    implementation(libs.camerax.lifecycle)
+    implementation(libs.camerax.view)
     
-    implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.0")
-    implementation("com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1")
+    // ML Kit on-device prompt API (used by AICoreModelHelper)
+    implementation(libs.mlkit.genai.prompt)
     
     implementation("com.google.ai.edge.litert:litert:1.0.1")
     implementation(libs.litertlm)
-    implementation("com.google.code.gson:gson:2.10.1")
+    implementation(libs.com.google.code.gson)
     
     implementation(libs.room.runtime)
     ksp(libs.room.compiler)
@@ -142,10 +147,16 @@ dependencies {
     // Termux terminal-emulator + terminal-view (JitPack)
     implementation("com.github.termux.termux-app:terminal-emulator:v0.118.1")
     implementation("com.github.termux.termux-app:terminal-view:v0.118.1")
+
+    // Moshi — JSON serialisation used by Types.kt and IntentHandler.kt
+    implementation(libs.moshi.kotlin)
+    ksp(libs.moshi.kotlin.codegen)
+
+    // Halilibo RichText / CommonMark — Markdown rendering used by MarkdownText.kt
+    implementation(libs.commonmark)
+    implementation(libs.richtext)
     
     // FIREBASE PURGED: BOM, Analytics, Crashlytics, and Messaging dependencies removed
-    
-    implementation("com.github.jeziellago:compose-markdown:0.5.2")
     
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

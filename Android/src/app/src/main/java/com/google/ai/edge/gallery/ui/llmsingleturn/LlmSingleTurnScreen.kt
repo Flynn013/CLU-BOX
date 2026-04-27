@@ -18,10 +18,6 @@ package com.google.ai.edge.gallery.ui.llmsingleturn
 
 import androidx.hilt.navigation.compose.hiltViewModel
 
-// import androidx.compose.ui.tooling.preview.Preview
-// import com.google.ai.edge.gallery.ui.preview.PreviewLlmSingleTurnViewModel
-// import com.google.ai.edge.gallery.ui.preview.PreviewModelManagerViewModel
-// import com.google.ai.edge.gallery.ui.theme.GalleryTheme
 import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility

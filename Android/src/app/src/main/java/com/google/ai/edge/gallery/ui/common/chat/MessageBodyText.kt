@@ -16,9 +16,6 @@
 
 package com.google.ai.edge.gallery.ui.common.chat
 
-// import com.google.ai.edge.gallery.ui.theme.GalleryTheme
-// import androidx.compose.ui.tooling.preview.Preview
-
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.MaterialTheme

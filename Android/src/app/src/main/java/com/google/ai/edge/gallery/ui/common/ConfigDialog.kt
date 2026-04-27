@@ -16,9 +16,6 @@
 
 package com.google.ai.edge.gallery.ui.common
 
-// import androidx.compose.ui.tooling.preview.Preview
-// import com.google.ai.edge.gallery.ui.preview.MODEL_TEST1
-// import com.google.ai.edge.gallery.ui.theme.GalleryTheme
 import android.util.Log
 import androidx.annotation.StringRes
 import androidx.compose.foundation.border

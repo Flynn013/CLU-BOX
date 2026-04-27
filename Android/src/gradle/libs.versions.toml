@@ -23,8 +23,6 @@ protobufJavaLite = "4.26.1"
 litertlm = "0.10.0"
 commonmark = "1.0.0-alpha02"
 richtext = "1.0.0-alpha02"
-playServicesTfliteJava = "16.4.0"
-playServicesTfliteGpu= "16.4.0"
 cameraX = "1.4.2"
 netOpenidAppauth = "0.11.1"
 splashscreen = "1.2.0-beta01"
@@ -32,15 +30,12 @@ hilt = "2.57.2"
 hiltNavigation = "1.3.0"
 ossLicenses = "0.10.6"
 playServicesOssLicenses = "17.1.0"
-googleService = "4.4.3"
-firebaseBom = "33.16.0"
 exifinterface = "1.4.1"
 securityCrypto = "1.1.0"
 kotlinReflect = "2.2.0"
 moshi = "1.15.2"
 mlkit-genai-prompt = "1.0.0-beta2"  # Ref: https://developers.google.com/ml-kit/genai/prompt/android/get-started#configure-project
 room = "2.7.0"
-mediapipeText = "0.10.21"
 ksp = "2.2.0-2.0.2"
 
 [libraries]
@@ -49,6 +44,7 @@ junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycleRuntimeKtx" }
+android-lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "lifecycleRuntimeKtx" }
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
 androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
 androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
@@ -71,9 +67,6 @@ androidx-webkit = { group = "androidx.webkit", name = "webkit", version.ref = "w
 litertlm = { group = "com.google.ai.edge.litertlm", name = "litertlm-android", version.ref = "litertlm" }
 commonmark = { group = "com.halilibo.compose-richtext", name = "richtext-commonmark", version.ref = "commonmark" }
 richtext = { group = "com.halilibo.compose-richtext", name = "richtext-ui-material3", version.ref = "richtext" }
-tflite = { group = "com.google.android.gms", name = "play-services-tflite-java", version.ref = "playServicesTfliteJava" }
-tflite-gpu = { group = "com.google.android.gms", name = "play-services-tflite-gpu", version.ref = "playServicesTfliteGpu" }
-tflite-support = { group = "com.google.android.gms", name = "play-services-tflite-support", version.ref = "playServicesTfliteJava" }
 camerax-core = { group = "androidx.camera", name = "camera-core", version.ref = "cameraX"}
 camerax-camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "cameraX"}
 camerax-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "cameraX"}
@@ -86,11 +79,6 @@ hilt-navigation-compose = { module = "androidx.hilt:hilt-navigation-compose", ve
 hilt-android-testing = { module = "com.google.dagger:hilt-android-testing", version.ref = "hilt" }
 hilt-android-compiler = { module = "com.google.dagger:hilt-android-compiler", version.ref = "hilt" }
 play-services-oss-licenses = { module = "com.google.android.gms:play-services-oss-licenses", version.ref = "playServicesOssLicenses"}
-firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebaseBom" }
-# When using the Firebase BoM, you don't specify versions in Firebase
-# library dependencies.
-firebase-analytics = { group = "com.google.firebase", name = "firebase-analytics" }
-firebase-messaging = { group = "com.google.firebase", name = "firebase-messaging" }
 androidx-exifinterface = { group = "androidx.exifinterface", name = "exifinterface", version.ref = "exifinterface" }
 moshi-kotlin = { group = "com.squareup.moshi", name = "moshi-kotlin", version.ref = "moshi" }
 moshi-kotlin-codegen = { group = "com.squareup.moshi", name = "moshi-kotlin-codegen", version.ref = "moshi" }
@@ -98,7 +86,6 @@ mlkit-genai-prompt = { group = "com.google.mlkit", name = "genai-prompt", versio
 room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
 room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
 room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
-mediapipe-tasks-text = { group = "com.google.mediapipe", name = "tasks-text", version.ref = "mediapipeText" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
@@ -108,5 +95,4 @@ kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", versi
 protobuf = {id = "com.google.protobuf", version.ref = "protobuf"}
 hilt-application = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
 oss-licenses = {id = "com.google.android.gms.oss-licenses-plugin", version.ref = "ossLicenses"}
-google-services = { id = "com.google.gms.google-services", version.ref = "googleService" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
