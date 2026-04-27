@@ -72,7 +72,8 @@ class AgentLoopManager {
   }
 
   /** Running count of consecutive errors since the last successful turn. */
-  private var errorCount = 0
+  var errorCount: Int = 0
+    private set
 
   // ── Error tracking ───────────────────────────────────────────────────────
 
