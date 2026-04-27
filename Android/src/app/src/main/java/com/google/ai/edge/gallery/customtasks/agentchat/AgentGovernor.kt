@@ -6,7 +6,11 @@ package com.google.ai.edge.gallery.customtasks.agentchat
  * @param maxLoops Maximum consecutive autonomous iterations before the circuit
  *                 breaker halts the loop to protect device stability.
  */
-data class AgentGovernor(val maxLoops: Int = 25) {
+data class AgentGovernor(
+  // 25 iterations balances giving the model enough attempts to complete multi-step tasks
+  // while preventing runaway loops that could drain battery or exhaust context on device.
+  val maxLoops: Int = 25,
+) {
   companion object {
     /**
      * Additional system constraint injected when running on a LOCAL engine.

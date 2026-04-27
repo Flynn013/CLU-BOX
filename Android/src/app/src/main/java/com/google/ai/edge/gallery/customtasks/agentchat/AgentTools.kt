@@ -32,6 +32,8 @@ import java.util.Locale
 import kotlinx.coroutines.channels.Channel
 
 private const val TAG = "AgentTools"
+// 3 000 chars keeps tool output well within the ~4 096-token local context window.
+// Larger payloads risk KV-cache bloat and native SIGSEGV on device.
 private const val MAX_TOOL_OUTPUT_CHARS = 3000
 
 /**

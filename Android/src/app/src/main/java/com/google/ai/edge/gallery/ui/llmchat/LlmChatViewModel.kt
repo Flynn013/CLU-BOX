@@ -47,6 +47,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private const val TAG = "AGLlmChatViewModel"
+/** Maximum label length (chars) stored in BrainBox for a forged neuron. */
+private const val NEURON_LABEL_MAX_CHARS = 80
 
 @HiltViewModel
 class LlmChatViewModel
@@ -286,7 +288,7 @@ constructor(
       try {
         val neuron = NeuronEntity(
           id = UUID.randomUUID().toString(),
-          label = content.take(80).replace("\n", " "),
+          label = content.take(NEURON_LABEL_MAX_CHARS).replace("\n", " "),
           type = "Session_Log",
           content = content,
         )
