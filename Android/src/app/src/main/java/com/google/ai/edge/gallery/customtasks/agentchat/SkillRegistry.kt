@@ -46,6 +46,7 @@ class SkillRegistry(agentTools: AgentTools) {
     // Register the explicitly ported skills with full CluSkill implementations.
     val ported: List<CluSkill> = listOf(
       ShellExecuteSkill(agentTools),
+      VirtualCommandSkill(agentTools),
       FileBoxWriteSkill(agentTools),
       FileBoxReadLinesSkill(agentTools),
       BrainBoxGrepSkill(agentTools),

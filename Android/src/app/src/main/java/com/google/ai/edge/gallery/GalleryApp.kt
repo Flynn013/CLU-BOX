@@ -299,6 +299,7 @@ fun GalleryApp(
                   )
                   OsModule.SYS_SETTINGS -> SystemSettingsScreen(
                     modelManagerViewModel = modelManagerViewModel,
+                    skillManagerViewModel = skillManagerViewModel,
                   )
                   else -> {} // all modules covered above
                 }

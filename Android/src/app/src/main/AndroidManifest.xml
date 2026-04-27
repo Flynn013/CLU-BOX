@@ -16,6 +16,7 @@
     <uses-permission android:name="com.google.android.apps.aicore.service.BIND_SERVICE" />
 
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
 
     <uses-feature
         android:name="android.hardware.camera"
@@ -89,6 +90,18 @@
             android:name=".CluEngineService"
             android:foregroundServiceType="dataSync"
             android:exported="false" />
+
+        <!--
+          Receives async command results from the external Termux app.
+          Must be exported so the system can deliver the PendingIntent callback.
+        -->
+        <receiver
+            android:name=".customtasks.agentchat.TermuxOutputReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.ai.edge.gallery.TERMUX_COMMAND_RESULT" />
+            </intent-filter>
+        </receiver>
 
         <uses-native-library android:name="libvndksupport.so" android:required="false"/>
         <uses-native-library android:name="libOpenCL.so" android:required="false"/>

@@ -130,6 +130,7 @@ private val INFERENCE_FILTERS = listOf(
 @Composable
 fun SystemSettingsScreen(
   modelManagerViewModel: ModelManagerViewModel,
+  skillManagerViewModel: com.google.ai.edge.gallery.customtasks.agentchat.SkillManagerViewModel,
 ) {
   val context = LocalContext.current
   var selectedTab by remember { mutableIntStateOf(0) }
@@ -190,7 +191,10 @@ fun SystemSettingsScreen(
 
       // ── Tab content ────────────────────────────────────────────────
       when (selectedTab) {
-        0 -> ConfigTab(modelManagerViewModel = modelManagerViewModel)
+        0 -> ConfigTab(
+          modelManagerViewModel = modelManagerViewModel,
+          skillManagerViewModel = skillManagerViewModel,
+        )
         1 -> LogTab(
           logBoxManager = terminalLogManager,
           label = "TERMINAL",
@@ -217,7 +221,10 @@ fun SystemSettingsScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ConfigTab(modelManagerViewModel: ModelManagerViewModel) {
+private fun ConfigTab(
+  modelManagerViewModel: ModelManagerViewModel,
+  skillManagerViewModel: com.google.ai.edge.gallery.customtasks.agentchat.SkillManagerViewModel,
+) {
   val dateFormatter = remember {
     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
       .withZone(ZoneId.systemDefault())
@@ -234,6 +241,14 @@ private fun ConfigTab(modelManagerViewModel: ModelManagerViewModel) {
   var bgHex by remember { mutableStateOf(colorToHex(ThemeSettings.customBackgroundColor.value)) }
   var textHex by remember { mutableStateOf(colorToHex(ThemeSettings.customTextColor.value)) }
   var accentHex by remember { mutableStateOf(colorToHex(ThemeSettings.customAccentColor.value)) }
+
+  // Derive initial shell engine from current skill states.
+  val skillUiState by skillManagerViewModel.uiState.collectAsState()
+  val isVirtualEnabled = remember(skillUiState) {
+    skillUiState.skills.find { it.skill.name == "virtualCommand" }?.skill?.selected ?: false
+  }
+  // 0 = LOCAL COMMAND, 1 = VIRTUAL COMMAND
+  var shellEngineIndex by remember(isVirtualEnabled) { mutableIntStateOf(if (isVirtualEnabled) 1 else 0) }
 
   val context = LocalContext.current
   val focusManager = LocalFocusManager.current
@@ -283,6 +298,48 @@ private fun ConfigTab(modelManagerViewModel: ModelManagerViewModel) {
             },
             checked = theme == selectedTheme,
             label = { Text(themeLabel(theme)) },
+          )
+        }
+      }
+    }
+
+    // ── Shell Engine Toggle ─────────────────────────────────────────
+    // Switches between LOCAL COMMAND (native PRoot sandbox) and VIRTUAL COMMAND
+    // (external Termux IPC). Activating one automatically disables the other in
+    // the SkillRegistry so the LLM only sees the active engine's skill.
+    Column(
+      modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {},
+      verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+      Text(
+        "Shell Engine",
+        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium),
+      )
+      Text(
+        "LOCAL — native PRoot sandbox  ·  VIRTUAL — external Termux IPC",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
+      MultiChoiceSegmentedButtonRow {
+        listOf("LOCAL", "VIRTUAL").forEachIndexed { index, label ->
+          SegmentedButton(
+            shape = SegmentedButtonDefaults.itemShape(index = index, count = 2),
+            onCheckedChange = {
+              shellEngineIndex = index
+              // Activate local → enable shellExecute, disable virtualCommand.
+              // Activate virtual → enable virtualCommand, disable shellExecute.
+              val enableLocal = index == 0
+              skillManagerViewModel.setSkillEnabled(
+                skillName = "shellExecute",
+                enabled = enableLocal,
+              )
+              skillManagerViewModel.setSkillEnabled(
+                skillName = "virtualCommand",
+                enabled = !enableLocal,
+              )
+            },
+            checked = shellEngineIndex == index,
+            label = { Text(label, fontFamily = FontFamily.Monospace) },
           )
         }
       }
