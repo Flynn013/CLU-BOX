@@ -25,6 +25,7 @@ import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import com.google.ai.edge.gallery.ui.theme.neonGreen
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -136,7 +137,11 @@ fun CursorTrackingTextField(
             enabled = true,
             isError = false,
             interactionSource = interactionSource,
-            colors = OutlinedTextFieldDefaults.colors(),
+            colors = OutlinedTextFieldDefaults.colors(
+              focusedBorderColor = neonGreen,
+              unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+              focusedLabelColor = neonGreen,
+            ),
             shape = OutlinedTextFieldDefaults.shape,
             focusedBorderThickness = 2.dp,
             unfocusedBorderThickness = 1.dp,

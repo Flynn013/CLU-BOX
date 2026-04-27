@@ -80,12 +80,8 @@ import com.google.ai.edge.gallery.customtasks.agentchat.AgentTools
 import com.google.ai.edge.gallery.customtasks.agentchat.SkillManagerBottomSheet
 import com.google.ai.edge.gallery.customtasks.agentchat.SkillManagerViewModel
 import com.google.ai.edge.gallery.data.BuiltInTaskId
-import com.google.ai.edge.gallery.data.ConfigKeys
-import com.google.ai.edge.gallery.data.EMPTY_MODEL
 import com.google.ai.edge.gallery.data.FileBoxManager
-import com.google.ai.edge.gallery.data.convertValueToTargetType
 import com.google.ai.edge.gallery.data.brainbox.GraphDatabase
-import com.google.ai.edge.gallery.ui.common.ConfigDialog
 import com.google.ai.edge.gallery.ui.modelmanager.GlobalModelManager
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import com.google.ai.edge.gallery.ui.navigation.GALLERY_ROUTE_BENCHMARK
@@ -97,6 +93,7 @@ import com.google.ai.edge.gallery.ui.osmodules.BrainBoxModuleScreen
 import com.google.ai.edge.gallery.ui.osmodules.DiffBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.FileBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.MstrCtrlScreen
+import com.google.ai.edge.gallery.ui.osmodules.SystemSettingsScreen
 import com.google.ai.edge.gallery.ui.theme.absoluteBlack
 import com.google.ai.edge.gallery.ui.theme.neonGreen
 import com.google.ai.edge.gallery.ui.theme.terminalLightGrey
@@ -124,8 +121,6 @@ fun GalleryApp(
   val drawerState = rememberDrawerState(DrawerValue.Closed)
   val scope = rememberCoroutineScope()
   var activeModule by remember { mutableStateOf(OsModule.CHAT_BOX) }
-  // True when the SYS_SETTINGS drawer item is tapped — shows the ConfigDialog overlay.
-  var showSysSettingsDialog by remember { mutableStateOf(false) }
   // True when the SKILL_BOX drawer item is tapped — shows the SkillManagerBottomSheet overlay.
   var showSkillBoxSheet by remember { mutableStateOf(false) }
   val db = remember { GraphDatabase.getInstance(context) }
@@ -198,10 +193,7 @@ fun GalleryApp(
               module = module,
               selected = activeModule == module,
               onClick = {
-                if (module == OsModule.SYS_SETTINGS) {
-                  // Show the Configurations dialog over the current module.
-                  showSysSettingsDialog = true
-                } else if (module == OsModule.SKILL_BOX) {
+                if (module == OsModule.SKILL_BOX) {
                   // Show the Skill Manager bottom sheet over the current module.
                   showSkillBoxSheet = true
                 } else {
@@ -305,6 +297,9 @@ fun GalleryApp(
                     sessionManager = terminalSessionManager,
                     sharedShellManager = sharedShellManager,
                   )
+                  OsModule.SYS_SETTINGS -> SystemSettingsScreen(
+                    modelManagerViewModel = modelManagerViewModel,
+                  )
                   else -> {} // all modules covered above
                 }
               }
@@ -338,58 +333,6 @@ fun GalleryApp(
           lineHeight = 14.sp,
           textAlign = TextAlign.Center,
         )
-      }
-
-      // ── SYS_SETTINGS configuration dialog ──────────────────────
-      // Shown as an overlay when the user taps the SETTINGS drawer item.
-      if (showSysSettingsDialog) {
-        val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
-        val selectedModel = modelManagerUiState.selectedModel
-        if (selectedModel != EMPTY_MODEL && selectedModel.configs.isNotEmpty()) {
-          val task = modelManagerViewModel.getTaskById(BuiltInTaskId.LLM_AGENT_CHAT)
-          val modelConfigs = selectedModel.configs.toMutableList()
-          // Remove task-specific configs that don't apply in the global settings context.
-          modelConfigs.removeIf { it.key == ConfigKeys.RESET_CONVERSATION_TURN_COUNT }
-          if (task?.allowThinking() != true) {
-            modelConfigs.removeIf { it.key == ConfigKeys.ENABLE_THINKING }
-          }
-          ConfigDialog(
-            title = "Configurations",
-            configs = modelConfigs,
-            initialValues = selectedModel.configValues,
-            showSystemPromptEditorTab = true,
-            onDismissed = { showSysSettingsDialog = false },
-            onOk = { curConfigValues, _, _ ->
-              showSysSettingsDialog = false
-              // Persist updated config values to the model.
-              val oldConfigValues = selectedModel.configValues
-              var changed = false
-              for (config in modelConfigs) {
-                val key = config.key.label
-                val oldValue = convertValueToTargetType(
-                  value = oldConfigValues.getValue(key),
-                  valueType = config.valueType,
-                )
-                val newValue = convertValueToTargetType(
-                  value = curConfigValues.getValue(key),
-                  valueType = config.valueType,
-                )
-                if (oldValue != newValue) {
-                  changed = true
-                  break
-                }
-              }
-              if (changed) {
-                selectedModel.prevConfigValues = oldConfigValues
-                selectedModel.configValues = curConfigValues
-                modelManagerViewModel.updateConfigValuesUpdateTrigger()
-              }
-            },
-          )
-        } else {
-          // No model selected or no configs — dismiss immediately.
-          LaunchedEffect(Unit) { showSysSettingsDialog = false }
-        }
       }
 
       // ── SKILL_BOX skill manager bottom sheet ───────────────────

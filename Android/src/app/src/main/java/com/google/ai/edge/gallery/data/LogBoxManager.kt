@@ -46,8 +46,15 @@ private const val MAX_LOG_LINES = 500
  * The manager is lifecycle-aware: [startStream] spawns a `logcat` process
  * on [Dispatchers.IO] and [stopStream] destroys it to save CPU when the
  * LOG_BOX view is hidden.
+ *
+ * @param tagFilters Optional list of `TAG:level` pairs (e.g. `"NativeShellBridge:V"`).
+ *   When non-null, all other tags are silenced via `*:S` and only the listed
+ *   tags are captured.  When null (default) the full logcat stream is shown.
  */
-class LogBoxManager(private val context: Context) {
+class LogBoxManager(
+  private val context: Context,
+  private val tagFilters: List<String>? = null,
+) {
 
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -78,9 +85,13 @@ class LogBoxManager(private val context: Context) {
       // LOG_BOX is opened — prevents stale entries from previous sessions.
       Runtime.getRuntime().exec("logcat -c")
 
-      val process = Runtime.getRuntime().exec(
-        arrayOf("logcat", "-v", "time")
-      )
+      val cmdArgs = mutableListOf("logcat", "-v", "time")
+      if (tagFilters != null) {
+        // Silence everything first, then re-enable only the requested tags.
+        cmdArgs.add("*:S")
+        cmdArgs.addAll(tagFilters)
+      }
+      val process = Runtime.getRuntime().exec(cmdArgs.toTypedArray())
       logcatProcess = process
       isStreaming = true
 
