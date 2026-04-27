@@ -44,6 +44,7 @@ import androidx.compose.material.icons.outlined.DashboardCustomize
 import androidx.compose.material.icons.outlined.Difference
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Psychology
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.DrawerValue
@@ -93,6 +94,7 @@ import com.google.ai.edge.gallery.ui.osmodules.BrainBoxModuleScreen
 import com.google.ai.edge.gallery.ui.osmodules.DiffBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.FileBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.MstrCtrlScreen
+import com.google.ai.edge.gallery.ui.osmodules.ScdlBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.SystemSettingsScreen
 import com.google.ai.edge.gallery.ui.theme.absoluteBlack
 import com.google.ai.edge.gallery.ui.theme.neonGreen
@@ -108,6 +110,7 @@ private enum class OsModule(val label: String, val icon: ImageVector) {
   DIFF_BOX("DIFF_BOX", Icons.Outlined.Difference),
   MSTR_CTRL("MSTR_CTRL", Icons.Outlined.Terminal),
   SKILL_BOX("SKILL_BOX", Icons.Outlined.Psychology),
+  SCDL_BOX("SCDL_BOX", Icons.Outlined.Schedule),
   VENDING_MACHINE("VENDING_MACHINE", Icons.Outlined.DashboardCustomize),
   SYS_SETTINGS("SETTINGS", Icons.Outlined.Settings),
 }
@@ -297,6 +300,7 @@ fun GalleryApp(
                     sessionManager = terminalSessionManager,
                     sharedShellManager = sharedShellManager,
                   )
+                  OsModule.SCDL_BOX -> ScdlBoxScreen(db = db)
                   OsModule.SYS_SETTINGS -> SystemSettingsScreen(
                     modelManagerViewModel = modelManagerViewModel,
                     skillManagerViewModel = skillManagerViewModel,

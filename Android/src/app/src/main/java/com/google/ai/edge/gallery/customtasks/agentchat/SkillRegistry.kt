@@ -52,6 +52,7 @@ class SkillRegistry(agentTools: AgentTools) {
       BrainBoxGrepSkill(agentTools),
       TodoSkill(agentTools),
       DelegateSkill(agentTools),
+      ScdlBoxSkill(agentTools),
     )
 
     // Merge with metadata-only entries for all other @Tool methods.
