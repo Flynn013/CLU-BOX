@@ -27,12 +27,12 @@ import androidx.compose.ui.graphics.Color
 // so no call-sites need to change.
 
 // ── Core accent ────────────────────────────────────────────────────────────
-val neonGreen          = Color(0xFFFFFFFF)   // primary accent — pure white
+val neonGreen          = Color(0xFF39FF14)   // primary accent — neon green
 
 // ── Background scale (pure black → near-black → dark grey) ─────────────────
 val absoluteBlack      = Color(0xFF000000)   // page / scaffold background
 val terminalDarkGrey   = Color(0xFF0D0D0D)   // surface lowest / subtle tint
-val terminalMidGrey    = Color(0xFF1A1A1A)   // card / sheet surface
+val terminalMidGrey    = Color(0xFF121212)   // card / sheet surface
 val terminalLightGrey  = Color(0xFF2A2A2A)   // elevated surface (container high)
 val terminalOutline    = Color(0xFF3A3A3A)   // dividers & borders
 val terminalOnSurface  = Color(0xFFECECEC)   // primary body text (off-white for comfort)
