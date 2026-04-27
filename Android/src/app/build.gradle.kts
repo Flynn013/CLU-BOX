@@ -70,6 +70,13 @@ android {
     }
     
     packaging {
+        jniLibs {
+            // Force physical extraction of .so files from the APK so that
+            // ProcessBuilder can execute libproot.so / libbash.so directly.
+            // Without this, AGP leaves them compressed inside the APK zip and
+            // nativeLibraryDir paths are unexecutable, causing immediate SIGKILL.
+            useLegacyPackaging = true
+        }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "META-INF/gradle/incremental.annotation.processors"
