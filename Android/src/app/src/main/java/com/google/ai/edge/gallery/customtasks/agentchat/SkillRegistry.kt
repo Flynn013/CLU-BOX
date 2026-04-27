@@ -40,7 +40,7 @@ private const val TAG = "SkillRegistry"
 class SkillRegistry(agentTools: AgentTools) {
 
   /** All registered skills, keyed by [CluSkill.name] for O(1) lookup. */
-  private val skills: Map<String, CluSkill>
+  private val skills: LinkedHashMap<String, CluSkill> = LinkedHashMap()
 
   init {
     // Register the explicitly ported skills with full CluSkill implementations.
@@ -60,8 +60,21 @@ class SkillRegistry(agentTools: AgentTools) {
     // for them goes through the litertlm @Tool framework.
     val allSkills = ported + agentTools.getMetadataOnlySkills()
 
-    skills = allSkills.associateBy { it.name }
+    allSkills.forEach { skills[it.name] = it }
     Log.d(TAG, "Registered ${skills.size} skills: ${skills.keys.joinToString()}")
+  }
+
+  /**
+   * Dynamically registers [McpDynamicSkill] instances loaded at runtime from a connected
+   * MCP server.  Any existing entry with the same name is replaced, allowing reconnect /
+   * refresh scenarios to work correctly.
+   *
+   * This method is safe to call from any thread.
+   */
+  @Synchronized
+  fun registerDynamicSkills(dynamicSkills: List<CluSkill>) {
+    dynamicSkills.forEach { skills[it.name] = it }
+    Log.d(TAG, "Registered ${dynamicSkills.size} dynamic MCP skills: ${dynamicSkills.map { it.name }}")
   }
 
   /**

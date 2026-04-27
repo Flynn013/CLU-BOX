@@ -43,6 +43,7 @@ import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.DashboardCustomize
 import androidx.compose.material.icons.outlined.Difference
 import androidx.compose.material.icons.outlined.Hub
+import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Settings
@@ -93,9 +94,12 @@ import com.google.ai.edge.gallery.data.SharedShellManager
 import com.google.ai.edge.gallery.ui.osmodules.BrainBoxModuleScreen
 import com.google.ai.edge.gallery.ui.osmodules.DiffBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.FileBoxScreen
+import com.google.ai.edge.gallery.ui.osmodules.LnkBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.MstrCtrlScreen
 import com.google.ai.edge.gallery.ui.osmodules.ScdlBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.SystemSettingsScreen
+import com.google.ai.edge.gallery.data.mcp.McpConnectionManager
+import com.google.ai.edge.gallery.customtasks.agentchat.McpDynamicSkill
 import com.google.ai.edge.gallery.ui.theme.absoluteBlack
 import com.google.ai.edge.gallery.ui.theme.neonGreen
 import com.google.ai.edge.gallery.ui.theme.terminalLightGrey
@@ -111,6 +115,7 @@ private enum class OsModule(val label: String, val icon: ImageVector) {
   MSTR_CTRL("MSTR_CTRL", Icons.Outlined.Terminal),
   SKILL_BOX("SKILL_BOX", Icons.Outlined.Psychology),
   SCDL_BOX("SCDL_BOX", Icons.Outlined.Schedule),
+  LNK_BOX("LNK_BOX", Icons.Outlined.Link),
   VENDING_MACHINE("VENDING_MACHINE", Icons.Outlined.DashboardCustomize),
   SYS_SETTINGS("SETTINGS", Icons.Outlined.Settings),
 }
@@ -148,6 +153,21 @@ fun GalleryApp(
   // Share the GalleryApp-level singleton so the AI and the FILE_BOX editor see the
   // same currentFilePath / cursorLine flows and drive the same FileObserver revision.
   agentTools.fileBoxManager = fileBoxManager
+
+  // MCP connection manager — persists server configs in the encrypted vault and manages
+  // the live stdio bridges.  Initialised here so it survives module navigation.
+  val mcpConnectionManager = remember { McpConnectionManager(context) }
+
+  // Wire dynamic skill registration: when an MCP server connects and lists its tools,
+  // wrap each tool in a McpDynamicSkill and register it with the skill registry so the
+  // LLM can see and invoke them via the normal dispatch path.
+  LaunchedEffect(mcpConnectionManager, agentTools) {
+    mcpConnectionManager.setOnConnectionReady { client, tools ->
+      val dynamicSkills = tools.map { McpDynamicSkill(it, client) }
+      agentTools.skillRegistry.registerDynamicSkills(dynamicSkills)
+    }
+    mcpConnectionManager.initialize()
+  }
 
   // Separate nav controllers so each module retains its own back stack.
   val chatNavController = rememberNavController()
@@ -301,6 +321,7 @@ fun GalleryApp(
                     sharedShellManager = sharedShellManager,
                   )
                   OsModule.SCDL_BOX -> ScdlBoxScreen(db = db)
+                  OsModule.LNK_BOX -> LnkBoxScreen(mcpConnectionManager = mcpConnectionManager)
                   OsModule.SYS_SETTINGS -> SystemSettingsScreen(
                     modelManagerViewModel = modelManagerViewModel,
                     skillManagerViewModel = skillManagerViewModel,
