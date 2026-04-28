@@ -73,7 +73,10 @@ android {
         buildConfig = true
     }
     
-    packaging {
+    // Note: 'packaging {}' is unavailable when Chaquopy is applied (it wraps the Android
+    // extension with BaseExtension which exposes the legacy 'packagingOptions' alias).
+    @Suppress("Deprecation")
+    packagingOptions {
         jniLibs {
             // Force physical extraction of .so files from the APK so that
             // ProcessBuilder can execute libproot.so / libbash.so directly.
