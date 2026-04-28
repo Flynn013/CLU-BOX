@@ -73,22 +73,23 @@ android {
         buildConfig = true
     }
     
-    // Note: 'packaging {}' is unavailable when Chaquopy is applied (it wraps the Android
-    // extension with BaseExtension which exposes the legacy 'packagingOptions' alias).
-    @Suppress("Deprecation")
-    packagingOptions {
-        jniLibs {
-            // Force physical extraction of .so files from the APK so that
-            // ProcessBuilder can execute libproot.so / libbash.so directly.
-            // Without this, AGP leaves them compressed inside the APK zip and
-            // nativeLibraryDir paths are unexecutable, causing immediate SIGKILL.
-            useLegacyPackaging = true
-        }
-        resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
-            excludes += "META-INF/gradle/incremental.annotation.processors"
-        }
-    }
+}
+
+// Chaquopy wraps the android extension with a classloader-isolated proxy.  AGP 8.9.0+
+// introduced PackagingOptions$AgpDecorated_Decorated (loaded by classloader A), but the
+// Kotlin DSL's generated packagingOptions{} / jniLibs{} / resources{} lambda accessors
+// cast the receiver to the same interface from classloader B — causing ClassCastException.
+// Fix: use direct property access here (no lambda = no checkcast bytecode instruction).
+// Virtual method dispatch works across classloader boundaries; explicit casts do not.
+@Suppress("DEPRECATION")
+android.packagingOptions.apply {
+    // Force physical extraction of .so files from the APK so that
+    // ProcessBuilder can execute libproot.so / libbash.so directly.
+    // Without this, AGP leaves them compressed inside the APK zip and
+    // nativeLibraryDir paths are unexecutable, causing immediate SIGKILL.
+    jniLibs.useLegacyPackaging = true
+    resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+    resources.excludes += "META-INF/gradle/incremental.annotation.processors"
 }
 
 dependencies {
