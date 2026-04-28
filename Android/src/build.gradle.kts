@@ -23,6 +23,6 @@ plugins {
     id("com.google.dagger.hilt.android") version "2.57.2" apply false
     id("com.google.devtools.ksp") version "2.2.0-2.0.2" apply false
     id("com.google.protobuf") version "0.9.5" apply false
-    id("com.chaquo.python") version "15.0.1" apply false
+    id("com.chaquo.python") version "15.6.0" apply false
     // FIREBASE PURGED: google-services plugin removed
 }
