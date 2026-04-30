@@ -72,3 +72,102 @@ android {
         compose = true
         buildConfig = true
     }
+}
+
+// FINAL STRIKE: AGP 8.9+ CHAQUOPY FIX
+// Bypasses the proxy bug and safely configures the physical APK extraction
+project.afterEvaluate {
+    val androidExt = extensions.getByType<com.android.build.api.dsl.ApplicationExtension>()
+    androidExt.packaging {
+        jniLibs.useLegacyPackaging = true
+        resources.excludes.add("/META-INF/{AL2.0,LGPL2.1}")
+        resources.excludes.add("META-INF/gradle/incremental.annotation.processors")
+    }
+}
+
+dependencies {
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.splashscreen)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.android.lifecycle.runtime.compose)
+    implementation(libs.androidx.activity.compose)
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.ui)
+    implementation(libs.androidx.ui.graphics)
+    implementation(libs.androidx.ui.tooling.preview)
+    implementation(libs.androidx.material3)
+
+    implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.3")
+    implementation(libs.androidx.compose.navigation)
+    
+    implementation(libs.camerax.core)
+    implementation(libs.camerax.camera2)
+    implementation(libs.camerax.lifecycle)
+    implementation(libs.camerax.view)
+    
+    implementation(libs.mlkit.genai.prompt)
+    
+    implementation("com.google.ai.edge.litert:litert:1.0.1")
+    implementation(libs.litertlm)
+    implementation(libs.com.google.code.gson)
+    
+    implementation(libs.room.runtime)
+    ksp(libs.room.compiler)
+    implementation(libs.room.ktx)
+
+    implementation(libs.androidx.work.runtime)
+
+    implementation("io.coil-kt:coil-compose:2.6.0")
+    implementation("com.google.accompanist:accompanist-systemuicontroller:0.34.0")
+
+    implementation(libs.androidx.datastore)
+    implementation(libs.protobuf.javalite)
+    
+    implementation(libs.hilt.android)
+    ksp(libs.hilt.android.compiler)
+    implementation(libs.hilt.navigation.compose)
+
+    implementation(libs.openid.appauth)
+    implementation(libs.play.services.oss.licenses)
+
+    implementation("com.github.termux.termux-app:terminal-emulator:v0.118.1")
+    implementation("com.github.termux.termux-app:terminal-view:v0.118.1")
+
+    implementation(libs.moshi.kotlin)
+    ksp(libs.moshi.kotlin.codegen)
+
+    implementation(libs.commonmark)
+    implementation(libs.richtext)
+    
+    testImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.espresso.core)
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.ui.test.junit4)
+    debugImplementation(libs.androidx.ui.tooling)
+    debugImplementation(libs.androidx.ui.test.manifest)
+}
+
+protobuf {
+    protoc {
+        artifact = "com.google.protobuf:protoc:4.26.1"
+    }
+    generateProtoTasks {
+        all().forEach { task ->
+            task.builtins {
+                create("java") {
+                    option("lite")
+                }
+            }
+        }
+    }
+}
+
+chaquopy {
+    defaultConfig {
+        version = "3.11"
+        pip { }
+    }
+    productFlavors { }
+}
