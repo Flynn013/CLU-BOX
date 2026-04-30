@@ -91,13 +91,9 @@
             android:foregroundServiceType="dataSync"
             android:exported="false" />
 
-        <!--
-          Receives async command results from the external Termux app.
-          Must be exported so the system can deliver the PendingIntent callback.
-        -->
         <receiver
             android:name=".customtasks.agentchat.TermuxOutputReceiver"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="com.google.ai.edge.gallery.TERMUX_COMMAND_RESULT" />
             </intent-filter>
