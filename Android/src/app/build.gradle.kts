@@ -74,17 +74,17 @@ android {
     }
 }
 
-// --- THE REFLECTIVE BYPASS ---
-// Chaquopy's classloader proxy is blocking the DSL from seeing '.packaging' or '.packagingOptions'.
-// We use the base ExtensionContainer to force configuration via the legacy method name
-// which is still present in the underlying Java implementation of AGP 8.9.
-project.extensions.configure<com.android.build.gradle.internal.dsl.BaseAppModuleExtension>("android") {
-    @Suppress("DEPRECATION")
-    packagingOptions.jniLibs.useLegacyPackaging = true
-    @Suppress("DEPRECATION")
-    packagingOptions.resources.excludes.add("/META-INF/{AL2.0,LGPL2.1}")
-    @Suppress("DEPRECATION")
-    packagingOptions.resources.excludes.add("META-INF/gradle/incremental.annotation.processors")
+// THE AGP 8.9+ CHAQUOPY FIX
+// We must configure packaging OUTSIDE the android block using afterEvaluate
+// to ensure we bypass Chaquopy's isolated classloader proxy which causes NoSuchMethodError.
+project.afterEvaluate {
+    extensions.configure<com.android.build.api.dsl.ApplicationExtension> {
+        packaging {
+            jniLibs.useLegacyPackaging = true
+            resources.excludes.add("/META-INF/{AL2.0,LGPL2.1}")
+            resources.excludes.add("META-INF/gradle/incremental.annotation.processors")
+        }
+    }
 }
 
 dependencies {
