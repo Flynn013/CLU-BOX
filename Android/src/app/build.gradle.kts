@@ -72,18 +72,15 @@ android {
         compose = true
         buildConfig = true
     }
+
+    // Chaquopy wraps the android extension with a classloader-isolated proxy.
+    // AGP 8.9.0+ introduced PackagingOptions$AgpDecorated_Decorated.
+    // Fix: use direct property access INSIDE the android block (no lambda = no checkcast bytecode instruction).
+    @Suppress("DEPRECATION")
+    packaging.jniLibs.useLegacyPackaging = true
+    packaging.resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+    packaging.resources.excludes += "META-INF/gradle/incremental.annotation.processors"
 }
-
-// Chaquopy wraps the android extension with a classloader-isolated proxy.
-// AGP 8.9.0+ introduced PackagingOptions$AgpDecorated_Decorated (loaded by classloader A), but the
-// Kotlin DSL's generated packagingOptions{} / jniLibs{} / resources{} lambda accessors
-// cast the receiver to the same interface from classloader B — causing ClassCastException.
-// Fix: use direct property access here (no lambda = no checkcast bytecode instruction).
-
-@Suppress("DEPRECATION")
-android.packaging.jniLibs.useLegacyPackaging = true
-android.packaging.resources.excludes.add("/META-INF/{AL2.0,LGPL2.1}")
-android.packaging.resources.excludes.add("META-INF/gradle/incremental.annotation.processors")
 
 dependencies {
     implementation(libs.androidx.core.ktx)
