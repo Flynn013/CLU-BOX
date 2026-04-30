@@ -21,6 +21,7 @@ import android.util.Log
 import androidx.core.net.toUri
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
+import org.json.JSONObject
 
 @JsonClass(generateAdapter = true)
 data class SendEmailParams(
@@ -81,5 +82,28 @@ object IntentHandler {
       }
     }
     return false
+  }
+
+  /**
+   * Routes a tool call from the autonomous agent loop to the correct [CluSkill]
+   * implementation via [SkillRegistry.dispatch].
+   *
+   * This is the entry point for the Observe→Reason→Act loop. After each LLM turn,
+   * the caller parses the model's tool-call JSON, extracts [skillName] and [args],
+   * then invokes this method. The returned string (stdout/stderr from the skill) is
+   * injected back into the context window as a TOOL turn for the next inference step.
+   *
+   * @param skillRegistry The active [SkillRegistry] for this agent session.
+   * @param skillName     The tool name emitted by the LLM (must match [CluSkill.name]).
+   * @param args          Parsed JSON arguments for the skill.
+   * @return The skill's execution result, or an error string if dispatch fails.
+   */
+  suspend fun handleSkillAction(
+    skillRegistry: SkillRegistry,
+    skillName: String,
+    args: JSONObject,
+  ): String {
+    Log.d(TAG, "handleSkillAction: routing '$skillName' through SkillRegistry")
+    return skillRegistry.dispatch(skillName, args)
   }
 }

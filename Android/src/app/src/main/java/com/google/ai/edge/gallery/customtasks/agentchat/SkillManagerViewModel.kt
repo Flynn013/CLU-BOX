@@ -599,6 +599,20 @@ constructor(
     setSkillSelected(skill, !skill.skill.selected)
   }
 
+  /**
+   * Enable or disable a skill by name.
+   *
+   * Used by the System Settings Shell Engine toggle to instantly activate/deactivate
+   * the `shellExecute` (LOCAL) and `virtualCommand` (VIRTUAL) skills when the operator
+   * switches the active execution engine.
+   *
+   * No-ops if no skill with [skillName] is found in the current state.
+   */
+  fun setSkillEnabled(skillName: String, enabled: Boolean) {
+    val skill = _uiState.value.skills.find { it.skill.name == skillName } ?: return
+    setSkillSelected(skill, enabled)
+  }
+
   fun setAllSkillsSelected(selected: Boolean) {
     // Update state.
     _uiState.update { currentState ->

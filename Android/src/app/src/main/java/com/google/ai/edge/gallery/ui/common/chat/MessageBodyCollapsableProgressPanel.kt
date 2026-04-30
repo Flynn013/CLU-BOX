@@ -70,8 +70,18 @@ private const val MAX_DESCRIPTION_LINES = 5
  */
 @Composable
 fun MessageBodyCollapsableProgressPanel(message: ChatMessageCollapsableProgressPanel) {
-  var isExpanded by remember { mutableStateOf(false) }
+  // Auto-expand while the task is running; collapse once it completes.
+  var isExpanded by remember(message.inProgress) { mutableStateOf(message.inProgress) }
   var showLogsViewer by remember { mutableStateOf(false) }
+
+  // Derive a contextual title: while running show the live title; once done
+  // and the panel is collapsed, summarise as "Ran X Actions".
+  val displayTitle = if (!message.inProgress && !isExpanded && message.items.isNotEmpty()) {
+    val count = message.items.size
+    "Ran $count action${if (count == 1) "" else "s"}"
+  } else {
+    message.title
+  }
 
   Column(
     modifier =
@@ -106,7 +116,7 @@ fun MessageBodyCollapsableProgressPanel(message: ChatMessageCollapsableProgressP
         Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
           // Title.
           AnimatedContent(
-            targetState = message.title,
+            targetState = displayTitle,
             transitionSpec = {
               slideInVertically { it } + fadeIn() togetherWith
                 slideOutVertically { -it } + fadeOut()

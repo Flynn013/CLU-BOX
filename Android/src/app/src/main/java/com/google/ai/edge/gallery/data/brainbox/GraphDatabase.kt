@@ -23,6 +23,8 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.google.ai.edge.gallery.data.scdlbox.ScdlBoxDao
+import com.google.ai.edge.gallery.data.scdlbox.ScdlBoxEntity
 
 /**
  * The Room database for the CLU/BOX BrainBox GraphRAG memory system.
@@ -30,8 +32,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  * Increment [version] whenever the schema changes and provide a migration strategy.
  */
 @Database(
-  entities = [NeuronEntity::class, ChatMessageEntity::class],
-  version = 5,
+  entities = [NeuronEntity::class, ChatMessageEntity::class, ScdlBoxEntity::class],
+  version = 6,
   exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -40,6 +42,8 @@ abstract class GraphDatabase : RoomDatabase() {
   abstract fun brainBoxDao(): BrainBoxDao
 
   abstract fun chatHistoryDao(): ChatHistoryDao
+
+  abstract fun scdlBoxDao(): ScdlBoxDao
 
   companion object {
     @Volatile private var INSTANCE: GraphDatabase? = null
@@ -69,6 +73,26 @@ abstract class GraphDatabase : RoomDatabase() {
         }
       }
 
+    /** Migration from v5 → v6: create the SCDL_BOX scheduled tasks table. */
+    private val MIGRATION_5_6 =
+      object : Migration(5, 6) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+          db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS scdl_tasks (
+              id TEXT NOT NULL PRIMARY KEY,
+              title TEXT NOT NULL,
+              description TEXT NOT NULL DEFAULT '',
+              payload TEXT NOT NULL,
+              isShellCommand INTEGER NOT NULL,
+              intervalMinutes INTEGER NOT NULL,
+              isEnabled INTEGER NOT NULL DEFAULT 1
+            )
+            """.trimIndent()
+          )
+        }
+      }
+
     fun getInstance(context: Context): GraphDatabase {
       return INSTANCE
         ?: synchronized(this) {
@@ -77,7 +101,7 @@ abstract class GraphDatabase : RoomDatabase() {
               GraphDatabase::class.java,
               "brainbox.db",
             )
-            .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+            .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
             .fallbackToDestructiveMigration() // TODO: replace with proper migrations before release
             .build()
             .also { INSTANCE = it }

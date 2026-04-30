@@ -17,7 +17,6 @@
 package com.google.ai.edge.gallery.customtasks.agentchat
 
 import android.content.Context
-import android.os.Bundle
 import android.util.Log
 import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
@@ -71,8 +70,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
-import com.google.ai.edge.gallery.GalleryEvent
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.common.AskInfoAgentAction
 import com.google.ai.edge.gallery.common.CallJsAgentAction
@@ -81,7 +79,6 @@ import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.RuntimeType
 import com.google.ai.edge.gallery.data.Task
-import com.google.ai.edge.gallery.firebaseAnalytics
 import com.google.ai.edge.gallery.ui.common.BaseGalleryWebViewClient
 import com.google.ai.edge.gallery.ui.common.GalleryWebView
 import com.google.ai.edge.gallery.ui.common.buildTrackableUrlAnnotatedString
@@ -164,6 +161,8 @@ fun AgentChatScreen(
   var curSystemPrompt by remember { mutableStateOf(task.defaultSystemPrompt) }
   val systemPromptUpdatedMessage = stringResource(R.string.system_prompt_updated)
   var sendMessageTrigger by remember { mutableStateOf<SendMessageTrigger?>(null) }
+  /** Manages error-retry logic and status emission for the agentic loop. */
+  val loopManager = remember { AgentLoopManager() }
   /** Tracks how many consecutive autonomous re-triggers have fired without user input. */
   var autonomousIterationCount by remember { mutableStateOf(0) }
   var showAlertForDisabledSkill by remember { mutableStateOf(false) }
@@ -175,7 +174,7 @@ fun AgentChatScreen(
   val autonomousLoopScope = rememberCoroutineScope()
   var showGeminiApiKeyDialog by remember { mutableStateOf(false) }
 
-  // Monitor selected model — prompt for API key when Cloud Node is selected without one.
+  // Monitor selected model — prompt for API key when CLOUD_CLU model is selected without one.
   val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
   val selectedModel = modelManagerUiState.selectedModel
   LaunchedEffect(selectedModel) {
@@ -199,16 +198,48 @@ fun AgentChatScreen(
     onFirstToken = { model ->
       updateProgressPanel(viewModel = viewModel, model = model, agentTools = agentTools)
     },
-    onInferenceError = { _ ->
-      // ── Error cleanup: break the autonomous loop on crash ──────────
-      // When inference fails (OOM, native crash, context overflow), clear
-      // any pending autonomous task so the loop doesn't try to fire again
-      // after the model is re-initialized.
-      Log.w(TAG, "Inference error — clearing pending autonomous task and resetting loop counter")
-      agentTools.pendingTaskDescription = null
-      autonomousIterationCount = 0
+    onInferenceError = { errorMessage ->
+      // ── Error recovery via AgentLoopManager ────────────────────────
+      // Ask the loop manager whether we should retry or halt.
+      val shouldRetry = loopManager.onError(errorMessage ?: "Unknown inference error")
+      if (shouldRetry) {
+        Log.w(TAG, "Inference error — retrying (${AgentLoopManager.MAX_RETRIES - loopManager.errorCount} attempt(s) left)")
+        // Inject a SYSTEM re-evaluation message so the model understands what
+        // went wrong and can try a different approach on the next turn.
+        val model = modelManagerViewModel.uiState.value.selectedModel
+        val retryMsg = loopManager.formatRetrySystemMessage("Inference engine", errorMessage ?: "unknown error")
+        viewModel.addMessage(
+          model = model,
+          message = ChatMessageText(content = retryMsg, side = ChatSide.AGENT),
+        )
+        // Re-trigger inference with the system message as the new user turn.
+        autonomousLoopScope.launch {
+          delay(AUTONOMOUS_LOOP_COOLDOWN_MS)
+          sendMessageTrigger = SendMessageTrigger(
+            model = model,
+            messages = listOf(ChatMessageText(content = retryMsg, side = ChatSide.USER)),
+          )
+        }
+      } else {
+        // Retry budget exhausted — break the loop and ask the user for help.
+        Log.w(TAG, "Inference error budget exhausted — halting agentic loop")
+        agentTools.pendingTaskDescription = null
+        autonomousIterationCount = 0
+        val model = modelManagerViewModel.uiState.value.selectedModel
+        viewModel.addMessage(
+          model = model,
+          message = ChatMessageText(
+            content = loopManager.buildExhaustedMessage(agentTools.engine),
+            side = ChatSide.AGENT,
+          ),
+        )
+        loopManager.reset()
+      }
     },
     onGenerateResponseDone = { model ->
+      // ── Success: reset the error retry counter ──────────────────────
+      loopManager.onSuccess()
+
       // Show any image produced by tools.
       agentTools.resultImageToShow?.let { resultImage ->
         resultImage.base64?.let { base64 ->
@@ -297,6 +328,8 @@ fun AgentChatScreen(
       }
     },
     onResetSessionClickedOverride = { task, model ->
+      loopManager.reset()
+      autonomousIterationCount = 0
       resetSessionWithCurrentSkills(
         viewModel,
         modelManagerViewModel,

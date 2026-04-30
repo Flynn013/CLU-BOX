@@ -48,8 +48,8 @@ class AgentChatTask @Inject constructor() : CustomTask {
       iconVectorResourceId = R.drawable.agent,
       newFeature = true,
       models = mutableListOf(),
-      description = "Chat with on-device AI using CLU/BOX skills and BrainBox memory",
-      shortDescription = "CLU/BOX agentic chat interface",
+      description = "Chat with LOCAL_CLU (Gemma 4) or CLOUD_CLU (Gemini API) using agentic skills and BrainBox memory",
+      shortDescription = "CLU/BOX agentic chat — LOCAL_CLU & CLOUD_CLU",
       docUrl = "https://github.com/Flynn013/CLU-BOX",
       sourceCodeUrl =
         "https://github.com/Flynn013/CLU-BOX",
@@ -77,7 +77,9 @@ class AgentChatTask @Inject constructor() : CustomTask {
     model: Model,
     onDone: (String) -> Unit,
   ) {
-    agentTools.skillManagerViewModel.loadSkills {
+    val smvm = agentTools.skillManagerViewModel
+      ?: run { onDone("SkillManagerViewModel not attached"); return }
+    smvm.loadSkills {
       try {
         // ── Agentic Context Router: set engine and select constraint ──────
         agentTools.engine = if (model.runtimeType == RuntimeType.GEMINI_CLOUD) {
@@ -85,27 +87,24 @@ class AgentChatTask @Inject constructor() : CustomTask {
         } else {
           AgentEngine.LOCAL
         }
-        val engineConstraint = if (agentTools.engine == AgentEngine.CLOUD) {
-          AgentGovernor.CLOUD_CONSTRAINT
-        } else {
-          AgentGovernor.LOCAL_CONSTRAINT
-        }
         val helper = if (model.runtimeType == RuntimeType.GEMINI_CLOUD) {
           GeminiCloudModelHelper.cacheApiKey(context)
           GeminiCloudModelHelper
         } else {
           LlmChatModelHelper
         }
-        val basePrompt = agentTools.skillRegistry.buildFinalSystemPrompt(task.defaultSystemPrompt)
-        val finalPrompt = "$basePrompt\n\n$engineConstraint"
+        val finalPrompt = SystemPromptManager.build(
+          engine = agentTools.engine,
+          basePrompt = task.defaultSystemPrompt,
+          skillRegistry = agentTools.skillRegistry,
+        )
         helper.initialize(
           context = context,
           model = model,
           supportImage = true,
           supportAudio = true,
           onDone = onDone,
-          systemInstruction =
-            agentTools.skillManagerViewModel.getSystemPrompt(finalPrompt),
+          systemInstruction = smvm.getSystemPrompt(finalPrompt),
           tools = listOf(tool(agentTools)),
           // Constrained decoding is intentionally DISABLED for Agent Chat.
           // General-purpose Gemma models (E2B/E4B) were not fine-tuned with the

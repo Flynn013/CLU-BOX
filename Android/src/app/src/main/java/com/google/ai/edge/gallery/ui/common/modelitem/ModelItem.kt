@@ -53,7 +53,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.data.Model
-import com.google.ai.edge.gallery.data.ModelDownloadStatusType
 import com.google.ai.edge.gallery.data.RuntimeType
 import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.ui.common.MarkdownText
@@ -90,7 +89,6 @@ fun ModelItem(
   val isBestOverall = model.bestForTaskIds.contains(task?.id ?: "")
   var isExpanded by remember { mutableStateOf(expanded ?: isBestOverall) }
 
-  val isDownloadFailed = downloadStatus?.status == ModelDownloadStatusType.FAILED
   val isAicore = model.runtimeType == RuntimeType.AICORE
   val isCloudModel = model.runtimeType == RuntimeType.GEMINI_CLOUD
 
@@ -166,10 +164,6 @@ fun ModelItem(
                 modifier = Modifier.padding(top = 12.dp),
               )
             }
-            if (isAicore && isDownloadFailed) {
-              AICoreAccessPanel()
-            }
-          }
         }
       }
       SharedTransitionLayout {

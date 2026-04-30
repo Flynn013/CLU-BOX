@@ -20,6 +20,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,6 +32,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.width
@@ -43,7 +45,9 @@ import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.DashboardCustomize
 import androidx.compose.material.icons.outlined.Difference
 import androidx.compose.material.icons.outlined.Hub
+import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Psychology
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.DrawerValue
@@ -73,19 +77,15 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.compose.rememberNavController
 import androidx.compose.runtime.collectAsState
 import com.google.ai.edge.gallery.customtasks.agentchat.AgentTools
 import com.google.ai.edge.gallery.customtasks.agentchat.SkillManagerBottomSheet
 import com.google.ai.edge.gallery.customtasks.agentchat.SkillManagerViewModel
 import com.google.ai.edge.gallery.data.BuiltInTaskId
-import com.google.ai.edge.gallery.data.ConfigKeys
-import com.google.ai.edge.gallery.data.EMPTY_MODEL
 import com.google.ai.edge.gallery.data.FileBoxManager
-import com.google.ai.edge.gallery.data.convertValueToTargetType
 import com.google.ai.edge.gallery.data.brainbox.GraphDatabase
-import com.google.ai.edge.gallery.ui.common.ConfigDialog
 import com.google.ai.edge.gallery.ui.modelmanager.GlobalModelManager
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import com.google.ai.edge.gallery.ui.navigation.GALLERY_ROUTE_BENCHMARK
@@ -96,9 +96,15 @@ import com.google.ai.edge.gallery.data.SharedShellManager
 import com.google.ai.edge.gallery.ui.osmodules.BrainBoxModuleScreen
 import com.google.ai.edge.gallery.ui.osmodules.DiffBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.FileBoxScreen
+import com.google.ai.edge.gallery.ui.osmodules.LnkBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.MstrCtrlScreen
+import com.google.ai.edge.gallery.ui.osmodules.ScdlBoxScreen
+import com.google.ai.edge.gallery.ui.osmodules.SystemSettingsScreen
+import com.google.ai.edge.gallery.data.mcp.McpConnectionManager
+import com.google.ai.edge.gallery.customtasks.agentchat.McpDynamicSkill
 import com.google.ai.edge.gallery.ui.theme.absoluteBlack
 import com.google.ai.edge.gallery.ui.theme.neonGreen
+import com.google.ai.edge.gallery.ui.theme.terminalLightGrey
 import com.google.ai.edge.gallery.ui.theme.terminalMidGrey
 import kotlinx.coroutines.launch
 
@@ -110,6 +116,8 @@ private enum class OsModule(val label: String, val icon: ImageVector) {
   DIFF_BOX("DIFF_BOX", Icons.Outlined.Difference),
   MSTR_CTRL("MSTR_CTRL", Icons.Outlined.Terminal),
   SKILL_BOX("SKILL_BOX", Icons.Outlined.Psychology),
+  SCDL_BOX("SCDL_BOX", Icons.Outlined.Schedule),
+  LNK_BOX("LNK_BOX", Icons.Outlined.Link),
   VENDING_MACHINE("VENDING_MACHINE", Icons.Outlined.DashboardCustomize),
   SYS_SETTINGS("SETTINGS", Icons.Outlined.Settings),
 }
@@ -123,8 +131,6 @@ fun GalleryApp(
   val drawerState = rememberDrawerState(DrawerValue.Closed)
   val scope = rememberCoroutineScope()
   var activeModule by remember { mutableStateOf(OsModule.CHAT_BOX) }
-  // True when the SYS_SETTINGS drawer item is tapped — shows the ConfigDialog overlay.
-  var showSysSettingsDialog by remember { mutableStateOf(false) }
   // True when the SKILL_BOX drawer item is tapped — shows the SkillManagerBottomSheet overlay.
   var showSkillBoxSheet by remember { mutableStateOf(false) }
   val db = remember { GraphDatabase.getInstance(context) }
@@ -150,6 +156,21 @@ fun GalleryApp(
   // same currentFilePath / cursorLine flows and drive the same FileObserver revision.
   agentTools.fileBoxManager = fileBoxManager
 
+  // MCP connection manager — persists server configs in the encrypted vault and manages
+  // the live stdio bridges.  Initialised here so it survives module navigation.
+  val mcpConnectionManager = remember { McpConnectionManager(context) }
+
+  // Wire dynamic skill registration: when an MCP server connects and lists its tools,
+  // wrap each tool in a McpDynamicSkill and register it with the skill registry so the
+  // LLM can see and invoke them via the normal dispatch path.
+  LaunchedEffect(mcpConnectionManager, agentTools) {
+    mcpConnectionManager.setOnConnectionReady { client, tools ->
+      val dynamicSkills = tools.map { McpDynamicSkill(it, client) }
+      agentTools.skillRegistry.registerDynamicSkills(dynamicSkills)
+    }
+    mcpConnectionManager.initialize()
+  }
+
   // Separate nav controllers so each module retains its own back stack.
   val chatNavController = rememberNavController()
 
@@ -157,7 +178,7 @@ fun GalleryApp(
     drawerState = drawerState,
     drawerContent = {
       ModalDrawerSheet(
-        modifier = Modifier.width(280.dp).fillMaxHeight(),
+        modifier = Modifier.width(288.dp).fillMaxHeight(),
         drawerContainerColor = absoluteBlack,
       ) {
         Column(
@@ -166,30 +187,30 @@ fun GalleryApp(
             .background(absoluteBlack)
             .verticalScroll(rememberScrollState()),
         ) {
-          // Drawer header
+          // Drawer header — elevated surface with bottom divider
           Box(
             modifier = Modifier
               .fillMaxWidth()
               .background(terminalMidGrey)
-              .padding(horizontal = 20.dp, vertical = 24.dp),
+              .padding(horizontal = 20.dp, vertical = 28.dp),
           ) {
-            Column {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
               Text(
                 "CLU/BOX",
-                style = MaterialTheme.typography.headlineMedium,
+                style = MaterialTheme.typography.headlineLarge,
                 color = neonGreen,
                 fontFamily = FontFamily.Monospace,
               )
               Text(
                 "OS v0.5 — offline AI",
-                style = MaterialTheme.typography.labelSmall,
-                color = neonGreen.copy(alpha = 0.7f),
+                style = MaterialTheme.typography.bodySmall,
+                color = neonGreen.copy(alpha = 0.55f),
                 fontFamily = FontFamily.Monospace,
               )
             }
           }
 
-          Spacer(Modifier.height(8.dp))
+          Spacer(Modifier.height(4.dp))
 
           // Module items.
           OsModule.entries.forEach { module ->
@@ -197,10 +218,7 @@ fun GalleryApp(
               module = module,
               selected = activeModule == module,
               onClick = {
-                if (module == OsModule.SYS_SETTINGS) {
-                  // Show the Configurations dialog over the current module.
-                  showSysSettingsDialog = true
-                } else if (module == OsModule.SKILL_BOX) {
+                if (module == OsModule.SKILL_BOX) {
                   // Show the Skill Manager bottom sheet over the current module.
                   showSkillBoxSheet = true
                 } else {
@@ -273,17 +291,16 @@ fun GalleryApp(
                 Row(
                   modifier = Modifier
                     .fillMaxWidth()
-                    .background(absoluteBlack)
+                    .background(terminalMidGrey)
                     .windowInsetsPadding(WindowInsets.statusBars)
-                    .padding(horizontal = 4.dp, vertical = 4.dp),
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
                   verticalAlignment = Alignment.CenterVertically,
                 ) {
                   Text(
                     activeModule.label,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleSmall,
                     color = neonGreen,
                     fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.padding(start = 12.dp),
                   )
                 }
               },
@@ -304,6 +321,12 @@ fun GalleryApp(
                   OsModule.MSTR_CTRL -> MstrCtrlScreen(
                     sessionManager = terminalSessionManager,
                     sharedShellManager = sharedShellManager,
+                  )
+                  OsModule.SCDL_BOX -> ScdlBoxScreen(db = db)
+                  OsModule.LNK_BOX -> LnkBoxScreen(mcpConnectionManager = mcpConnectionManager)
+                  OsModule.SYS_SETTINGS -> SystemSettingsScreen(
+                    modelManagerViewModel = modelManagerViewModel,
+                    skillManagerViewModel = skillManagerViewModel,
                   )
                   else -> {} // all modules covered above
                 }
@@ -340,58 +363,6 @@ fun GalleryApp(
         )
       }
 
-      // ── SYS_SETTINGS configuration dialog ──────────────────────
-      // Shown as an overlay when the user taps the SETTINGS drawer item.
-      if (showSysSettingsDialog) {
-        val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
-        val selectedModel = modelManagerUiState.selectedModel
-        if (selectedModel != EMPTY_MODEL && selectedModel.configs.isNotEmpty()) {
-          val task = modelManagerViewModel.getTaskById(BuiltInTaskId.LLM_AGENT_CHAT)
-          val modelConfigs = selectedModel.configs.toMutableList()
-          // Remove task-specific configs that don't apply in the global settings context.
-          modelConfigs.removeIf { it.key == ConfigKeys.RESET_CONVERSATION_TURN_COUNT }
-          if (task?.allowThinking() != true) {
-            modelConfigs.removeIf { it.key == ConfigKeys.ENABLE_THINKING }
-          }
-          ConfigDialog(
-            title = "Configurations",
-            configs = modelConfigs,
-            initialValues = selectedModel.configValues,
-            showSystemPromptEditorTab = true,
-            onDismissed = { showSysSettingsDialog = false },
-            onOk = { curConfigValues, _, _ ->
-              showSysSettingsDialog = false
-              // Persist updated config values to the model.
-              val oldConfigValues = selectedModel.configValues
-              var changed = false
-              for (config in modelConfigs) {
-                val key = config.key.label
-                val oldValue = convertValueToTargetType(
-                  value = oldConfigValues.getValue(key),
-                  valueType = config.valueType,
-                )
-                val newValue = convertValueToTargetType(
-                  value = curConfigValues.getValue(key),
-                  valueType = config.valueType,
-                )
-                if (oldValue != newValue) {
-                  changed = true
-                  break
-                }
-              }
-              if (changed) {
-                selectedModel.prevConfigValues = oldConfigValues
-                selectedModel.configValues = curConfigValues
-                modelManagerViewModel.updateConfigValuesUpdateTrigger()
-              }
-            },
-          )
-        } else {
-          // No model selected or no configs — dismiss immediately.
-          LaunchedEffect(Unit) { showSysSettingsDialog = false }
-        }
-      }
-
       // ── SKILL_BOX skill manager bottom sheet ───────────────────
       // Shown as an overlay when the user taps the SKILL_BOX drawer item.
       if (showSkillBoxSheet) {
@@ -407,18 +378,19 @@ fun GalleryApp(
 
 @Composable
 private fun DrawerItem(module: OsModule, selected: Boolean, onClick: () -> Unit) {
-  val bgColor = if (selected) terminalMidGrey else Color.Transparent
-  val textColor = if (selected) neonGreen else MaterialTheme.colorScheme.onSurface
+  val bgColor = if (selected) terminalLightGrey else Color.Transparent
+  val textColor = if (selected) neonGreen else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+  val iconTint = if (selected) neonGreen else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
 
   Row(
     modifier = Modifier
       .fillMaxWidth()
       .background(bgColor)
       .clickable(onClick = onClick)
-      .padding(horizontal = 20.dp, vertical = 14.dp),
+      .padding(horizontal = 20.dp, vertical = 16.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
-    Icon(module.icon, contentDescription = module.label, tint = textColor)
+    Icon(module.icon, contentDescription = module.label, tint = iconTint, modifier = Modifier.size(20.dp))
     Spacer(Modifier.width(16.dp))
     Text(
       module.label,

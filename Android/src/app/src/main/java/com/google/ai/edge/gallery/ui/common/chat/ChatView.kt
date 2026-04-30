@@ -16,11 +16,6 @@
 
 package com.google.ai.edge.gallery.ui.common.chat
 
-// import com.google.ai.edge.gallery.ui.preview.PreviewChatModel
-// import com.google.ai.edge.gallery.ui.preview.PreviewModelManagerViewModel
-// import com.google.ai.edge.gallery.ui.preview.TASK_TEST1
-// import com.google.ai.edge.gallery.ui.theme.GalleryTheme
-
 import android.graphics.Bitmap
 import android.util.Log
 import androidx.activity.compose.BackHandler

@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ListAlt
@@ -56,6 +57,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.SnackbarDuration
@@ -139,7 +141,12 @@ fun AddOrEditSkillBottomSheet(
   val snackbarHostState = remember { SnackbarHostState() }
 
   val curSkill = skill
-  val viewingMode = true
+  // View-only for built-in skills; editable for custom skills and new skill creation.
+  // A null skill (curSkill == null) means this is a new skill being created.
+  val isNewSkill = curSkill == null
+  val viewingMode = !isNewSkill && (curSkill?.builtIn == true)
+
+  var showDeleteSkillDialog by remember { mutableStateOf(false) }
 
   var llmPromptGeneratorRequirements by remember { mutableStateOf(skill?.description ?: "") }
   var llmPromptGeneratorInputData by remember { mutableStateOf(INPUT_DATA_PLACEHOLDER) }
@@ -359,61 +366,84 @@ fun AddOrEditSkillBottomSheet(
             Modifier.background(MaterialTheme.colorScheme.surfaceContainer)
               .fillMaxWidth()
               .padding(vertical = 8.dp, horizontal = 16.dp),
-          horizontalArrangement = Arrangement.End,
+          horizontalArrangement = Arrangement.SpaceBetween,
           verticalAlignment = Alignment.CenterVertically,
         ) {
-          if (viewingMode) {
-            Button(
-              onClick = {
-                cancelClicked = true
-                scope.launch {
-                  sheetState.hide()
-                  onDismiss()
-                }
-              }
+          // Delete button — shown only for existing custom (non-built-in) skills.
+          if (!viewingMode && !isNewSkill) {
+            OutlinedButton(
+              onClick = { showDeleteSkillDialog = true },
+              colors = ButtonDefaults.outlinedButtonColors(
+                contentColor = MaterialTheme.customColors.errorTextColor,
+              ),
+              border = BorderStroke(1.dp, MaterialTheme.customColors.errorTextColor),
             ) {
-              Text(stringResource(R.string.ok))
+              Icon(
+                Icons.Outlined.Delete,
+                contentDescription = stringResource(R.string.delete),
+                modifier = Modifier.size(16.dp),
+              )
+              Spacer(modifier = Modifier.width(4.dp))
+              Text(stringResource(R.string.delete))
             }
           } else {
-            TextButton(
-              onClick = {
-                if (edited) {
-                  showDiscardDialog = true
-                } else {
+            Spacer(modifier = Modifier.width(0.dp))
+          }
+
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            if (viewingMode) {
+              Button(
+                onClick = {
                   cancelClicked = true
                   scope.launch {
                     sheetState.hide()
                     onDismiss()
                   }
                 }
+              ) {
+                Text(stringResource(R.string.ok))
               }
-            ) {
-              Text(stringResource(R.string.cancel))
+            } else {
+              TextButton(
+                onClick = {
+                  if (edited) {
+                    showDiscardDialog = true
+                  } else {
+                    cancelClicked = true
+                    scope.launch {
+                      sheetState.hide()
+                      onDismiss()
+                    }
+                  }
+                }
+              ) {
+                Text(stringResource(R.string.cancel))
+              }
             }
-          }
-          if (!viewingMode) {
-            Spacer(modifier = Modifier.width(8.dp))
-            Button(
-              onClick = {
-                skillManagerViewModel.saveSkillEdit(
-                  index = skillIndex,
-                  name = name,
-                  description = description,
-                  instructions = instructions,
-                  scriptsContent = scriptContents,
-                  onError = { error ->
-                    errorMessage = error
-                    showErrorDialog = true
-                  },
-                  onSuccess = {
-                    onDismiss()
-                    onSuccess()
-                  },
-                )
-              },
-              enabled = name.isNotEmpty() && description.isNotEmpty() && edited,
-            ) {
-              Text(stringResource(R.string.save))
+            if (!viewingMode) {
+              Spacer(modifier = Modifier.width(8.dp))
+              Button(
+                onClick = {
+                  skillManagerViewModel.saveSkillEdit(
+                    index = skillIndex,
+                    name = name,
+                    description = description,
+                    instructions = instructions,
+                    scriptsContent = scriptContents,
+                    onError = { error ->
+                      errorMessage = error
+                      showErrorDialog = true
+                    },
+                    onSuccess = {
+                      onDismiss()
+                      onSuccess()
+                    },
+                  )
+                },
+                enabled = name.isNotEmpty() && description.isNotEmpty() && edited,
+              ) {
+                Text(stringResource(R.string.save))
+              }
             }
           }
         }
@@ -459,6 +489,38 @@ fun AddOrEditSkillBottomSheet(
       },
       dismissButton = {
         TextButton(onClick = { showDiscardDialog = false }) {
+          Text(stringResource(R.string.cancel))
+        }
+      },
+    )
+  }
+
+  if (showDeleteSkillDialog) {
+    AlertDialog(
+      onDismissRequest = { showDeleteSkillDialog = false },
+      title = { Text(stringResource(R.string.delete_skill_dialog_title)) },
+      text = { Text(stringResource(R.string.delete_skill_dialog_content)) },
+      confirmButton = {
+        Button(
+          onClick = {
+            curSkill?.let { skillManagerViewModel.deleteSkill(name = it.name) }
+            showDeleteSkillDialog = false
+            cancelClicked = true
+            scope.launch {
+              sheetState.hide()
+              onDismiss()
+            }
+          },
+          colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.customColors.errorTextColor,
+            contentColor = Color.White,
+          ),
+        ) {
+          Text(stringResource(R.string.delete))
+        }
+      },
+      dismissButton = {
+        OutlinedButton(onClick = { showDeleteSkillDialog = false }) {
           Text(stringResource(R.string.cancel))
         }
       },

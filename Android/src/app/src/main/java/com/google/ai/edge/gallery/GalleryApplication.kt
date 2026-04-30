@@ -17,14 +17,17 @@
 package com.google.ai.edge.gallery
 
 import android.app.Application
+import android.util.Log
 import com.google.ai.edge.gallery.data.DataStoreRepository
+import com.google.ai.edge.gallery.data.python.PythonBridge
 import com.google.ai.edge.gallery.ui.theme.ThemeSettings
-import com.google.firebase.FirebaseApp
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+private const val TAG = "GalleryApplication"
 
 @HiltAndroidApp
 class GalleryApplication : Application() {
@@ -34,12 +37,20 @@ class GalleryApplication : Application() {
   override fun onCreate() {
     super.onCreate()
 
+    // ── Chaquopy — initialize Python on the main thread (Chaquopy requirement) ──
+    // Python.start() must be called before any background thread calls getInstance().
+    // PythonBridge wraps the double-checked-lock so this is safe even if called
+    // more than once (e.g. in tests).
+    try {
+      PythonBridge.initialize(this)
+    } catch (e: Exception) {
+      Log.e(TAG, "Failed to initialize Python interpreter — PYTHON_EXEC skill unavailable", e)
+    }
+
     // IO BYPASS: Shift the DataStore synchronous load off the Main Thread
     // so the app bootloader doesn't choke out on cold start.
     CoroutineScope(Dispatchers.IO).launch {
       ThemeSettings.themeOverride.value = dataStoreRepository.readTheme()
     }
-
-    FirebaseApp.initializeApp(this)
   }
 }

@@ -15,20 +15,13 @@
  */
 package com.google.ai.edge.gallery.customtasks.mobileactions
 
-import com.google.ai.edge.gallery.customtasks.common.CustomTask
 import dagger.Module
-import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
-import dagger.multibindings.IntoSet
 
 @Module
 @InstallIn(SingletonComponent::class)
 internal object MobileActionsModule {
-  // Boilerplate task stripped — not used in CLU/BOX.
-  // @Provides
-  // @IntoSet
-  // fun provideTask(): CustomTask {
-  //   return MobileActionsTask()
-  // }
+  // MobileActionsTask is retained as a feature stub but not provided to Hilt
+  // until the on-device mobile-actions pipeline is re-enabled for CLU/BOX.
 }

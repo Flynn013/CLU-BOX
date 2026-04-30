@@ -16,9 +16,6 @@
 
 package com.google.ai.edge.gallery.ui.home
 
-// import androidx.compose.ui.tooling.preview.Preview
-// import com.google.ai.edge.gallery.ui.theme.GalleryTheme
-// import com.google.ai.edge.gallery.ui.preview.PreviewModelManagerViewModel
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
@@ -90,13 +87,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Brush.Companion.linearGradient
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -642,13 +637,13 @@ private fun TryGm4IntroText(enableAnimation: Boolean) {
     horizontalArrangement = Arrangement.spacedBy(8.dp),
   ) {
     Icon(
-      ImageVector.vectorResource(R.drawable.gemma_logo),
+      Icons.automirrored.rounded.ListAlt,
       contentDescription = null,
       modifier = Modifier.size(24.dp),
-      tint = MaterialTheme.colorScheme.primary,
+      tint = neonGreen,
     )
     Text(
-      text = "Try Gemma 4 today",
+      text = "CLU/BOX — latest models",
       style =
         MaterialTheme.typography.headlineSmall.copy(
           fontWeight = FontWeight.Medium,
@@ -660,7 +655,7 @@ private fun TryGm4IntroText(enableAnimation: Boolean) {
   }
 
   Text(
-    "Gemma 4 E2B & E4B are here! Try them in CLU/BOX Chat, or the use cases below.",
+    "New models available. Try them in CLU/BOX Chat, or the use cases below.",
     style = MaterialTheme.typography.bodyMedium,
     modifier =
       Modifier.graphicsLayer {

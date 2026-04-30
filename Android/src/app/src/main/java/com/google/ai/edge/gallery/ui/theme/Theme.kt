@@ -146,7 +146,7 @@ val LocalCustomColors = staticCompositionLocalOf { CustomColors() }
 
 val lightCustomColors =
   CustomColors(
-    appTitleGradientColors = listOf(neonGreen, neonGreen),
+    appTitleGradientColors = listOf(neonGreen, Color(0xFFCCCCCC)),
     tabHeaderBgColor = absoluteBlack,
     taskCardBgColor = terminalMidGrey,
     taskBgColors =
@@ -160,7 +160,7 @@ val lightCustomColors =
       ),
     taskIconColors =
       listOf(neonGreen, neonGreen, neonGreen, neonGreen),
-    taskIconShapeBgColor = absoluteBlack,
+    taskIconShapeBgColor = terminalDarkGrey,
     homeBottomGradient = listOf(Color(0x00000000), absoluteBlack),
     agentBubbleBgColor = terminalDarkGrey,
     userBubbleBgColor = terminalMidGrey,
@@ -168,19 +168,19 @@ val lightCustomColors =
     successColor = neonGreen,
     recordButtonBgColor = neonGreen,
     waveFormBgColor = terminalOutline,
-    modelInfoIconColor = terminalOutline,
+    modelInfoIconColor = brutalistGrey,
     warningContainerColor = terminalMidGrey,
     warningTextColor = neonGreen,
     errorContainerColor = terminalErrorContainer,
     errorTextColor = terminalError,
-    newFeatureContainerColor = terminalMidGrey,
+    newFeatureContainerColor = terminalLightGrey,
     newFeatureTextColor = neonGreen,
-    bgStarColor = Color(0x19FFFFFF),
+    bgStarColor = Color(0x14FFFFFF),
     promoBannerBgBrush =
       Brush.linearGradient(
         colorStops =
           arrayOf(
-            0.0f to Color(0xFF0D0D0D),
+            0.0f to Color(0xFF111111),
             1.0f to absoluteBlack,
           ),
         start = Offset(0f, 0f),
@@ -190,7 +190,7 @@ val lightCustomColors =
       Brush.linearGradient(
         colorStops =
           arrayOf(
-            0.0f to Color(0xFF1A1A1A),
+            0.0f to Color(0xFF1E1E1E),
             1.0f to absoluteBlack,
           ),
         start = Offset(0f, 1f),

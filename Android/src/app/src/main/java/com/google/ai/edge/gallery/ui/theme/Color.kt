@@ -18,95 +18,106 @@ package com.google.ai.edge.gallery.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// CLU/BOX Monochrome Brutalist Palette
-// Primary accent: white (#FFFFFF) on absolute black (#000000) with grey (#333333) accents.
-// The original neon-green name is kept for source compatibility; its value has been
-// updated to pure white so all existing references adopt the new brutalist look.
+// CLU/BOX Ultra-Dark Material Design Palette
+// ─────────────────────────────────────────────────────────────────────────────
+// Design language: pure black canvas, elevation through dark grey steps,
+// clean white as the sole accent.  No colour noise.
+//
+// Naming kept source-compatible with the original (neonGreen, absoluteBlack…)
+// so no call-sites need to change.
 
-val neonGreen = Color(0xFFFFFFFF)          // primary accent — white (was #4ade80)
-val absoluteBlack = Color(0xFF000000)       // all backgrounds
-val terminalDarkGrey = Color(0xFF111111)    // subtle surface tint
-val terminalMidGrey = Color(0xFF222222)     // card / surface container
-val terminalLightGrey = Color(0xFF333333)   // dividers, highlights (brutalist grey)
-val terminalOutline = Color(0xFF555555)     // border / outline mid-grey
-val terminalOnSurface = Color(0xFFFFFFFF)   // all body text — pure white
-val terminalError = Color(0xFFFF5555)       // error red (unchanged)
-val terminalErrorContainer = Color(0xFF3D0000) // error container (unchanged)
+// ── Core accent ────────────────────────────────────────────────────────────
+val neonGreen          = Color(0xFF39FF14)   // primary accent — neon green
 
-// Additional explicit grey steps for fine-grained UI control.
-val brutalistGrey = Color(0xFF888888)       // secondary text / disabled state
-val brutalistDark = Color(0xFF333333)       // same as terminalLightGrey; canonical reference
+// ── Background scale (pure black → near-black → dark grey) ─────────────────
+val absoluteBlack      = Color(0xFF000000)   // page / scaffold background
+val terminalDarkGrey   = Color(0xFF0D0D0D)   // surface lowest / subtle tint
+val terminalMidGrey    = Color(0xFF121212)   // card / sheet surface
+val terminalLightGrey  = Color(0xFF2A2A2A)   // elevated surface (container high)
+val terminalOutline    = Color(0xFF3A3A3A)   // dividers & borders
+val terminalOnSurface  = Color(0xFFECECEC)   // primary body text (off-white for comfort)
 
-// Dark-only scheme — all light-mode values mirror dark for forced dark mode.
+// ── Supporting greys ────────────────────────────────────────────────────────
+val brutalistGrey      = Color(0xFF7A7A7A)   // secondary / disabled text
+val brutalistDark      = Color(0xFF2A2A2A)   // alias for terminalLightGrey
 
-val primaryLight = neonGreen
-val onPrimaryLight = absoluteBlack
-val primaryContainerLight = terminalMidGrey
-val onPrimaryContainerLight = neonGreen
-val secondaryLight = neonGreen
-val onSecondaryLight = absoluteBlack
-val secondaryContainerLight = terminalMidGrey
-val onSecondaryContainerLight = neonGreen
-val tertiaryLight = neonGreen
-val onTertiaryLight = absoluteBlack
-val tertiaryContainerLight = terminalMidGrey
-val onTertiaryContainerLight = neonGreen
-val errorLight = terminalError
-val onErrorLight = absoluteBlack
-val errorContainerLight = terminalErrorContainer
-val onErrorContainerLight = terminalError
-val backgroundLight = absoluteBlack
-val onBackgroundLight = terminalOnSurface
-val surfaceLight = absoluteBlack
-val onSurfaceLight = terminalOnSurface
-val surfaceVariantLight = terminalDarkGrey
-val onSurfaceVariantLight = terminalOnSurface
-val surfaceContainerLowestLight = absoluteBlack
-val surfaceContainerLowLight = terminalDarkGrey
-val surfaceContainerLight = terminalMidGrey
-val surfaceContainerHighLight = terminalLightGrey
-val surfaceContainerHighestLight = terminalLightGrey
-val inverseSurfaceLight = terminalOnSurface
-val inverseOnSurfaceLight = absoluteBlack
-val outlineLight = terminalOutline
-val outlineVariantLight = terminalMidGrey
-val inversePrimaryLight = absoluteBlack
-val surfaceDimLight = absoluteBlack
-val surfaceBrightLight = terminalMidGrey
-val scrimLight = absoluteBlack
+// ── Semantic error palette (unchanged) ─────────────────────────────────────
+val terminalError          = Color(0xFFFF5555)
+val terminalErrorContainer = Color(0xFF3D0000)
 
-val primaryDark = neonGreen
-val onPrimaryDark = absoluteBlack
-val primaryContainerDark = terminalMidGrey
-val onPrimaryContainerDark = neonGreen
-val secondaryDark = neonGreen
-val onSecondaryDark = absoluteBlack
-val secondaryContainerDark = terminalMidGrey
-val onSecondaryContainerDark = neonGreen
-val tertiaryDark = neonGreen
-val onTertiaryDark = absoluteBlack
-val tertiaryContainerDark = terminalMidGrey
-val onTertiaryContainerDark = neonGreen
-val errorDark = terminalError
-val onErrorDark = absoluteBlack
-val errorContainerDark = terminalErrorContainer
-val onErrorContainerDark = terminalError
-val backgroundDark = absoluteBlack
-val onBackgroundDark = terminalOnSurface
-val surfaceDark = absoluteBlack
-val onSurfaceDark = terminalOnSurface
-val surfaceVariantDark = terminalDarkGrey
-val onSurfaceVariantDark = terminalOnSurface
-val surfaceContainerLowestDark = absoluteBlack
-val surfaceContainerLowDark = terminalDarkGrey
-val surfaceContainerDark = terminalMidGrey
-val surfaceContainerHighDark = terminalLightGrey
-val surfaceContainerHighestDark = terminalLightGrey
-val inverseSurfaceDark = terminalOnSurface
-val inverseOnSurfaceDark = absoluteBlack
-val outlineDark = terminalOutline
-val outlineVariantDark = terminalMidGrey
-val inversePrimaryDark = absoluteBlack
-val surfaceDimDark = absoluteBlack
-val surfaceBrightDark = terminalMidGrey
-val scrimDark = absoluteBlack
+// ── Light-mode palette — mirrors dark (app is always dark, but Material3
+//    requires both to be specified for the lightColorScheme constructor).    ──
+
+val primaryLight                 = neonGreen
+val onPrimaryLight               = absoluteBlack
+val primaryContainerLight        = terminalLightGrey
+val onPrimaryContainerLight      = neonGreen
+val secondaryLight               = Color(0xFFB0B0B0)    // light grey secondary
+val onSecondaryLight             = absoluteBlack
+val secondaryContainerLight      = terminalMidGrey
+val onSecondaryContainerLight    = terminalOnSurface
+val tertiaryLight                = Color(0xFF909090)    // dark grey tertiary
+val onTertiaryLight              = absoluteBlack
+val tertiaryContainerLight       = terminalMidGrey
+val onTertiaryContainerLight     = terminalOnSurface
+val errorLight                   = terminalError
+val onErrorLight                 = absoluteBlack
+val errorContainerLight          = terminalErrorContainer
+val onErrorContainerLight        = terminalError
+val backgroundLight              = absoluteBlack
+val onBackgroundLight            = terminalOnSurface
+val surfaceLight                 = absoluteBlack
+val onSurfaceLight               = terminalOnSurface
+val surfaceVariantLight          = terminalDarkGrey
+val onSurfaceVariantLight        = Color(0xFFCCCCCC)
+val surfaceContainerLowestLight  = absoluteBlack
+val surfaceContainerLowLight     = terminalDarkGrey
+val surfaceContainerLight        = terminalMidGrey
+val surfaceContainerHighLight    = terminalLightGrey
+val surfaceContainerHighestLight = Color(0xFF333333)
+val inverseSurfaceLight          = terminalOnSurface
+val inverseOnSurfaceLight        = absoluteBlack
+val outlineLight                 = terminalOutline
+val outlineVariantLight          = terminalMidGrey
+val inversePrimaryLight          = absoluteBlack
+val surfaceDimLight              = absoluteBlack
+val surfaceBrightLight           = terminalLightGrey
+val scrimLight                   = absoluteBlack
+
+// ── Dark-mode palette — same values for forced dark ───────────────────────
+
+val primaryDark                 = neonGreen
+val onPrimaryDark               = absoluteBlack
+val primaryContainerDark        = terminalLightGrey
+val onPrimaryContainerDark      = neonGreen
+val secondaryDark               = Color(0xFFB0B0B0)    // light grey secondary
+val onSecondaryDark             = absoluteBlack
+val secondaryContainerDark      = terminalMidGrey
+val onSecondaryContainerDark    = terminalOnSurface
+val tertiaryDark                = Color(0xFF909090)    // dark grey tertiary
+val onTertiaryDark              = absoluteBlack
+val tertiaryContainerDark       = terminalMidGrey
+val onTertiaryContainerDark     = terminalOnSurface
+val errorDark                   = terminalError
+val onErrorDark                 = absoluteBlack
+val errorContainerDark          = terminalErrorContainer
+val onErrorContainerDark        = terminalError
+val backgroundDark              = absoluteBlack
+val onBackgroundDark            = terminalOnSurface
+val surfaceDark                 = absoluteBlack
+val onSurfaceDark               = terminalOnSurface
+val surfaceVariantDark          = terminalDarkGrey
+val onSurfaceVariantDark        = Color(0xFFCCCCCC)
+val surfaceContainerLowestDark  = absoluteBlack
+val surfaceContainerLowDark     = terminalDarkGrey
+val surfaceContainerDark        = terminalMidGrey
+val surfaceContainerHighDark    = terminalLightGrey
+val surfaceContainerHighestDark = Color(0xFF333333)
+val inverseSurfaceDark          = terminalOnSurface
+val inverseOnSurfaceDark        = absoluteBlack
+val outlineDark                 = terminalOutline
+val outlineVariantDark          = terminalMidGrey
+val inversePrimaryDark          = absoluteBlack
+val surfaceDimDark              = absoluteBlack
+val surfaceBrightDark           = terminalLightGrey
+val scrimDark                   = absoluteBlack
