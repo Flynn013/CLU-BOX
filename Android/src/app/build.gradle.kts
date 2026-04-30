@@ -72,16 +72,17 @@ android {
         compose = true
         buildConfig = true
     }
-
-    // Chaquopy wraps the android extension with a classloader-isolated proxy.
-    // Fix: use direct property access INSIDE the android block (no lambda = no checkcast bytecode instruction).
-    @Suppress("DEPRECATION")
-    packagingOptions.jniLibs.useLegacyPackaging = true
-    @Suppress("DEPRECATION")
-    packagingOptions.resources.excludes.add("/META-INF/{AL2.0,LGPL2.1}")
-    @Suppress("DEPRECATION")
-    packagingOptions.resources.excludes.add("META-INF/gradle/incremental.annotation.processors")
 }
+
+// --- THE CHAQUOPY BYPASS ---
+// Chaquopy dynamically wraps the 'android' block, but its proxy clashes with AGP 8.9+ 
+// packaging method signatures, causing UnresolvedReferences and NoSuchMethodErrors.
+// We bypass the proxy completely by pulling the pure AGP extension directly.
+val agpExtension = extensions.getByType<com.android.build.api.dsl.ApplicationExtension>()
+agpExtension.packaging.jniLibs.useLegacyPackaging = true
+agpExtension.packaging.resources.excludes.add("/META-INF/{AL2.0,LGPL2.1}")
+agpExtension.packaging.resources.excludes.add("META-INF/gradle/incremental.annotation.processors")
+// ---------------------------
 
 dependencies {
     implementation(libs.androidx.core.ktx)
