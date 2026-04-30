@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -29,17 +29,6 @@ private const val TAG = "NativeMcpBridge"
  * Unlike [com.google.ai.edge.gallery.data.NativeShellBridge], this bridge does **not** wrap the
  * command in a PTY or terminal emulator.  PTY/TTY injection would corrupt the line-delimited
  * JSON-RPC stream with ANSI escape codes, causing the JSON parser to fail silently.
- *
- * Usage:
- * ```
- * val bridge = NativeMcpBridge()
- * bridge.start("node /path/to/mcp-server/index.js", mapOf("API_KEY" to "…"))
- * bridge.sendLine(requestJson)
- * val response = bridge.readLine()
- * bridge.stop()
- * ```
- *
- * @see McpClient for the protocol layer that sits on top of this bridge.
  */
 class NativeMcpBridge {
 
@@ -54,9 +43,7 @@ class NativeMcpBridge {
   /**
    * Starts the MCP server subprocess.
    *
-   * [command] is split on whitespace to form the [ProcessBuilder] argument list —
-   * e.g. `"node /data/mcp/server/index.js"` becomes `["node", "/data/mcp/server/index.js"]`.
-   *
+   * Executes the command safely using the native shell to preserve quoted paths.
    * Environment variables in [envVars] are merged into the subprocess environment **without**
    * logging their values, keeping secrets out of Logcat.
    *
@@ -68,11 +55,10 @@ class NativeMcpBridge {
       Log.w(TAG, "start() called while already running — stopping previous process first")
       stop()
     }
-    val tokens = command.trim().split(Regex("\\s+"))
-    Log.d(TAG, "Starting MCP server: ${tokens.joinToString(" ")} (${envVars.size} env vars)")
+    Log.d(TAG, "Starting MCP server: $command (${envVars.size} env vars)")
 
     val proc =
-      ProcessBuilder(tokens)
+      ProcessBuilder("/system/bin/sh", "-c", command)
         // Keep stderr separate so it does not corrupt the JSON-RPC stdout stream.
         .redirectErrorStream(false)
         .also { pb ->
@@ -89,8 +75,6 @@ class NativeMcpBridge {
 
   /**
    * Writes a single JSON-RPC line to the subprocess stdin.
-   *
-   * The newline character is appended automatically so callers need not include it.
    */
   fun sendLine(json: String) {
     try {
@@ -105,9 +89,6 @@ class NativeMcpBridge {
 
   /**
    * Reads one line from the subprocess stdout.
-   *
-   * Blocks the calling thread until a newline-terminated message arrives.
-   * Returns `null` if the stream closes or an I/O error occurs.
    */
   fun readLine(): String? =
     try {
