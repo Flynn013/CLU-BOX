@@ -43,6 +43,9 @@ android {
         ndk {
             abiFilters.add("arm64-v8a")
         }
+
+        // REQUIRED BY APPAUTH LIBRARY: Tells the browser how to deep-link back to the app
+        manifestPlaceholders["appAuthRedirectScheme"] = "com.google.ai.edge.gallery"
     }
 
     buildTypes {
@@ -77,8 +80,6 @@ android {
 // ---------------------------------------------------------
 // THE ACTUAL BYPASS: Android Components Variant API
 // ---------------------------------------------------------
-// We drop the read-only 'useLegacyPackaging' since the Manifest 
-// already handles 'extractNativeLibs=true' implicitly.
 androidComponents {
     onVariants { variant ->
         variant.packaging.resources.excludes.add("/META-INF/{AL2.0,LGPL2.1}")
