@@ -300,7 +300,7 @@ fun HomeScreen(
                 SquareDrawerItem(
                   label = stringResource(R.string.drawer_models_label),
                   description = stringResource(R.string.drawer_models_description),
-                  icon = Icons.AutoMirrored.Rounded.ListAlt,
+                  icon = Icons.Rounded.ListAlt,
                   onClick = {
                     scope.launch { drawerState.close() }
                     scope.launch {
