@@ -77,12 +77,10 @@ android {
 // ---------------------------------------------------------
 // THE ACTUAL BYPASS: Android Components Variant API
 // ---------------------------------------------------------
-// Chaquopy poisons the 'android' block extension proxy. 
-// We abandon configuring packaging in there completely.
-// We use the modern AGP Variant API which Chaquopy cannot touch.
 androidComponents {
     onVariants { variant ->
-        variant.packaging.jniLibs.useLegacyPackaging.set(true)
+        // Direct boolean assignment instead of .set()
+        variant.packaging.jniLibs.useLegacyPackaging = true
         variant.packaging.resources.excludes.add("/META-INF/{AL2.0,LGPL2.1}")
         variant.packaging.resources.excludes.add("META-INF/gradle/incremental.annotation.processors")
     }
