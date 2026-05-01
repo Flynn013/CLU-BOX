@@ -686,3 +686,6 @@ class ChatWebViewClient(val context: Context) : BaseGalleryWebViewClient(context
     onPageLoaded?.invoke()
   }
 }
+
+data class ResultImage(val base64: String?)
+data class ResultWebView(val url: String?, val iframe: Boolean?, val aspectRatio: Float?)

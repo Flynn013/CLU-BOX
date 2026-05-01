@@ -162,7 +162,7 @@ fun SkillTesterBottomSheet(agentTools: AgentTools, skill: Skill, onDismiss: () -
                   MessageBodyWebview(
                     message =
                       ChatMessageWebView(
-                        url = finalUrl,
+                        url = finalUrl ?: "",
                         iframe = webview.iframe == true,
                         aspectRatio = 1.333f,
                       )

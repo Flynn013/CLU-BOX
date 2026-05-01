@@ -637,7 +637,7 @@ private fun TryGm4IntroText(enableAnimation: Boolean) {
     horizontalArrangement = Arrangement.spacedBy(8.dp),
   ) {
     Icon(
-      Icons.automirrored.rounded.ListAlt,
+      Icons.Rounded.ListAlt,
       contentDescription = null,
       modifier = Modifier.size(24.dp),
       tint = neonGreen,
