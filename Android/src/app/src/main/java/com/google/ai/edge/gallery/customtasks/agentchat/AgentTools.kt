@@ -23,6 +23,7 @@ import com.google.ai.edge.gallery.data.TerminalSessionManager
 import com.google.ai.edge.gallery.data.brainbox.BrainBoxDao
 import com.google.ai.edge.gallery.data.brainbox.VectorEngine
 import com.google.ai.edge.litertlm.Tool
+import com.google.ai.edge.litertlm.ToolSet
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -41,7 +42,7 @@ private const val MAX_TOOL_OUTPUT_CHARS = 3000
  * Mutable properties (context, brainBoxDao, etc.) are injected by [AgentChatScreen]
  * after Compose composition.
  */
-class AgentTools {
+class AgentTools : ToolSet {
 
   // ── Injected by AgentChatScreen after composition ─────────────────
   var context: Context? = null

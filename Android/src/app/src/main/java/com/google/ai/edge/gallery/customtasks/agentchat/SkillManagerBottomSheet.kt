@@ -723,7 +723,7 @@ fun SkillManagerBottomSheet(
       var curSecret by remember {
         mutableStateOf(
           skillManagerViewModel.dataStoreRepository.readSecret(
-            getSkillSecretKey(skillName = it.skill.name)
+            skillManagerViewModel.getSkillSecretKey(skillName = it.skill.name)
           ) ?: ""
         )
       }
@@ -734,7 +734,7 @@ fun SkillManagerBottomSheet(
         onValueChange = { curSecret = it },
         onDone = {
           skillManagerViewModel.dataStoreRepository.saveSecret(
-            key = getSkillSecretKey(skillName = it.skill.name),
+            key = skillManagerViewModel.getSkillSecretKey(skillName = it.skill.name),
             value = curSecret,
           )
           showSecretEditorDialog = false

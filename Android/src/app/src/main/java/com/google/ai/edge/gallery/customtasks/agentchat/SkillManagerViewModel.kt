@@ -690,6 +690,11 @@ constructor(
     }
   }
 
+  /** Generates a secret key for a skill. */
+  fun getSkillSecretKey(skillName: String): String {
+    return "skill_secret_$skillName"
+  }
+
   /**
    * Converts the content of a skill.md file to a [Skill] proto.
    *

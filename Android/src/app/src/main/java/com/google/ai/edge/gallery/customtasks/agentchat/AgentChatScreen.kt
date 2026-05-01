@@ -648,9 +648,6 @@ private fun resetSessionWithCurrentSkills(
   onDone: (Model) -> Unit = {},
 ) {
   val model = modelManagerViewModel.uiState.value.selectedModel
-  // FIX: Properly extract the ToolSet from AgentTools so the new LiteRT API recognizes it.
-  val toolSet = agentTools.getToolSet()
-  
   viewModel.resetSession(
     task = task,
     model = model,
@@ -658,7 +655,7 @@ private fun resetSessionWithCurrentSkills(
       skillManagerViewModel.getSystemPrompt(
         curSystemPrompt,
       ),
-    tools = listOf(tool(toolSet)),
+    tools = listOf(tool(agentTools)),
     supportImage = true,
     supportAudio = true,
     onDone = { onDone(model) },

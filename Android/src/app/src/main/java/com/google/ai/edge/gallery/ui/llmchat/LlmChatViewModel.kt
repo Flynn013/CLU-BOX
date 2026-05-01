@@ -51,7 +51,7 @@ private const val TAG = "AGLlmChatViewModel"
 private const val NEURON_LABEL_MAX_CHARS = 80
 
 @HiltViewModel
-class LlmChatViewModel
+open class LlmChatViewModel
 @Inject
 constructor(
   private val dataStoreRepository: DataStoreRepository,

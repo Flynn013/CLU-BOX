@@ -99,9 +99,6 @@ class AgentChatTask @Inject constructor() : CustomTask {
           skillRegistry = agentTools.skillRegistry,
         )
         
-        // FIX: Extract the ToolSet before passing to litertlm tool()
-        val toolSet = agentTools.getToolSet()
-        
         helper.initialize(
           context = context,
           model = model,
@@ -109,7 +106,7 @@ class AgentChatTask @Inject constructor() : CustomTask {
           supportAudio = true,
           onDone = onDone,
           systemInstruction = smvm.getSystemPrompt(finalPrompt),
-          tools = listOf(tool(toolSet)),
+          tools = listOf(tool(agentTools)),
           // Constrained decoding is intentionally DISABLED for Agent Chat.
           // General-purpose Gemma models (E2B/E4B) were not fine-tuned with the
           // full 21-tool catalog grammar. Enabling constrained decoding restricts

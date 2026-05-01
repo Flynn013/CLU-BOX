@@ -38,7 +38,7 @@ private const val TAG = "SkillRegistry"
  * process-global singleton) because skills hold a reference to their
  * parent [AgentTools].
  */
-class SkillRegistry(agentTools: AgentTools) {
+class SkillRegistry(private val agentTools: AgentTools) {
 
   /** All registered skills, keyed by [CluSkill.name] for O(1) lookup. */
   private val skills: ConcurrentHashMap<String, CluSkill> = ConcurrentHashMap()
