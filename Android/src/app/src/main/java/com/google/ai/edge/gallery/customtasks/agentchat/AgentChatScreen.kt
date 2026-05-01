@@ -75,7 +75,6 @@ import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.common.AskInfoAgentAction
 import com.google.ai.edge.gallery.common.CallJsAgentAction
 import com.google.ai.edge.gallery.common.SkillProgressAgentAction
-import com.google.ai.edge.gallery.common.decodeBase64ToBitmap
 import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.RuntimeType
@@ -684,6 +683,14 @@ class ChatWebViewClient(val context: Context) : BaseGalleryWebViewClient(context
     super.onPageFinished(view, url)
     Log.d(TAG, "page loaded")
     onPageLoaded?.invoke()
+  }
+}
+fun decodeBase64ToBitmap(base64String: String): android.graphics.Bitmap? {
+  return try {
+    val decodedBytes = android.util.Base64.decode(base64String, android.util.Base64.DEFAULT)
+    android.graphics.BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size)
+  } catch (e: Exception) {
+    null
   }
 }
 
