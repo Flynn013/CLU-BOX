@@ -77,10 +77,10 @@ android {
 // ---------------------------------------------------------
 // THE ACTUAL BYPASS: Android Components Variant API
 // ---------------------------------------------------------
+// We drop the read-only 'useLegacyPackaging' since the Manifest 
+// already handles 'extractNativeLibs=true' implicitly.
 androidComponents {
     onVariants { variant ->
-        // Direct boolean assignment instead of .set()
-        variant.packaging.jniLibs.useLegacyPackaging = true
         variant.packaging.resources.excludes.add("/META-INF/{AL2.0,LGPL2.1}")
         variant.packaging.resources.excludes.add("META-INF/gradle/incremental.annotation.processors")
     }
