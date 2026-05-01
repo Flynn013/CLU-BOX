@@ -142,6 +142,11 @@ dependencies {
     implementation(libs.commonmark)
     implementation(libs.richtext)
     
+    // NEW DEPENDENCIES ADDED TO FIX COMPILER ERRORS
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
+    implementation("androidx.security:security-crypto-ktx:1.1.0-alpha06")
+    implementation("com.google.mediapipe:tasks-text:0.20230731")
+    
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
