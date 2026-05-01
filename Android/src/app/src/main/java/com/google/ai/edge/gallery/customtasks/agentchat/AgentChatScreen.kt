@@ -452,4 +452,164 @@ fun AgentChatScreen(
                   when (curConsoleMessage.messageLevel()) {
                     ConsoleMessage.MessageLevel.LOG -> LogMessageLevel.Info
                     ConsoleMessage.MessageLevel.ERROR -> LogMessageLevel.Error
-     
+                     ConsoleMessage.MessageLevel.WARNING -> LogMessageLevel.Warning
+                    else -> LogMessageLevel.Info
+                  },
+                source = curConsoleMessage.sourceId(),
+                lineNumber = curConsoleMessage.lineNumber(),
+                message = curConsoleMessage.message(),
+              )
+            viewModel.addLogMessageToLastCollapsableProgressPanel(
+              model = model,
+              logMessage = logMessage,
+            )
+            Log.d(
+              TAG,
+              "${curConsoleMessage.message()} " +
+                "-- From line ${curConsoleMessage.lineNumber()} of ${curConsoleMessage.sourceId()}",
+            )
+          }
+        },
+      )
+    },
+    allowEditingSystemPrompt = true,
+    curSystemPrompt = curSystemPrompt,
+    onSystemPromptChanged = { newPrompt ->
+      curSystemPrompt = newPrompt
+      resetSessionWithCurrentSkills(
+        viewModel,
+        modelManagerViewModel,
+        skillManagerViewModel,
+        task,
+        curSystemPrompt,
+        agentTools,
+        onDone = { model ->
+          viewModel.addMessage(
+            model = model,
+            message = ChatMessageInfo(content = systemPromptUpdatedMessage),
+          )
+        },
+      )
+    },
+    emptyStateComposable = { _ ->
+      // Blank initial state — minimalist aesthetic.
+      Box(modifier = Modifier.fillMaxSize())
+    },
+    sendMessageTrigger = sendMessageTrigger,
+    onChatHistoryClicked = { showChatHistorySheet = true },
+  )
+
+  if (showAskInfoDialog && currentAskInfoAction != null) {
+    val action = currentAskInfoAction!!
+    SecretEditorDialog(
+      title = action.dialogTitle,
+      fieldLabel = action.fieldLabel,
+      value = askInfoInputValue,
+      onValueChange = { askInfoInputValue = it },
+      onDone = {
+        action.result.complete(askInfoInputValue)
+        showAskInfoDialog = false
+        currentAskInfoAction = null
+      },
+      onDismiss = {
+        action.result.complete("")
+        showAskInfoDialog = false
+        currentAskInfoAction = null
+      },
+    )
+  }
+
+  if (showSkillManagerBottomSheet) {
+    SkillManagerBottomSheet(
+      agentTools = agentTools,
+      skillManagerViewModel = skillManagerViewModel,
+      onDismiss = { selectedSkillsChanged ->
+        // Hide sheet.
+        showSkillManagerBottomSheet = false
+
+        // Reset session when selected skills changed.
+        if (selectedSkillsChanged) {
+          Log.d(TAG, "Selected skill changed. Resetting conversation.")
+          resetSessionWithCurrentSkills(
+            viewModel,
+            modelManagerViewModel,
+            skillManagerViewModel,
+            task,
+            curSystemPrompt,
+            agentTools,
+          )
+        }
+      },
+    )
+  }
+
+  if (showAlertForDisabledSkill) {
+    AlertDialog(
+      onDismissRequest = { showAlertForDisabledSkill = false },
+      title = { Text("The \"$disabledSkillName\" skill is currently disabled") },
+      text = { Text(stringResource(R.string.enable_skill_dialog_content)) },
+      confirmButton = {
+        Button(onClick = { showAlertForDisabledSkill = false }) {
+          Text(stringResource(R.string.ok))
+        }
+      },
+    )
+  }
+
+  if (showChatHistorySheet) {
+    // Use key() to force recomposition when sessions are deleted
+    key(chatHistoryRefreshKey) {
+      ChatHistorySheet(
+        chatHistoryDao = chatHistoryDao,
+        onDismiss = { showChatHistorySheet = false },
+        onSessionSelected = { _, modelName ->
+          // Select the model and close sheet — the existing LaunchedEffect in ChatViewWrapper
+          // will automatically load the history for the newly selected model.
+          val matchingModel = task.models.find { it.name == modelName }
+          if (matchingModel != null) {
+            modelManagerViewModel.selectModel(model = matchingModel)
+          }
+          showChatHistorySheet = false
+        },
+        onSessionDeleted = { sessionTaskId, modelName ->
+          // Delete from database directly. If the model matches the current session,
+          // also clear in-memory state.
+          val matchingModel = task.models.find { it.name == modelName }
+          if (matchingModel != null) {
+            viewModel.wipeGrid(sessionTaskId, matchingModel)
+          } else {
+            // Model may have been removed from the task — delete DB rows directly.
+            chatHistoryScope.launch {
+              chatHistoryDao.deleteMessages(taskId = sessionTaskId, modelName = modelName)
+            }
+          }
+          // Bump refresh key to force LaunchedEffect in ChatHistorySheet to re-query
+          chatHistoryRefreshKey++
+        },
+      )
+    }
+  }
+
+  // ── Gemini Cloud Node: API key dialog ─────────────────────────────────
+  if (showGeminiApiKeyDialog) {
+    GeminiApiKeyDialog(
+      onDismiss = { showGeminiApiKeyDialog = false },
+      onApiKeySaved = { key ->
+        GeminiApiKeyStore.setApiKey(context, key)
+        showGeminiApiKeyDialog = false
+      },
+    )
+  }
+}
+
+private fun updateProgressPanel(viewModel: LlmChatViewModel, model: Model, agentTools: AgentTools) {
+  // Update status.
+  val lastProgressPanelMessage =
+    viewModel.getLastMessageWithType(
+      model = model,
+      type = ChatMessageType.COLLAPSABLE_PROGRESS_PANEL,
+    )
+  if (
+    lastProgressPanelMessage != null &&
+      lastProgressPanelMessage is ChatMessageCollaps
+    
