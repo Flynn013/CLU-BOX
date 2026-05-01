@@ -611,5 +611,81 @@ private fun updateProgressPanel(viewModel: LlmChatViewModel, model: Model, agent
     )
   if (
     lastProgressPanelMessage != null &&
-      lastProgressPanelMessage is ChatMessageCollaps
-    
+            lastProgressPanelMessage is ChatMessageCollapsableProgressPanel
+  ) {
+    if (lastProgressPanelMessage.title.startsWith("Loading")) {
+      agentTools.sendAgentAction(
+        SkillProgressAgentAction(
+          label = lastProgressPanelMessage.title.replace("Loading", "Loaded"),
+          inProgress = false,
+        )
+      )
+    } else if (lastProgressPanelMessage.title.startsWith("Calling")) {
+      agentTools.sendAgentAction(
+        SkillProgressAgentAction(
+          label = lastProgressPanelMessage.title.replace("Calling", "Called"),
+          inProgress = false,
+        )
+      )
+    } else if (lastProgressPanelMessage.title.startsWith("Executing")) {
+      agentTools.sendAgentAction(
+        SkillProgressAgentAction(
+          label = lastProgressPanelMessage.title.replace("Executing", "Executed"),
+          inProgress = false,
+        )
+      )
+    }
+  }
+}
+
+private fun resetSessionWithCurrentSkills(
+  viewModel: LlmChatViewModel,
+  modelManagerViewModel: ModelManagerViewModel,
+  skillManagerViewModel: SkillManagerViewModel,
+  task: Task,
+  curSystemPrompt: String,
+  agentTools: AgentTools,
+  onDone: (Model) -> Unit = {},
+) {
+  val model = modelManagerViewModel.uiState.value.selectedModel
+  // FIX: Properly extract the ToolSet from AgentTools so the new LiteRT API recognizes it.
+  val toolSet = agentTools.getToolSet()
+  
+  viewModel.resetSession(
+    task = task,
+    model = model,
+    systemInstruction =
+      skillManagerViewModel.getSystemPrompt(
+        curSystemPrompt,
+      ),
+    tools = listOf(tool(toolSet)),
+    supportImage = true,
+    supportAudio = true,
+    onDone = { onDone(model) },
+    // Constrained decoding disabled — see AgentChatTaskModule for rationale.
+    enableConversationConstrainedDecoding = false,
+  )
+}
+
+class ChatWebViewJavascriptInterface {
+  var onResultListener: ((String) -> Unit)? = null
+
+  @JavascriptInterface
+  fun onResultReady(result: String) {
+    onResultListener?.invoke(result)
+  }
+}
+
+class ChatWebViewClient(val context: Context) : BaseGalleryWebViewClient(context = context) {
+  private var onPageLoaded: (() -> Unit)? = null
+
+  fun setPageLoadListener(listener: (() -> Unit)?) {
+    onPageLoaded = listener
+  }
+
+  override fun onPageFinished(view: WebView?, url: String?) {
+    super.onPageFinished(view, url)
+    Log.d(TAG, "page loaded")
+    onPageLoaded?.invoke()
+  }
+}
