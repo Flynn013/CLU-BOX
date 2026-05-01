@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -151,11 +151,7 @@ fun GalleryApp(
   agentTools.brainBoxDao = remember(context) { GraphDatabase.getInstance(context).brainBoxDao() }
   agentTools.vectorEngine = remember(context) { com.google.ai.edge.gallery.data.brainbox.VectorEngine(context) }
   agentTools.terminalSessionManager = terminalSessionManager
-  agentTools.sharedShellManager = sharedShellManager
-  // Share the GalleryApp-level singleton so the AI and the FILE_BOX editor see the
-  // same currentFilePath / cursorLine flows and drive the same FileObserver revision.
-  agentTools.fileBoxManager = fileBoxManager
-
+  
   // MCP connection manager — persists server configs in the encrypted vault and manages
   // the live stdio bridges.  Initialised here so it survives module navigation.
   val mcpConnectionManager = remember { McpConnectionManager(context) }
@@ -400,4 +396,3 @@ private fun DrawerItem(module: OsModule, selected: Boolean, onClick: () -> Unit)
     )
   }
 }
-
