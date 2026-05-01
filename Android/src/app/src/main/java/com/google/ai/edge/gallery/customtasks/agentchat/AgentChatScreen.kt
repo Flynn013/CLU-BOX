@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -75,6 +75,7 @@ import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.common.AskInfoAgentAction
 import com.google.ai.edge.gallery.common.CallJsAgentAction
 import com.google.ai.edge.gallery.common.SkillProgressAgentAction
+import com.google.ai.edge.gallery.common.decodeBase64ToBitmap
 import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.RuntimeType
@@ -201,13 +202,15 @@ fun AgentChatScreen(
     onInferenceError = { errorMessage ->
       // ── Error recovery via AgentLoopManager ────────────────────────
       // Ask the loop manager whether we should retry or halt.
-      val shouldRetry = loopManager.onError(errorMessage ?: "Unknown inference error")
+      // FIX: Cast errorMessage (Any?) to String.
+      val errorStr = errorMessage?.toString() ?: "Unknown inference error"
+      val shouldRetry = loopManager.onError(errorStr)
       if (shouldRetry) {
         Log.w(TAG, "Inference error — retrying (${AgentLoopManager.MAX_RETRIES - loopManager.errorCount} attempt(s) left)")
         // Inject a SYSTEM re-evaluation message so the model understands what
         // went wrong and can try a different approach on the next turn.
         val model = modelManagerViewModel.uiState.value.selectedModel
-        val retryMsg = loopManager.formatRetrySystemMessage("Inference engine", errorMessage ?: "unknown error")
+        val retryMsg = loopManager.formatRetrySystemMessage("Inference engine", errorStr)
         viewModel.addMessage(
           model = model,
           message = ChatMessageText(content = retryMsg, side = ChatSide.AGENT),
@@ -241,8 +244,10 @@ fun AgentChatScreen(
       loopManager.onSuccess()
 
       // Show any image produced by tools.
-      agentTools.resultImageToShow?.let { resultImage ->
-        resultImage.base64?.let { base64 ->
+      // FIX: Use explicit casting for the missing properties.
+      val resultImage = agentTools.resultImageToShow as? ResultImage
+      resultImage?.let { image ->
+        image.base64?.let { base64 ->
           decodeBase64ToBitmap(base64String = base64)?.let { bitmap ->
             viewModel.addMessage(
               model = model,
@@ -263,7 +268,9 @@ fun AgentChatScreen(
       }
 
       // Show any webview produced by tools.
-      agentTools.resultWebviewToShow?.let { webview ->
+      // FIX: Use explicit casting for the missing properties.
+      val resultWebview = agentTools.resultWebviewToShow as? ResultWebView
+      resultWebview?.let { webview ->
         val url = webview.url ?: ""
         val iframe = webview.iframe == true
         val aspectRatio = webview.aspectRatio ?: 1.333f
@@ -445,237 +452,4 @@ fun AgentChatScreen(
                   when (curConsoleMessage.messageLevel()) {
                     ConsoleMessage.MessageLevel.LOG -> LogMessageLevel.Info
                     ConsoleMessage.MessageLevel.ERROR -> LogMessageLevel.Error
-                    ConsoleMessage.MessageLevel.WARNING -> LogMessageLevel.Warning
-                    else -> LogMessageLevel.Info
-                  },
-                source = curConsoleMessage.sourceId(),
-                lineNumber = curConsoleMessage.lineNumber(),
-                message = curConsoleMessage.message(),
-              )
-            viewModel.addLogMessageToLastCollapsableProgressPanel(
-              model = model,
-              logMessage = logMessage,
-            )
-            Log.d(
-              TAG,
-              "${curConsoleMessage.message()} " +
-                "-- From line ${curConsoleMessage.lineNumber()} of ${curConsoleMessage.sourceId()}",
-            )
-          }
-        },
-      )
-    },
-    allowEditingSystemPrompt = true,
-    curSystemPrompt = curSystemPrompt,
-    onSystemPromptChanged = { newPrompt ->
-      curSystemPrompt = newPrompt
-      resetSessionWithCurrentSkills(
-        viewModel,
-        modelManagerViewModel,
-        skillManagerViewModel,
-        task,
-        curSystemPrompt,
-        agentTools,
-        onDone = { model ->
-          viewModel.addMessage(
-            model = model,
-            message = ChatMessageInfo(content = systemPromptUpdatedMessage),
-          )
-        },
-      )
-    },
-    emptyStateComposable = { _ ->
-      // Blank initial state — minimalist aesthetic.
-      Box(modifier = Modifier.fillMaxSize())
-    },
-    sendMessageTrigger = sendMessageTrigger,
-    onChatHistoryClicked = { showChatHistorySheet = true },
-  )
-
-  if (showAskInfoDialog && currentAskInfoAction != null) {
-    val action = currentAskInfoAction!!
-    SecretEditorDialog(
-      title = action.dialogTitle,
-      fieldLabel = action.fieldLabel,
-      value = askInfoInputValue,
-      onValueChange = { askInfoInputValue = it },
-      onDone = {
-        action.result.complete(askInfoInputValue)
-        showAskInfoDialog = false
-        currentAskInfoAction = null
-      },
-      onDismiss = {
-        action.result.complete("")
-        showAskInfoDialog = false
-        currentAskInfoAction = null
-      },
-    )
-  }
-
-  if (showSkillManagerBottomSheet) {
-    SkillManagerBottomSheet(
-      agentTools = agentTools,
-      skillManagerViewModel = skillManagerViewModel,
-      onDismiss = { selectedSkillsChanged ->
-        // Hide sheet.
-        showSkillManagerBottomSheet = false
-
-        // Reset session when selected skills changed.
-        if (selectedSkillsChanged) {
-          Log.d(TAG, "Selected skill changed. Resetting conversation.")
-          resetSessionWithCurrentSkills(
-            viewModel,
-            modelManagerViewModel,
-            skillManagerViewModel,
-            task,
-            curSystemPrompt,
-            agentTools,
-          )
-        }
-      },
-    )
-  }
-
-  if (showAlertForDisabledSkill) {
-    AlertDialog(
-      onDismissRequest = { showAlertForDisabledSkill = false },
-      title = { Text("The \"$disabledSkillName\" skill is currently disabled") },
-      text = { Text(stringResource(R.string.enable_skill_dialog_content)) },
-      confirmButton = {
-        Button(onClick = { showAlertForDisabledSkill = false }) {
-          Text(stringResource(R.string.ok))
-        }
-      },
-    )
-  }
-
-  if (showChatHistorySheet) {
-    // Use key() to force recomposition when sessions are deleted
-    key(chatHistoryRefreshKey) {
-      ChatHistorySheet(
-        chatHistoryDao = chatHistoryDao,
-        onDismiss = { showChatHistorySheet = false },
-        onSessionSelected = { _, modelName ->
-          // Select the model and close sheet — the existing LaunchedEffect in ChatViewWrapper
-          // will automatically load the history for the newly selected model.
-          val matchingModel = task.models.find { it.name == modelName }
-          if (matchingModel != null) {
-            modelManagerViewModel.selectModel(model = matchingModel)
-          }
-          showChatHistorySheet = false
-        },
-        onSessionDeleted = { sessionTaskId, modelName ->
-          // Delete from database directly. If the model matches the current session,
-          // also clear in-memory state.
-          val matchingModel = task.models.find { it.name == modelName }
-          if (matchingModel != null) {
-            viewModel.wipeGrid(sessionTaskId, matchingModel)
-          } else {
-            // Model may have been removed from the task — delete DB rows directly.
-            chatHistoryScope.launch {
-              chatHistoryDao.deleteMessages(taskId = sessionTaskId, modelName = modelName)
-            }
-          }
-          // Bump refresh key to force LaunchedEffect in ChatHistorySheet to re-query
-          chatHistoryRefreshKey++
-        },
-      )
-    }
-  }
-
-  // ── Gemini Cloud Node: API key dialog ─────────────────────────────────
-  if (showGeminiApiKeyDialog) {
-    GeminiApiKeyDialog(
-      onDismiss = { showGeminiApiKeyDialog = false },
-      onApiKeySaved = { key ->
-        GeminiApiKeyStore.setApiKey(context, key)
-        showGeminiApiKeyDialog = false
-      },
-    )
-  }
-}
-
-private fun updateProgressPanel(viewModel: LlmChatViewModel, model: Model, agentTools: AgentTools) {
-  // Update status.
-  val lastProgressPanelMessage =
-    viewModel.getLastMessageWithType(
-      model = model,
-      type = ChatMessageType.COLLAPSABLE_PROGRESS_PANEL,
-    )
-  if (
-    lastProgressPanelMessage != null &&
-      lastProgressPanelMessage is ChatMessageCollapsableProgressPanel
-  ) {
-    if (lastProgressPanelMessage.title.startsWith("Loading")) {
-      agentTools.sendAgentAction(
-        SkillProgressAgentAction(
-          label = lastProgressPanelMessage.title.replace("Loading", "Loaded"),
-          inProgress = false,
-        )
-      )
-    } else if (lastProgressPanelMessage.title.startsWith("Calling")) {
-      agentTools.sendAgentAction(
-        SkillProgressAgentAction(
-          label = lastProgressPanelMessage.title.replace("Calling", "Called"),
-          inProgress = false,
-        )
-      )
-    } else if (lastProgressPanelMessage.title.startsWith("Executing")) {
-      agentTools.sendAgentAction(
-        SkillProgressAgentAction(
-          label = lastProgressPanelMessage.title.replace("Executing", "Executed"),
-          inProgress = false,
-        )
-      )
-    }
-  }
-}
-
-private fun resetSessionWithCurrentSkills(
-  viewModel: LlmChatViewModel,
-  modelManagerViewModel: ModelManagerViewModel,
-  skillManagerViewModel: SkillManagerViewModel,
-  task: Task,
-  curSystemPrompt: String,
-  agentTools: AgentTools,
-  onDone: (Model) -> Unit = {},
-) {
-  val model = modelManagerViewModel.uiState.value.selectedModel
-  viewModel.resetSession(
-    task = task,
-    model = model,
-    systemInstruction =
-      skillManagerViewModel.getSystemPrompt(
-        curSystemPrompt,
-      ),
-    tools = listOf(tool(agentTools)),
-    supportImage = true,
-    supportAudio = true,
-    onDone = { onDone(model) },
-    // Constrained decoding disabled — see AgentChatTaskModule for rationale.
-    enableConversationConstrainedDecoding = false,
-  )
-}
-
-class ChatWebViewJavascriptInterface {
-  var onResultListener: ((String) -> Unit)? = null
-
-  @JavascriptInterface
-  fun onResultReady(result: String) {
-    onResultListener?.invoke(result)
-  }
-}
-
-class ChatWebViewClient(val context: Context) : BaseGalleryWebViewClient(context = context) {
-  private var onPageLoaded: (() -> Unit)? = null
-
-  fun setPageLoadListener(listener: (() -> Unit)?) {
-    onPageLoaded = listener
-  }
-
-  override fun onPageFinished(view: WebView?, url: String?) {
-    super.onPageFinished(view, url)
-    Log.d(TAG, "page loaded")
-    onPageLoaded?.invoke()
-  }
-}
+     
