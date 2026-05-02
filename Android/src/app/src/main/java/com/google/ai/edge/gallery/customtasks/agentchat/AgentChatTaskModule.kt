@@ -33,8 +33,8 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
-import dagger.multibindings.IntoSet
 import javax.inject.Inject
+import dagger.multibindings.IntoSet
 import kotlinx.coroutines.CoroutineScope
 
 class AgentChatTask @Inject constructor() : CustomTask {
@@ -87,12 +87,13 @@ class AgentChatTask @Inject constructor() : CustomTask {
         } else {
           AgentEngine.LOCAL
         }
+        
         val helper = if (model.runtimeType == RuntimeType.GEMINI_CLOUD) {
-          GeminiCloudModelHelper.cacheApiKey(context)
           GeminiCloudModelHelper
         } else {
           LlmChatModelHelper
         }
+        
         val finalPrompt = SystemPromptManager.build(
           engine = agentTools.engine,
           basePrompt = task.defaultSystemPrompt,
