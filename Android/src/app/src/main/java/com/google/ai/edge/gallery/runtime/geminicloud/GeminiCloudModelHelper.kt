@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -49,8 +49,6 @@ import kotlinx.coroutines.launch
 
 private const val TAG = "GeminiCloudModelHelper"
 private const val API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
-// NOTE: The model ID is now taken from model.name at runtime (set when the model is created).
-// This constant is kept only as a fallback for legacy/test code paths.
 private const val GEMINI_MODEL_FALLBACK = "gemini-2.0-flash"
 private const val MAX_FUNCTION_CALL_ROUNDS = 10
 
@@ -59,6 +57,7 @@ private const val MAX_FUNCTION_CALL_ROUNDS = 10
  * tools, system prompt, and any in-flight inference job.
  */
 data class GeminiCloudInstance(
+  val context: Context, // Injected so we can dynamically fetch API keys at inference time
   var conversationHistory: MutableList<JsonObject> = mutableListOf(),
   var systemInstruction: String? = null,
   var toolDeclarations: JsonArray? = null,
@@ -94,13 +93,8 @@ object GeminiCloudModelHelper : LlmModelHelper {
     enableConversationConstrainedDecoding: Boolean,
     coroutineScope: CoroutineScope?,
   ) {
-    val apiKey = GeminiApiKeyStore.getApiKey(context)
-    if (apiKey == null) {
-      onDone("Gemini API key not configured. Please set your API key first.")
-      return
-    }
-    // Cache the API key for use during inference calls (avoids storing Context).
-    cachedApiKey = apiKey
+    // We NO LONGER check the API key here. We always initialize the instance so
+    // the UI doesn't drop into an infinite loading loop.
 
     // Build Gemini function declarations from the ToolSet.
     var toolDeclarations: JsonArray? = null
@@ -108,7 +102,6 @@ object GeminiCloudModelHelper : LlmModelHelper {
     if (tools.isNotEmpty()) {
       val provider = tools.firstOrNull()
       if (provider != null) {
-        // The ToolProvider wraps a ToolSet — extract it via the property.
         try {
           val tsField = provider.javaClass.declaredFields.find { ToolSet::class.java.isAssignableFrom(it.type) }
           if (tsField != null) {
@@ -127,6 +120,7 @@ object GeminiCloudModelHelper : LlmModelHelper {
     val systemText = systemInstruction?.let { buildSystemText(it) }
 
     val instance = GeminiCloudInstance(
+      context = context.applicationContext,
       systemInstruction = systemText,
       toolDeclarations = toolDeclarations,
       toolSet = toolSet,
@@ -235,8 +229,7 @@ object GeminiCloudModelHelper : LlmModelHelper {
             return@launch
           }
 
-          val content = candidates[0].asJsonObject
-            .getAsJsonObject("content")
+          val content = candidates[0].asJsonObject.getAsJsonObject("content")
           val parts = content?.getAsJsonArray("parts")
           if (parts == null || parts.size() == 0) {
             resultListener("", true, null)
@@ -248,11 +241,6 @@ object GeminiCloudModelHelper : LlmModelHelper {
           instance.conversationHistory.add(content)
 
           // Check if any part is a function call.
-          // ── Auto-Heal: wrap function-call extraction in try-catch ────
-          // If the model returns a malformed functionCall (missing fields,
-          // bad JSON structure, etc.) we inject a system error into the
-          // conversation history and let the inference loop continue so
-          // the model can self-correct on the next round.
           val functionCallPart = try {
             parts.firstOrNull { it.asJsonObject.has("functionCall") }
           } catch (e: Exception) {
@@ -289,17 +277,9 @@ object GeminiCloudModelHelper : LlmModelHelper {
               resultListener("", false, null)
               continue
             } catch (e: Exception) {
-              // ── Auto-Heal: malformed tool call recovery ──────────────
-              // Do NOT crash the loop. Inject a system error message into
-              // the conversation history so the model can self-correct.
-              // NOTE: This message is an internal recovery prompt injected
-              // into the LLM conversation — it is NOT shown to the user.
-              // The exception detail helps the model understand what went
-              // wrong so it can fix its output on the next round.
               Log.e(TAG, "Auto-Heal: malformed function call — injecting error and retrying", e)
               val sanitizedMsg = (e.message ?: "unknown error").take(200)
-              val errorMessage = "[System Error: Malformed tool call. Invalid JSON syntax " +
-                "or missing fields. Exception: $sanitizedMsg. Correct your formatting and try again.]"
+              val errorMessage = "[System Error: Malformed tool call. Exception: $sanitizedMsg. Correct formatting and try again.]"
               val errorContent = JsonObject().apply {
                 addProperty("role", "user")
                 add("parts", JsonArray().apply {
@@ -343,22 +323,13 @@ object GeminiCloudModelHelper : LlmModelHelper {
   // Gemini REST API communication
   // ──────────────────────────────────────────────────────────────────────────
 
-  /**
-   * Calls the Gemini generateContent endpoint with the full conversation
-   * history and returns the raw JSON response body.
-   */
   private fun callGeminiApi(model: Model, instance: GeminiCloudInstance): String {
-    val context = (model.instance as? GeminiCloudInstance) ?: instance
-    // We need the Android context to read the API key — pass it through model config.
-    // The API key was validated at initialize() time. We read it from the store
-    // using the application context cached in the instance.
-    // Since we don't store Context in the instance (to avoid leaks), we extract
-    // the key once at init and refresh here by reading it from the field
-    // set on the model.
-    val apiKey = getApiKeyFromModel(model) ?: throw IllegalStateException("API key missing")
+    // DYNAMIC FETCH: Grabs the key exactly when inference starts to prevent lockups.
+    val apiKey = GeminiApiKeyStore.getApiKey(instance.context)
+    if (apiKey.isNullOrBlank()) {
+      throw IllegalStateException("Gemini API key not configured. Please enter your API key.")
+    }
 
-    // Use the model's name as the Gemini model ID (e.g. "gemini-2.0-flash").
-    // Fall back to the legacy constant only if the name looks like a path or is empty.
     val geminiModelId = model.name.takeIf { it.isNotBlank() && !it.contains('/') }
       ?: GEMINI_MODEL_FALLBACK
     val url = URL("$API_BASE/$geminiModelId:generateContent?key=$apiKey")
@@ -391,13 +362,9 @@ object GeminiCloudModelHelper : LlmModelHelper {
     }
   }
 
-  /**
-   * Builds the JSON request body for the Gemini generateContent API.
-   */
   private fun buildRequestBody(instance: GeminiCloudInstance): String {
     val body = JsonObject()
 
-    // System instruction.
     instance.systemInstruction?.let { sysText ->
       body.add("system_instruction", JsonObject().apply {
         add("parts", JsonArray().apply {
@@ -406,14 +373,12 @@ object GeminiCloudModelHelper : LlmModelHelper {
       })
     }
 
-    // Conversation contents.
     val contents = JsonArray()
     for (msg in instance.conversationHistory) {
       contents.add(msg)
     }
     body.add("contents", contents)
 
-    // Tools (function declarations).
     instance.toolDeclarations?.let { decls ->
       if (decls.size() > 0) {
         body.add("tools", JsonArray().apply {
@@ -424,7 +389,6 @@ object GeminiCloudModelHelper : LlmModelHelper {
       }
     }
 
-    // Generation config.
     body.add("generationConfig", JsonObject().apply {
       addProperty("temperature", 1.0)
       addProperty("topP", 0.95)
@@ -439,12 +403,6 @@ object GeminiCloudModelHelper : LlmModelHelper {
   // Tool / Function Calling bridge
   // ──────────────────────────────────────────────────────────────────────────
 
-  /**
-   * Builds the `function_declarations` JSON array from a [ToolSet] instance
-   * by reflecting on its `@Tool`-annotated methods and their `@ToolParam`
-   * parameters. This maps the existing tool catalog to Gemini's native
-   * Function Calling schema.
-   */
   private fun buildFunctionDeclarations(toolSet: ToolSet): JsonArray {
     val declarations = JsonArray()
 
@@ -461,7 +419,6 @@ object GeminiCloudModelHelper : LlmModelHelper {
         val properties = JsonObject()
         val required = JsonArray()
 
-        // Skip the first parameter (this/receiver).
         for (param in fn.valueParameters) {
           val paramAnnotation = param.findAnnotation<com.google.ai.edge.litertlm.ToolParam>()
           val paramName = param.name ?: continue
@@ -489,10 +446,6 @@ object GeminiCloudModelHelper : LlmModelHelper {
     return declarations
   }
 
-  /**
-   * Dispatches a Gemini `functionCall` to the matching `@Tool` method on
-   * the [ToolSet]. Arguments are extracted from [args] by parameter name.
-   */
   @Suppress("UNCHECKED_CAST")
   private fun executeFunctionCall(
     toolSet: ToolSet?,
@@ -510,13 +463,13 @@ object GeminiCloudModelHelper : LlmModelHelper {
     }
 
     return try {
-      val paramValues = mutableListOf<Any?>(toolSet) // receiver
+      val paramValues = mutableListOf<Any?>(toolSet)
       for (param in fn.valueParameters) {
         val paramName = param.name ?: ""
         val value = if (args.has(paramName)) {
           args.get(paramName).asString
         } else {
-          "" // Default to empty string for missing params.
+          ""
         }
         paramValues.add(value)
       }
@@ -535,13 +488,6 @@ object GeminiCloudModelHelper : LlmModelHelper {
   // Helpers
   // ──────────────────────────────────────────────────────────────────────────
 
-  /**
-   * Extracts a plain-text system instruction from a [Contents] object.
-   *
-   * [Contents.of] wraps a plain-text string, so we attempt to extract the
-   * text via a `text` property. Falls back to `toString()` if the property
-   * is unavailable (e.g. obfuscated builds).
-   */
   @Suppress("UNCHECKED_CAST")
   private fun buildSystemText(contents: Contents): String {
     return try {
@@ -555,19 +501,5 @@ object GeminiCloudModelHelper : LlmModelHelper {
       Log.w(TAG, "Could not extract text from Contents, falling back to toString()", e)
       contents.toString()
     }
-  }
-
-  /**
-   * Retrieves the Gemini API key. Since we cannot store Android Context in
-   * the instance, we stash the key in a thread-safe field during initialize().
-   */
-  private var cachedApiKey: String? = null
-
-  fun cacheApiKey(context: Context) {
-    cachedApiKey = GeminiApiKeyStore.getApiKey(context)
-  }
-
-  private fun getApiKeyFromModel(model: Model): String? {
-    return cachedApiKey
   }
 }
