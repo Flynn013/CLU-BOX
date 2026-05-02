@@ -32,9 +32,6 @@ import java.util.UUID
 import kotlinx.coroutines.channels.Channel
 
 private const val TAG = "AgentTools"
-// 3 000 chars keeps tool output well within the ~4 096-token local context window.
-// Larger payloads risk KV-cache bloat and native SIGSEGV on device.
-private const val MAX_TOOL_OUTPUT_CHARS = 3000
 
 /**
  * Host object that exposes all CLU/BOX tools to the LiteRT-LM `@Tool` framework.
@@ -77,20 +74,36 @@ class AgentTools : ToolSet {
 
   // ── Output safety ─────────────────────────────────────────────────
 
+  /**
+   * Dynamically caps tool outputs to prevent KV-cache bloat on local hardware.
+   * Cloud models bypass the tight restriction to leverage their massive context windows.
+   */
   fun capOutputWithSpill(rawOutput: String, toolName: String): String {
-    if (rawOutput.length <= MAX_TOOL_OUTPUT_CHARS) return rawOutput
-    val ctx = context ?: return rawOutput.take(MAX_TOOL_OUTPUT_CHARS) +
+    // Flex the pipeline based on the active cognitive engine
+    val maxLimit = if (engine == AgentEngine.CLOUD) {
+      // Cloud models can easily digest entire files. Cap set high just for network sanity.
+      250_000 
+    } else {
+      // Local models will SIGSEGV the device if the token limit overflows.
+      3000 
+    }
+
+    if (rawOutput.length <= maxLimit) return rawOutput
+    
+    val ctx = context ?: return rawOutput.take(maxLimit) +
       "\n[SYSTEM WARNING: Output truncated.]"
+      
     val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
     val spillFileName = "spill_${toolName}_$timeStamp.txt"
     val workspaceDir = File(ctx.filesDir, "workspace/temp_out").also { it.mkdirs() }
     val spillFile = File(workspaceDir, spillFileName)
+    
     return try {
       spillFile.writeText(rawOutput)
-      rawOutput.take(MAX_TOOL_OUTPUT_CHARS) +
+      rawOutput.take(maxLimit) +
         "\n[SYSTEM WARNING: Output truncated. Full output saved to: workspace/temp_out/$spillFileName]"
     } catch (e: Exception) {
-      rawOutput.take(MAX_TOOL_OUTPUT_CHARS) + "\n[SYSTEM WARNING: Output truncated. Failed to write spill file: ${e.message}]"
+      rawOutput.take(maxLimit) + "\n[SYSTEM WARNING: Output truncated. Failed to write spill file: ${e.message}]"
     }
   }
 
