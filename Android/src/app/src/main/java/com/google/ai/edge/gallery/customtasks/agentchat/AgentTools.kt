@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -223,6 +223,44 @@ class AgentTools : ToolSet {
     } catch (e: Exception) {
       Log.e(TAG, "brainBoxGrep failed", e)
       mapOf("matches" to "Error: ${e.message}")
+    }
+  }
+
+  /**
+   * Writes a memory or concept directly to the native BrainBox database.
+   */
+  @Tool("Forge a new memory node in the BrainBox database. Use this instead of shell commands to save memories.")
+  fun brainBoxWrite(label: String, type: String, content: String): Map<String, String> {
+    if (label.isBlank()) return mapOf("result" to "Error: label argument is required")
+    if (content.isBlank()) return mapOf("result" to "Error: content argument is required")
+    
+    val dao = brainBoxDao ?: return mapOf("result" to "Error: BrainBox database not available")
+    
+    Log.d(TAG, "brainBoxWrite: Forging neuron '\$label'")
+    sendAgentAction(SkillProgressAgentAction(label = "Forging Neuron: \$label", inProgress = true))
+    
+    return try {
+      // Create the new neuron entity directly in the GraphDatabase
+      val neuron = com.google.ai.edge.gallery.data.brainbox.NeuronEntity(
+        label = label,
+        type = type.ifBlank { "Concept" },
+        content = content,
+        synapses = "",
+        createdAt = System.currentTimeMillis(),
+        updatedAt = System.currentTimeMillis(),
+        isCore = false
+      )
+      
+      // Execute the suspend function synchronously for the LiteRT-LM tool framework
+      kotlinx.coroutines.runBlocking {
+        dao.insertNeuron(neuron)
+      }
+      
+      sendAgentAction(SkillProgressAgentAction(label = "Neuron Forged: \$label", inProgress = false))
+      mapOf("result" to "ok", "message" to "Successfully forged node '\$label' in BrainBox")
+    } catch (e: Exception) {
+      Log.e(TAG, "brainBoxWrite failed", e)
+      mapOf("result" to "Error: \${e.message}")
     }
   }
 }
