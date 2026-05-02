@@ -56,13 +56,8 @@ class AgentTools : ToolSet {
   var engine: AgentEngine = AgentEngine.LOCAL
 
   // ── Autonomous loop state ─────────────────────────────────────────
-  /** If non-null, the loop will auto-re-trigger inference with this description. */
   var pendingTaskDescription: String? = null
-
-  /** If non-null, the screen will render this image after the turn. */
   var resultImageToShow: Any? = null
-
-  /** If non-null, the screen will render this WebView after the turn. */
   var resultWebviewToShow: Any? = null
 
   // ── Circuit-breaker governor ───────────────────────────────────────
@@ -78,20 +73,10 @@ class AgentTools : ToolSet {
     actionChannel.trySend(action)
   }
 
-  // ── CluSkill metadata stubs ────────────────────────────────────────
-  /**
-   * Returns metadata-only [CluSkill] entries for @Tool methods that don't
-   * have a full [CluSkill] implementation. These are routed through the
-   * litertlm @Tool framework directly.
-   */
   fun getMetadataOnlySkills(): List<CluSkill> = emptyList()
 
   // ── Output safety ─────────────────────────────────────────────────
 
-  /**
-   * Hard-caps tool outputs to prevent KV-cache bloat and SIGSEGV on token overflow.
-   * If truncated, the full output is spilled to a temp file in the sandbox.
-   */
   fun capOutputWithSpill(rawOutput: String, toolName: String): String {
     if (rawOutput.length <= MAX_TOOL_OUTPUT_CHARS) return rawOutput
     val ctx = context ?: return rawOutput.take(MAX_TOOL_OUTPUT_CHARS) +
@@ -109,12 +94,8 @@ class AgentTools : ToolSet {
     }
   }
 
-  // ── Tool implementations ──────────────────────────────────────────
+  // ── File & Shell Tool Implementations ─────────────────────────────
 
-  /**
-   * Executes a shell command in the sandbox and returns its output.
-   * The result map uses keys "stdout" and "exit_code".
-   */
   @Tool("Execute a bash command in the sandboxed terminal. Returns stdout and exit code.")
   fun shellExecute(command: String): Map<String, String> {
     if (command.isBlank()) return mapOf("stdout" to "Error: command argument is required", "exit_code" to "1")
@@ -132,10 +113,6 @@ class AgentTools : ToolSet {
     return mapOf("stdout" to capped, "exit_code" to exitCode.toString())
   }
 
-  /**
-   * Writes content to a file in the CLU FileBox sandbox.
-   * Returns "ok" or an error string.
-   */
   @Tool("Write content to a file in the FileBox sandbox. This is the ONLY way to create or overwrite files.")
   fun fileBoxWrite(file_path: String, content: String): Map<String, String> {
     if (file_path.isBlank()) return mapOf("result" to "Error: file_path argument is required")
@@ -147,7 +124,6 @@ class AgentTools : ToolSet {
       val safeRelative = file_path.trimStart('/')
       val root = File(ctx.filesDir, "clu_file_box")
       val target = File(root, safeRelative).canonicalFile
-      // Path traversal guard — target must be under clu_file_box.
       if (!target.absolutePath.startsWith(root.canonicalPath)) {
         return mapOf("result" to "Error: path traversal not allowed")
       }
@@ -161,10 +137,6 @@ class AgentTools : ToolSet {
     }
   }
 
-  /**
-   * Reads a line range from a file in the FileBox sandbox.
-   * Useful for inspecting large files without consuming the full context window.
-   */
   @Tool("Read a range of lines from a file in the FileBox sandbox.")
   fun fileBoxReadLines(file_path: String, start_line: Int, end_line: Int): Map<String, String> {
     if (file_path.isBlank()) return mapOf("lines" to "Error: file_path argument is required")
@@ -190,9 +162,6 @@ class AgentTools : ToolSet {
     }
   }
 
-  /**
-   * Searches a file for a keyword and returns matching lines with ±2 lines of context.
-   */
   @Tool("Search a file in the FileBox sandbox for a keyword and return matching lines.")
   fun brainBoxGrep(file_path: String, keyword: String): Map<String, String> {
     if (file_path.isBlank()) return mapOf("matches" to "Error: file_path argument is required")
@@ -227,40 +196,143 @@ class AgentTools : ToolSet {
     }
   }
 
-  /**
-   * Writes a memory or concept directly to the native BrainBox database.
-   */
-  @Tool("Forge a new memory node in the BrainBox database. Use this instead of shell commands to save memories.")
-  fun brainBoxWrite(label: String, type: String, content: String): Map<String, String> {
+  // ── BrainBox Knowledge Graph Tools ────────────────────────────────
+
+  @Tool("Search the BrainBox database for memories, knowledge, or context using a keyword query. Returns matching memory nodes.")
+  fun brainBoxSearch(query: String): Map<String, String> {
+    if (query.isBlank()) return mapOf("result" to "Error: query argument is required")
+    val dao = brainBoxDao ?: return mapOf("result" to "Error: BrainBox database not available")
+
+    Log.d(TAG, "brainBoxSearch: '$query'")
+    sendAgentAction(SkillProgressAgentAction(label = "Recalling: $query", inProgress = true))
+
+    return try {
+      val matches = kotlinx.coroutines.runBlocking {
+        dao.searchNeurons(query)
+      }
+      if (matches.isEmpty()) {
+        sendAgentAction(SkillProgressAgentAction(label = "Recall: No matches", inProgress = false))
+        return mapOf("result" to "No matches found for '$query'")
+      }
+
+      val resultStr = buildString {
+        matches.forEach { n ->
+          appendLine("---")
+          appendLine("Label: ${n.label}")
+          appendLine("Type: ${n.type}")
+          appendLine("Is Core: ${n.isCore}")
+          appendLine("Content: ${n.content}")
+          if (n.synapses.isNotBlank()) appendLine("Synapses: ${n.synapses}")
+        }
+      }
+
+      sendAgentAction(SkillProgressAgentAction(label = "Recall: ${matches.size} found", inProgress = false))
+      mapOf("result" to capOutputWithSpill(resultStr, "brainBoxSearch"))
+    } catch (e: Exception) {
+      Log.e(TAG, "brainBoxSearch failed", e)
+      mapOf("result" to "Error: ${e.message}")
+    }
+  }
+
+  @Tool("Forge a new memory node in the BrainBox database. If no synapses exist, pass an empty string.")
+  fun brainBoxWrite(label: String, type: String, content: String, synapses: String): Map<String, String> {
     if (label.isBlank()) return mapOf("result" to "Error: label argument is required")
     if (content.isBlank()) return mapOf("result" to "Error: content argument is required")
     
     val dao = brainBoxDao ?: return mapOf("result" to "Error: BrainBox database not available")
     
     Log.d(TAG, "brainBoxWrite: Forging neuron '$label'")
-    sendAgentAction(SkillProgressAgentAction(label = "Forging Neuron: $label", inProgress = true))
+    sendAgentAction(SkillProgressAgentAction(label = "Forging Node: $label", inProgress = true))
     
     return try {
-      // Create the new neuron entity matching your schema
       val neuron = com.google.ai.edge.gallery.data.brainbox.NeuronEntity(
         id = UUID.randomUUID().toString(),
         label = label,
         type = type.ifBlank { "Concept" },
         content = content,
-        synapses = "",
+        synapses = synapses,
         isCore = false,
         falsePaths = ""
       )
       
-      // Execute the suspend function synchronously for the LiteRT-LM tool framework
       kotlinx.coroutines.runBlocking {
         dao.insertNeuron(neuron)
       }
       
-      sendAgentAction(SkillProgressAgentAction(label = "Neuron Forged: $label", inProgress = false))
+      sendAgentAction(SkillProgressAgentAction(label = "Node Forged: $label", inProgress = false))
       mapOf("result" to "ok", "message" to "Successfully forged node '$label' in BrainBox")
     } catch (e: Exception) {
       Log.e(TAG, "brainBoxWrite failed", e)
+      mapOf("result" to "Error: ${e.message}")
+    }
+  }
+
+  @Tool("Edit an existing, non-core memory node in BrainBox. Target the node by its exact Label.")
+  fun brainBoxEdit(target_label: String, new_content: String): Map<String, String> {
+    if (target_label.isBlank()) return mapOf("result" to "Error: target_label is required")
+    if (new_content.isBlank()) return mapOf("result" to "Error: new_content is required")
+    val dao = brainBoxDao ?: return mapOf("result" to "Error: BrainBox database not available")
+
+    Log.d(TAG, "brainBoxEdit: '$target_label'")
+    sendAgentAction(SkillProgressAgentAction(label = "Rewiring Node: $target_label", inProgress = true))
+
+    return try {
+      kotlinx.coroutines.runBlocking {
+        val matches = dao.searchNeurons(target_label)
+        val target = matches.find { it.label.equals(target_label, ignoreCase = true) }
+
+        if (target == null) {
+          sendAgentAction(SkillProgressAgentAction(label = "Rewire Failed: Node not found", inProgress = false))
+          return@runBlocking mapOf("result" to "Error: No node found with exact label '$target_label'")
+        }
+
+        if (target.isCore) {
+          sendAgentAction(SkillProgressAgentAction(label = "Rewire Failed: Core protection active", inProgress = false))
+          return@runBlocking mapOf("result" to "Error: Cannot edit core node '$target_label'. Core nodes are read-only.")
+        }
+
+        val updatedNode = target.copy(content = new_content)
+        dao.updateNeuron(updatedNode)
+
+        sendAgentAction(SkillProgressAgentAction(label = "Node Rewired: $target_label", inProgress = false))
+        mapOf("result" to "ok", "message" to "Successfully updated node '$target_label'")
+      }
+    } catch (e: Exception) {
+      Log.e(TAG, "brainBoxEdit failed", e)
+      mapOf("result" to "Error: ${e.message}")
+    }
+  }
+
+  @Tool("Delete a non-core memory node from BrainBox. Target the node by its exact Label.")
+  fun brainBoxDelete(target_label: String): Map<String, String> {
+    if (target_label.isBlank()) return mapOf("result" to "Error: target_label is required")
+    val dao = brainBoxDao ?: return mapOf("result" to "Error: BrainBox database not available")
+
+    Log.d(TAG, "brainBoxDelete: '$target_label'")
+    sendAgentAction(SkillProgressAgentAction(label = "Pruning Node: $target_label", inProgress = true))
+
+    return try {
+      kotlinx.coroutines.runBlocking {
+        val matches = dao.searchNeurons(target_label)
+        val target = matches.find { it.label.equals(target_label, ignoreCase = true) }
+
+        if (target == null) {
+          sendAgentAction(SkillProgressAgentAction(label = "Prune Failed: Node not found", inProgress = false))
+          return@runBlocking mapOf("result" to "Error: No node found with exact label '$target_label'")
+        }
+
+        if (target.isCore) {
+          sendAgentAction(SkillProgressAgentAction(label = "Prune Failed: Core protection active", inProgress = false))
+          return@runBlocking mapOf("result" to "Error: Cannot delete core node '$target_label'. Core nodes are protected.")
+        }
+
+        dao.deleteNeuron(target)
+
+        sendAgentAction(SkillProgressAgentAction(label = "Node Pruned: $target_label", inProgress = false))
+        mapOf("result" to "ok", "message" to "Successfully deleted node '$target_label'")
+      }
+    } catch (e: Exception) {
+      Log.e(TAG, "brainBoxDelete failed", e)
       mapOf("result" to "Error: ${e.message}")
     }
   }
