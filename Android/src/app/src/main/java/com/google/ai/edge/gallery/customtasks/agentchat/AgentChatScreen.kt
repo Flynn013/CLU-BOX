@@ -685,14 +685,3 @@ class ChatWebViewClient(val context: Context) : BaseGalleryWebViewClient(context
     onPageLoaded?.invoke()
   }
 }
-private fun decodeBase64ToBitmap(base64String: String): android.graphics.Bitmap? {
-  return try {
-    val decodedBytes = android.util.Base64.decode(base64String, android.util.Base64.DEFAULT)
-    android.graphics.BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size)
-  } catch (e: Exception) {
-    null
-  }
-}
-
-private data class ResultImage(val base64: String?)
-private data class ResultWebView(val url: String?, val iframe: Boolean?, val aspectRatio: Float?)
