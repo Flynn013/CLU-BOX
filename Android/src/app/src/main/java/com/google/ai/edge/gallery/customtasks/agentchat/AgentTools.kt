@@ -28,6 +28,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 import kotlinx.coroutines.channels.Channel
 
 private const val TAG = "AgentTools"
@@ -236,19 +237,19 @@ class AgentTools : ToolSet {
     
     val dao = brainBoxDao ?: return mapOf("result" to "Error: BrainBox database not available")
     
-    Log.d(TAG, "brainBoxWrite: Forging neuron '\$label'")
-    sendAgentAction(SkillProgressAgentAction(label = "Forging Neuron: \$label", inProgress = true))
+    Log.d(TAG, "brainBoxWrite: Forging neuron '$label'")
+    sendAgentAction(SkillProgressAgentAction(label = "Forging Neuron: $label", inProgress = true))
     
     return try {
-      // Create the new neuron entity directly in the GraphDatabase
+      // Create the new neuron entity matching your schema
       val neuron = com.google.ai.edge.gallery.data.brainbox.NeuronEntity(
+        id = UUID.randomUUID().toString(),
         label = label,
         type = type.ifBlank { "Concept" },
         content = content,
         synapses = "",
-        createdAt = System.currentTimeMillis(),
-        updatedAt = System.currentTimeMillis(),
-        isCore = false
+        isCore = false,
+        falsePaths = ""
       )
       
       // Execute the suspend function synchronously for the LiteRT-LM tool framework
@@ -256,11 +257,11 @@ class AgentTools : ToolSet {
         dao.insertNeuron(neuron)
       }
       
-      sendAgentAction(SkillProgressAgentAction(label = "Neuron Forged: \$label", inProgress = false))
-      mapOf("result" to "ok", "message" to "Successfully forged node '\$label' in BrainBox")
+      sendAgentAction(SkillProgressAgentAction(label = "Neuron Forged: $label", inProgress = false))
+      mapOf("result" to "ok", "message" to "Successfully forged node '$label' in BrainBox")
     } catch (e: Exception) {
       Log.e(TAG, "brainBoxWrite failed", e)
-      mapOf("result" to "Error: \${e.message}")
+      mapOf("result" to "Error: ${e.message}")
     }
   }
 }
