@@ -1083,19 +1083,3 @@ fun getDisplayName(context: Context, uri: Uri): String {
   }
   return name.ifEmpty { uri.path?.substringAfterLast('/') ?: "Unknown" }
 }
-
-fun decodeBase64ToBitmap(base64String: String): Bitmap? {
-  return try {
-    // 1. Clean the string (remove headers if present)
-    val pureBase64 = base64String.substringAfter(",")
-
-    // 2. Decode the Base64 string into a byte array
-    val imageBytes = Base64.decode(pureBase64)
-
-    // 3. Convert the byte array into a Bitmap
-    BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-  } catch (e: java.lang.Exception) {
-    e.printStackTrace()
-    null
-  }
-}
