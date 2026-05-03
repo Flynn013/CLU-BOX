@@ -47,7 +47,7 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "CLU/BOX"
+rootProject.name = "CLU-BOX"
 
 include(":app")
 
