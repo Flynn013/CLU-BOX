@@ -25,7 +25,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 private const val TAG = "SplinterAPI"
@@ -174,32 +173,41 @@ class SplinterAPI private constructor() {
   //  LNK_BOX — Model Context Protocol connections
   // ─────────────────────────────────────────────────────────────────────────
 
-  /** In-memory map of connection-id -> spec JSON (persisted by McpConnectionManager). */
-  private val mcpConnections = ConcurrentHashMap<String, JSONObject>()
-
   /**
-   * Registers an MCP connection spec. The actual stdio bridge is opened by
-   * `McpConnectionManager` reading the same persisted vault — this method only
-   * exposes a JSON-friendly CRUD layer to Python skills.
+   * Open a real MCP connection through [LnkBoxBridge].
+   *
+   * @param transport `"sse"` (Ktor remote SSE) or `"stdio"` (Chaquopy local).
+   * @param target    SSE endpoint URL, or local Python module name for stdio.
    */
-  fun lnkBoxConnect(id: String, transport: String, target: String): String {
-    val spec = JSONObject().apply {
-      put("id", id)
-      put("transport", transport)
-      put("target", target)
+  fun lnkBoxConnect(id: String, transport: String, target: String): String =
+    when (transport.lowercase()) {
+      "sse" -> com.google.ai.edge.gallery.data.lnkbox.LnkBoxBridge.connectSse(id, target)
+      "stdio" -> com.google.ai.edge.gallery.data.lnkbox.LnkBoxBridge.connectStdio(context, id, target)
+      else -> "[lnkBoxConnect error: unknown transport '$transport']"
     }
-    mcpConnections[id] = spec
-    return spec.toString()
+
+  /** Send a JSON-RPC frame down a previously-opened connection. */
+  fun lnkBoxSend(id: String, method: String, paramsJson: String = "{}"): String {
+    val params = runCatching { JSONObject(paramsJson) }.getOrElse { JSONObject() }
+    val asMap = mutableMapOf<String, Any?>()
+    params.keys().forEach { k -> asMap[k] = params.opt(k) }
+    return com.google.ai.edge.gallery.data.lnkbox.LnkBoxBridge.send(id, method, asMap)
   }
 
   fun lnkBoxList(): String {
     val arr = JSONArray()
-    mcpConnections.values.forEach(arr::put)
+    com.google.ai.edge.gallery.data.lnkbox.LnkBoxBridge.list().forEach { snap ->
+      arr.put(JSONObject().apply {
+        put("id", snap.id)
+        put("transport", snap.transport)
+        put("target", snap.target)
+      })
+    }
     return arr.toString()
   }
 
   fun lnkBoxDisconnect(id: String): String =
-    if (mcpConnections.remove(id) != null) "[lnkBoxDisconnect ok: $id]" else "[lnkBoxDisconnect missing: $id]"
+    com.google.ai.edge.gallery.data.lnkbox.LnkBoxBridge.close(id)
 
   // ─────────────────────────────────────────────────────────────────────────
   //  FILE_BOX — JGit + BusyBox file IO inside the workspace
@@ -268,7 +276,14 @@ class SplinterAPI private constructor() {
     arr.toString()
   }
 
-  /** Store (forge) a new neuron. */
+  /**
+   * Store (forge) a new **EPISODIC** neuron — the only memory tier the AI is
+   * allowed to author. Returns `[brainBoxStore ok: id=…]` on success.
+   *
+   * Note: `isCore` is hard-wired to `false` here. CORE memories may only be
+   * created by the user through the BrainBox UI — the AI cannot promote its
+   * own EPISODIC neurons to CORE through this API.
+   */
   fun brainBoxStore(label: String, type: String, content: String, synapses: String): String = runBlocking {
     val dao = GraphDatabase.getInstance(context).brainBoxDao()
     runCatching {
@@ -279,10 +294,58 @@ class SplinterAPI private constructor() {
         type = type,
         content = content,
         synapses = synapses,
+        isCore = false, // explicit: CORE provenance is reserved for the user.
       )
       dao.insertNeuron(entity)
       "[brainBoxStore ok: id=$id]"
     }.getOrElse { "[brainBoxStore error: ${it.message}]" }
+  }
+
+  /**
+   * AI-safe partial update of an existing EPISODIC neuron. Returns a JSON
+   * envelope `{ok, updated}` where `updated` is the rows-affected count.
+   *
+   * If the row is CORE the underlying SQL `WHERE isCore = 0` clause produces
+   * 0 affected rows, so the agent simply receives `ok=false, updated=0` and
+   * the user's curated memory is preserved untouched.
+   */
+  fun brainBoxUpdate(id: String, content: String, synapses: String = "", falsePaths: String = ""): String = runBlocking {
+    val dao = GraphDatabase.getInstance(context).brainBoxDao()
+    val updated = runCatching { dao.updateEpisodicFields(id, content, synapses, falsePaths) }.getOrElse {
+      return@runBlocking "[brainBoxUpdate error: ${it.message}]"
+    }
+    val current = runCatching { dao.getNeuronById(id) }.getOrNull()
+    JSONObject().apply {
+      put("ok", updated > 0)
+      put("updated", updated)
+      put("isCore", current?.isCore ?: false)
+      put("reason", if (updated == 0) {
+        if (current == null) "id not found" else "CORE memory is immutable for the AI"
+      } else "")
+    }.toString()
+  }
+
+  /**
+   * AI-safe delete ("forget") of an EPISODIC neuron. CORE neurons are
+   * explicitly protected by the SQL clause; if the agent attempts to delete
+   * one it receives a structured refusal envelope instead of a silent ok.
+   */
+  fun brainBoxForget(id: String): String = runBlocking {
+    val dao = GraphDatabase.getInstance(context).brainBoxDao()
+    val before = runCatching { dao.getNeuronById(id) }.getOrNull()
+    val deleted = runCatching { dao.deleteEpisodicById(id) }.getOrElse {
+      return@runBlocking "[brainBoxForget error: ${it.message}]"
+    }
+    JSONObject().apply {
+      put("ok", deleted > 0)
+      put("deleted", deleted)
+      put("reason", when {
+        deleted > 0 -> ""
+        before == null -> "id not found"
+        before.isCore -> "CORE memory is immutable for the AI"
+        else -> "unknown"
+      })
+    }.toString()
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -322,6 +385,22 @@ class SplinterAPI private constructor() {
 
   fun clnBoxDelete(name: String): String =
     if (File(clnDir(), "$name.json").delete()) "[clnBoxDelete ok: $name]" else "[clnBoxDelete error: $name]"
+
+  /**
+   * Resolves a persona by name and returns its `systemPrompt` string ready to
+   * be prepended to a delegated agent's context. Returns an empty string when
+   * the persona is missing so callers can degrade gracefully.
+   *
+   * The delegation engine ([com.google.ai.edge.gallery.customtasks.agentchat.DelegationEngine])
+   * uses this to materialise sub-worker prompts.
+   */
+  fun clnBoxApply(name: String): String {
+    val f = File(clnDir(), "$name.json")
+    if (!f.isFile) return ""
+    return runCatching {
+      JSONObject(f.readText()).optString("systemPrompt", "")
+    }.getOrDefault("")
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
   //  Misc / diagnostics

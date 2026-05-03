@@ -11,7 +11,12 @@
 package com.google.ai.edge.gallery.customtasks.agentchat.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
@@ -37,6 +42,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -96,6 +102,21 @@ fun ToolExecutionBox(
     label = "chevron-rotation",
   )
 
+  // Continuous neon pulse while the tool is actively executing. The opacity
+  // oscillates between 35 % and 100 % on a 900 ms triangle wave, which gives
+  // the Goose-style "alive" feedback without distracting motion blur.
+  val pulse by rememberInfiniteTransition(label = "tool-pulse").animateFloat(
+    initialValue = 0.35f,
+    targetValue = 1f,
+    animationSpec = infiniteRepeatable(
+      animation = tween(durationMillis = 900, easing = LinearEasing),
+      repeatMode = RepeatMode.Reverse,
+    ),
+    label = "tool-pulse-alpha",
+  )
+  val isPulsing = execution.phase == AgentGovernor.Phase.EXECUTING_TOOL
+  val borderAlpha = if (isPulsing) pulse else 1f
+
   // Status colour mapping mirrors Goose's pill semantics.
   val (statusColor, statusIcon, statusLabel) = when (execution.phase) {
     AgentGovernor.Phase.EXECUTING_TOOL -> Triple(neonGreen, Icons.Filled.PlayArrow, "running…")
@@ -114,7 +135,11 @@ fun ToolExecutionBox(
       .fillMaxWidth()
       .clip(RoundedCornerShape(8.dp))
       .background(terminalMidGrey)
-      .border(1.dp, terminalOutline, RoundedCornerShape(8.dp))
+      .border(
+        width = if (isPulsing) 1.5.dp else 1.dp,
+        color = if (isPulsing) neonGreen.copy(alpha = borderAlpha) else terminalOutline,
+        shape = RoundedCornerShape(8.dp),
+      )
       .clickable { expanded = !expanded }
       .padding(horizontal = 12.dp, vertical = 10.dp),
   ) {

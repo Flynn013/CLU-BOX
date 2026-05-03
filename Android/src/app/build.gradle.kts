@@ -163,7 +163,15 @@ dependencies {
 
     // WorkManager Kotlin extensions for the SCDL_BOX scheduler subsystem of SplinterAPI.
     implementation("androidx.work:work-runtime-ktx:2.9.1")
-    // ─────────────────────────────────────────────────────────────────────
+
+    // Ktor client + SSE plugin for the LNK_BOX MCP remote transport
+    // (see com.google.ai.edge.gallery.data.lnkbox.LnkBoxBridge.connectSse).
+    // CIO engine is the lightest-weight option that supports HTTP/1.1 keep-alive
+    // and chunked SSE streams without pulling in OkHttp.
+    implementation("io.ktor:ktor-client-core:2.3.12")
+    implementation("io.ktor:ktor-client-cio:2.3.12")
+    implementation("io.ktor:ktor-client-sse:2.3.12")
+    // ──────────────────────────────────────────────────────────────────
     
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

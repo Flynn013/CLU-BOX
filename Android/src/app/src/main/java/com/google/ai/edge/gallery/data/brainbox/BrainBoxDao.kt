@@ -65,6 +65,32 @@ interface BrainBoxDao {
   @Update
   suspend fun updateNeuron(neuron: NeuronEntity)
 
+  /** Returns a single neuron by primary key, or `null` if not found. */
+  @Query("SELECT * FROM neurons WHERE id = :id LIMIT 1")
+  suspend fun getNeuronById(id: String): NeuronEntity?
+
+  /**
+   * AI-safe delete: only removes the neuron if it is **not** marked as Core.
+   * Returns the number of rows actually deleted (0 means the row was Core and
+   * was therefore protected, or the id did not exist at all).
+   *
+   * The agent's [com.google.ai.edge.gallery.data.splinter.SplinterAPI] uses
+   * this method exclusively so the AI cannot accidentally erase user-curated
+   * Core memories.
+   */
+  @Query("DELETE FROM neurons WHERE id = :id AND isCore = 0")
+  suspend fun deleteEpisodicById(id: String): Int
+
+  /**
+   * AI-safe partial update: rewrites only the malleable fields of an
+   * **EPISODIC** neuron. Returns the number of rows updated; returns 0 when
+   * the row does not exist or is Core (and therefore immutable for the AI).
+   */
+  @Query(
+    "UPDATE neurons SET content = :content, synapses = :synapses, falsePaths = :falsePaths WHERE id = :id AND isCore = 0"
+  )
+  suspend fun updateEpisodicFields(id: String, content: String, synapses: String, falsePaths: String): Int
+
   /**
    * Atomically replaces the entire brain: deletes all neurons then inserts the
    * given list inside a single database transaction.  If the process crashes
