@@ -47,19 +47,9 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "AI Edge Gallery"
+rootProject.name = "CLU/BOX"
 
 include(":app")
 
-// ── Local Termux engine modules ──────────────────────────────────────────────
-// To graft the Termux engine natively, clone the relevant modules from
-// https://github.com/termux/termux-app into the libs/ directory:
-//   libs/terminal-emulator/   ← termux-app/terminal-emulator
-//   libs/termux-shared/       ← termux-app/termux-shared
-// Then uncomment the four lines below and comment-out the JitPack dep in
-// app/build.gradle.kts.
-//
-// include(":terminal-emulator")
-// project(":terminal-emulator").projectDir = file("libs/terminal-emulator")
-// include(":termux-shared")
-// project(":termux-shared").projectDir = file("libs/termux-shared")
+// Termux module hooks purged — CLU/BOX now embeds an arm64-v8a BusyBox binary
+// and uses Eclipse JGit, so no external Termux source modules are required.
