@@ -48,7 +48,8 @@ class SkillRegistry(private val agentTools: AgentTools) {
     val ported: List<CluSkill> = listOf(
       PythonExecSkill(),
       ShellExecuteSkill(agentTools),
-      VirtualCommandSkill(agentTools),
+      // VirtualCommandSkill removed: shell access is now provided exclusively
+      // by ShellExecuteSkill, which delegates to the embedded BusyBoxBridge.
       FileBoxWriteSkill(agentTools),
       FileBoxReadLinesSkill(agentTools),
       BrainBoxGrepSkill(agentTools),

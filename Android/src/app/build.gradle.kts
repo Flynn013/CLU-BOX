@@ -133,8 +133,9 @@ dependencies {
     implementation(libs.openid.appauth)
     implementation(libs.play.services.oss.licenses)
 
-    implementation("com.github.termux.termux-app:terminal-emulator:v0.118.1")
-    implementation("com.github.termux.termux-app:terminal-view:v0.118.1")
+    // Termux terminal-emulator/terminal-view dependencies purged.
+    // Shell capabilities are now provided by the embedded arm64-v8a BusyBox binary
+    // (see com.google.ai.edge.gallery.data.busybox.BusyBoxBridge).
 
     implementation(libs.moshi.kotlin)
     ksp(libs.moshi.kotlin.codegen)
@@ -148,6 +149,29 @@ dependencies {
     implementation("com.google.mediapipe:tasks-text:0.20230731")
     implementation("androidx.webkit:webkit:1.11.0")
     implementation("androidx.documentfile:documentfile:1.0.1")
+
+    // ── Cognitive OS — pure-native managers ──────────────────────────────
+    // Eclipse JGit: pure-Java Git for self-modifying source pulls/commits/pushes
+    // (see com.google.ai.edge.gallery.data.git.JGitManager). Android-friendly classifier
+    // is published under `org.eclipse.jgit:org.eclipse.jgit:6.7.0.202309050840-r` which
+    // omits the AWT-dependent `awtui` module that breaks Android builds.
+    implementation("org.eclipse.jgit:org.eclipse.jgit:6.7.0.202309050840-r") {
+        // Exclude desktop Apache HTTP transport — we use the SSH/HTTPS pipeline only.
+        exclude(group = "org.apache.httpcomponents", module = "httpclient")
+    }
+    implementation("org.slf4j:slf4j-nop:2.0.9") // silence JGit's slf4j chatter at runtime
+
+    // WorkManager Kotlin extensions for the SCDL_BOX scheduler subsystem of SplinterAPI.
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
+
+    // Ktor client + SSE plugin for the LNK_BOX MCP remote transport
+    // (see com.google.ai.edge.gallery.data.lnkbox.LnkBoxBridge.connectSse).
+    // CIO engine is the lightest-weight option that supports HTTP/1.1 keep-alive
+    // and chunked SSE streams without pulling in OkHttp.
+    implementation("io.ktor:ktor-client-core:2.3.12")
+    implementation("io.ktor:ktor-client-cio:2.3.12")
+    implementation("io.ktor:ktor-client-sse:2.3.12")
+    // ──────────────────────────────────────────────────────────────────
     
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
