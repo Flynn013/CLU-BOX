@@ -178,4 +178,60 @@ class SkillRegistry(private val agentTools: AgentTools) {
     }
     return filtered.joinToString("\n")
   }
+
+  /**
+   * Builds a list of tool-definition [JSONObject]s in OpenAI function-calling format
+   * for every **enabled** skill in the registry.
+   *
+   * The list is passed by [AgentEngineV2] to [LlmProvider.streamChat] / [LlmProvider.chat]
+   * so cloud providers can offer function-calling to the model.
+   *
+   * Each object follows:
+   * ```json
+   * {
+   *   "type": "function",
+   *   "function": {
+   *     "name": "...",
+   *     "description": "...",
+   *     "parameters": { ... }
+   *   }
+   * }
+   * ```
+   *
+   * Skills whose `jsonSchema` cannot be parsed as JSON are omitted with a warning.
+   */
+  fun buildToolDefinitions(): List<JSONObject> {
+    val skillVm = agentTools.skillManagerViewModel
+    val disabledNames: Set<String> = if (skillVm != null) {
+      skillVm.uiState.value.skills.filter { !it.skill.selected }.map { it.skill.name }.toSet()
+    } else {
+      emptySet()
+    }
+
+    val defs = mutableListOf<JSONObject>()
+    for ((name, skill) in skills) {
+      if (name in disabledNames) continue
+      val schema = try {
+        JSONObject(skill.jsonSchema)
+      } catch (e: JSONException) {
+        Log.w(TAG, "buildToolDefinitions: could not parse schema for '$name': ${e.message}")
+        continue
+      }
+      try {
+        val def = JSONObject().apply {
+          put("type", "function")
+          put("function", JSONObject().apply {
+            put("name", name)
+            put("description", skill.description)
+            put("parameters", schema)
+          })
+        }
+        defs.add(def)
+      } catch (e: JSONException) {
+        Log.w(TAG, "buildToolDefinitions: error building def for '$name': ${e.message}")
+      }
+    }
+    Log.d(TAG, "buildToolDefinitions: ${defs.size} tool definitions built")
+    return defs
+  }
 }
