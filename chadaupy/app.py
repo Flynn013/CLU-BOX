@@ -21,6 +21,11 @@ DELETE /api/v1/skills/<name>      — delete a skill
 GET  /api/v1/skills/<name>/schema — return the LLM tool schema (introspected)
 POST /api/v1/skills/<name>/run    — execute a skill with JSON kwargs
 GET  /health                      — liveness probe
+
+Skill name constraints
+----------------------
+Names must match ``^[a-z][a-z0-9_]{0,63}$`` — lowercase, start with a letter,
+contain only letters/digits/underscores, and be at most 64 characters long.
 """
 
 from __future__ import annotations
@@ -32,7 +37,6 @@ import os
 import re
 import sys
 import time
-import traceback
 import types
 from pathlib import Path
 from typing import Any
@@ -55,7 +59,13 @@ app = Flask(__name__)
 
 
 def _skill_path(name: str) -> Path:
-    return SKILLS_DIR / f"{name}.py"
+    # The caller must have already validated `name` with _validate_name.
+    # Resolve the full path and confirm it stays inside SKILLS_DIR to prevent
+    # any path-traversal (e.g. `../`) from escaping the sandbox.
+    candidate = (SKILLS_DIR / f"{name}.py").resolve()
+    if not str(candidate).startswith(str(SKILLS_DIR.resolve())):
+        raise ValueError(f"Path traversal detected for name '{name}'")
+    return candidate
 
 
 def _validate_name(name: str) -> str | None:
@@ -76,7 +86,11 @@ def _load_skill_source(name: str) -> str | None:
 
 
 def _load_skill_module(name: str) -> tuple[types.ModuleType | None, str | None]:
-    """Load skill module; return (module, error_string)."""
+    """Load skill module; return (module, error_string).
+
+    Internal load errors are logged server-side; only a sanitised message is
+    returned so that stack traces are never exposed to the HTTP caller.
+    """
     source = _load_skill_source(name)
     if source is None:
         return None, f"Skill '{name}' not found."
@@ -87,7 +101,11 @@ def _load_skill_module(name: str) -> tuple[types.ModuleType | None, str | None]:
         spec.loader.exec_module(mod)  # type: ignore[attr-defined]
         return mod, None
     except Exception as exc:
-        return None, f"Failed to load skill '{name}': {traceback.format_exc(limit=6)}"
+        # Log the full traceback server-side but do NOT include it in the
+        # response — avoids py/stack-trace-exposure.
+        import logging
+        logging.getLogger(__name__).exception("Failed to load skill '%s'", name)
+        return None, f"Failed to load skill '{name}': {type(exc).__name__}: {exc}"
 
 
 def _introspect_module(mod: types.ModuleType) -> list[dict]:
@@ -256,7 +274,11 @@ def run_skill(name: str):
         result = mod.run(**kwargs)
         return jsonify({"result": str(result)})
     except Exception as exc:
-        return jsonify({"error": traceback.format_exc(limit=8)}), 500
+        # Log full traceback server-side; only return a sanitised message to
+        # the caller to avoid py/stack-trace-exposure.
+        import logging
+        logging.getLogger(__name__).exception("Skill '%s' raised an exception", name)
+        return jsonify({"error": f"Skill execution error: {type(exc).__name__}: {exc}"}), 500
 
 
 # ── Entry point ────────────────────────────────────────────────────────────

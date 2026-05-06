@@ -305,8 +305,12 @@ class GoogleProvider(
                             val functionCallPart = JSONObject()
                             val functionCall = JSONObject()
                             functionCall.put("name", toolResult.toolName ?: "unknown")
-                            // We don't have the original args, but Google needs the functionCall
-                            // to match the functionResponse. Use an empty args object.
+                            // Google's API requires a `functionCall` part in the model turn
+                            // immediately before a `functionResponse` part in the user turn.
+                            // The original tool call arguments are not stored in ConversationMessage,
+                            // so we pass an empty object here.  The Gemini API treats this as valid
+                            // because the arguments were already executed — only the name needs to
+                            // match the corresponding functionResponse for proper turn pairing.
                             functionCall.put("args", JSONObject())
                             functionCallPart.put("functionCall", functionCall)
                             parts.put(functionCallPart)
