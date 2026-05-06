@@ -191,21 +191,23 @@ class ContextManager(
     private fun dropOldest(messages: List<ProviderMessage>): List<ProviderMessage> {
         val mutable = messages.toMutableList()
 
-        // Identify the protected tail: system (index 0) + last user message
         val systemIdx = mutable.indexOfFirst { it.role == "system" }
-        val lastUserIdx = mutable.indexOfLast { it.role == "user" }
-
         var dropped = 0
+
+        // Scan forward from just after the system message. We re-evaluate
+        // lastUserIdx on every iteration because indices shift after each removal.
         var i = if (systemIdx == 0) 1 else 0
 
         while (!fits(mutable) && i < mutable.size) {
-            if (i == lastUserIdx) { i++; continue }
+            val lastUserIdx = mutable.indexOfLast { it.role == "user" }
+            // Never remove the last user message (it's the current request)
+            if (i == lastUserIdx) {
+                i++
+                continue
+            }
             mutable.removeAt(i)
             dropped++
-            // Don't advance i — the next element slid down to the same index
-            // but recompute lastUserIdx which may have shifted
-            val newLastUserIdx = mutable.indexOfLast { it.role == "user" }
-            if (newLastUserIdx != lastUserIdx) break // safety guard
+            // Do not advance i; the former element at i+1 has now slid to i.
         }
 
         if (dropped > 0) Log.w(TAG, "Dropped $dropped message(s) to fit context window")

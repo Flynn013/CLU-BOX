@@ -188,7 +188,7 @@ data class Message(
                 if (sm.thinking.isNotEmpty()) add(MessageContent.Thinking(sm.thinking))
                 if (sm.content.isNotEmpty()) add(MessageContent.Text(sm.content))
                 for (tc in sm.toolCalls) {
-                    if (tc.output.isNotEmpty() || tc.status == SessionToolCall(tc.id, tc.name, ToolCallStatus.COMPLETE, tc.input, tc.output).status) {
+                    if (tc.output.isNotEmpty() || tc.status == ToolCallStatus.COMPLETE || tc.status == ToolCallStatus.ERROR) {
                         add(MessageContent.ToolResult(tc.id, tc.name, tc.output, tc.status == ToolCallStatus.ERROR))
                     } else {
                         add(MessageContent.ToolRequest(tc.id, tc.name, tc.input))
