@@ -59,12 +59,21 @@ app = Flask(__name__)
 
 
 def _skill_path(name: str) -> Path:
-    # The caller must have already validated `name` with _validate_name.
-    # Resolve the full path and confirm it stays inside SKILLS_DIR to prevent
-    # any path-traversal (e.g. `../`) from escaping the sandbox.
-    candidate = (SKILLS_DIR / f"{name}.py").resolve()
-    if not str(candidate).startswith(str(SKILLS_DIR.resolve())):
-        raise ValueError(f"Path traversal detected for name '{name}'")
+    # Strip any character outside [a-z0-9_] before constructing the path.
+    # This is a defence-in-depth sanitization step — the caller must also have
+    # validated `name` via _validate_name before reaching here.
+    # Using re.sub to produce a safe_name that CodeQL can recognise as free of
+    # directory traversal characters (no '.', '/', '\', etc.).
+    safe_name = re.sub(r"[^a-z0-9_]", "", name)
+    if not safe_name:
+        raise ValueError(f"Skill name '{name}' produced an empty sanitised path component")
+    base = SKILLS_DIR.resolve()
+    candidate = (base / f"{safe_name}.py").resolve()
+    try:
+        # relative_to raises ValueError if candidate is outside base
+        candidate.relative_to(base)
+    except ValueError:
+        raise ValueError(f"Path traversal detected for name '{name}'") from None
     return candidate
 
 
@@ -101,11 +110,11 @@ def _load_skill_module(name: str) -> tuple[types.ModuleType | None, str | None]:
         spec.loader.exec_module(mod)  # type: ignore[attr-defined]
         return mod, None
     except Exception as exc:
-        # Log the full traceback server-side but do NOT include it in the
-        # response — avoids py/stack-trace-exposure.
+        # Log full traceback server-side; only return exception type to avoid
+        # py/stack-trace-exposure — never include str(exc) in the HTTP response.
         import logging
         logging.getLogger(__name__).exception("Failed to load skill '%s'", name)
-        return None, f"Failed to load skill '{name}': {type(exc).__name__}: {exc}"
+        return None, f"Failed to load skill '{name}': {type(exc).__name__}"
 
 
 def _introspect_module(mod: types.ModuleType) -> list[dict]:
@@ -274,11 +283,11 @@ def run_skill(name: str):
         result = mod.run(**kwargs)
         return jsonify({"result": str(result)})
     except Exception as exc:
-        # Log full traceback server-side; only return a sanitised message to
-        # the caller to avoid py/stack-trace-exposure.
+        # Log full traceback server-side; return only exception type to avoid
+        # py/stack-trace-exposure — never include str(exc) in the HTTP response.
         import logging
         logging.getLogger(__name__).exception("Skill '%s' raised an exception", name)
-        return jsonify({"error": f"Skill execution error: {type(exc).__name__}: {exc}"}), 500
+        return jsonify({"error": f"Skill execution error: {type(exc).__name__}"}), 500
 
 
 # ── Entry point ────────────────────────────────────────────────────────────

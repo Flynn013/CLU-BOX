@@ -129,13 +129,14 @@ def _find_subtree(node: Any, target: str) -> Any:
 def _delete(path: str) -> str:
     if not path:
         return "[file_manager] 'path' is required for action=delete"
-    # Guard against path traversal — reject paths containing '..' segments.
+    # Guard against path traversal — reject paths with '..' segments or absolute paths.
     normalized = os.path.normpath(path)
     if normalized.startswith("..") or os.path.isabs(normalized):
         return f"[file_manager] Invalid path '{path}': must be relative and within the workspace"
     try:
-        # Use shell to delete since SplinterAPI may not expose a delete method
-        result = Splinter.shell(f"rm -rf '{normalized}'")
+        # Use shell to delete since SplinterAPI may not expose a delete method.
+        # shlex.quote handles single quotes within the path safely.
+        result = Splinter.shell(f"rm -rf {shlex.quote(normalized)}")
         return f"[file_manager] Deleted '{normalized}'" + (f"\n{result}" if result else "")
     except Exception as exc:
         return f"[file_manager] delete error for '{path}': {exc}"
@@ -155,7 +156,7 @@ def _stat(path: str) -> str:
     if not path:
         return "[file_manager] 'path' is required for action=stat"
     try:
-        result = Splinter.shell(f"stat -c '%n %s %Y' '{path}' 2>&1")
+        result = Splinter.shell(f"stat -c '%n %s %Y' {shlex.quote(path)} 2>&1")
         if result and not result.startswith("stat:"):
             parts = result.strip().split()
             if len(parts) >= 3:
