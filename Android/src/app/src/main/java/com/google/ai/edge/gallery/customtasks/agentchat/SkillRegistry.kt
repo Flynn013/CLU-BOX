@@ -203,7 +203,9 @@ class SkillRegistry(private val agentTools: AgentTools) {
   fun buildToolDefinitions(): List<JSONObject> {
     val skillVm = agentTools.skillManagerViewModel
     val disabledNames: Set<String> = if (skillVm != null) {
-      skillVm.uiState.value.skills.filter { !it.skill.selected }.map { it.skill.name }.toSet()
+      skillVm.uiState.value.skills.mapNotNullTo(mutableSetOf()) { s ->
+        if (!s.skill.selected) s.skill.name else null
+      }
     } else {
       emptySet()
     }

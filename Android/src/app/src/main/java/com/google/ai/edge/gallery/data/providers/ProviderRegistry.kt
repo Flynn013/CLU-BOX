@@ -109,11 +109,14 @@ object ProviderRegistry {
             }
 
             "openai" -> {
-                val apiKey = ManualApiKeyStore.getApiKey(context, "openai") ?: "lm-studio"
+                val apiKey = ManualApiKeyStore.getApiKey(context, "openai")
+                if (apiKey.isNullOrBlank()) {
+                    Log.w(TAG, "No OpenAI API key configured; proceeding without key (may fail if endpoint requires auth)")
+                }
                 val url = baseUrl
                     ?: ManualApiKeyStore.getApiKey(context, "openai_base_url")
                     ?: "https://api.openai.com/v1"
-                OpenAIProvider(apiKey, modelId, url)
+                OpenAIProvider(apiKey ?: "", modelId, url)
             }
 
             "litert" -> {

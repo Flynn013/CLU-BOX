@@ -159,7 +159,7 @@ class ActionRequiredQueue {
         }
         requestQueue.clear()
         _pending.value = null
-        Log.d(TAG, "Cancelled ${ ids.size } pending approval(s)")
+        Log.d(TAG, "Cancelled ${ids.size} pending approval(s)")
     }
 
     /** Returns `true` if there are any pending approval requests. */

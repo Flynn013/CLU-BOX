@@ -185,6 +185,11 @@ data class Message(
 
         fun fromSessionMessage(sm: SessionMessage): Message {
             val contents = buildList<MessageContent> {
+                // System notifications are surfaced only when there is no other content
+                if (sm.role == MessageRole.SYSTEM && sm.toolCalls.isEmpty() && sm.thinking.isEmpty()) {
+                    add(MessageContent.SystemNotification(sm.content))
+                    return@buildList
+                }
                 if (sm.thinking.isNotEmpty()) add(MessageContent.Thinking(sm.thinking))
                 if (sm.content.isNotEmpty()) add(MessageContent.Text(sm.content))
                 for (tc in sm.toolCalls) {
@@ -193,9 +198,6 @@ data class Message(
                     } else {
                         add(MessageContent.ToolRequest(tc.id, tc.name, tc.input))
                     }
-                }
-                if (sm.role == MessageRole.SYSTEM && isEmpty()) {
-                    add(MessageContent.SystemNotification(sm.content))
                 }
             }
             return Message(

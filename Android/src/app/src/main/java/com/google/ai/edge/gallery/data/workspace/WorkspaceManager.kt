@@ -64,7 +64,7 @@ class WorkspaceManager(private val context: Context) {
 
     /** `true` when the workspace points at an external (SAF) directory. */
     val isExternalWorkspace: Boolean
-        get() = _workspaceDir.value != defaultInternalDir()
+        get() = _workspaceDir.value.canonicalPath != defaultInternalDir().canonicalPath
 
     init {
         // Restore persisted external workspace URI (if any) on first use.

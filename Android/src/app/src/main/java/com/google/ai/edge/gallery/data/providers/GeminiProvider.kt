@@ -54,6 +54,10 @@ class GeminiProvider(
 
     override val providerId: String = "gemini"
 
+    /** Generates a unique tool-call ID in the format expected by the provider layer. */
+    private fun newToolCallId(): String =
+        "call_${UUID.randomUUID().toString().replace("-", "").take(24)}"
+
     private val httpClient = HttpClient(CIO) {
         install(HttpTimeout) {
             requestTimeoutMillis = 120_000L
@@ -159,7 +163,7 @@ class GeminiProvider(
                                 if (functionCall != null) {
                                     val name = functionCall.optString("name", "")
                                     val args = functionCall.optJSONObject("args") ?: JSONObject()
-                                    val id = "call_${UUID.randomUUID().toString().replace("-", "").take(24)}"
+                                    val id = newToolCallId()
                                     emit(ProviderEvent.ToolCallStart(id, name))
                                     emit(ProviderEvent.ToolCallInput(id, args.toString()))
                                     val result = ProviderToolCallResult(id, name, args)
@@ -337,7 +341,7 @@ class GeminiProvider(
             part.optJSONObject("functionCall")?.let { fc ->
                 val name = fc.optString("name", "")
                 val args = fc.optJSONObject("args") ?: JSONObject()
-                val id = "call_${UUID.randomUUID().toString().replace("-", "").take(24)}"
+                val id = newToolCallId()
                 toolCalls.add(ProviderToolCallResult(id, name, args))
             }
         }

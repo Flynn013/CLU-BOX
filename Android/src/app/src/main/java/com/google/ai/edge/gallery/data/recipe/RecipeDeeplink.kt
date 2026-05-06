@@ -91,7 +91,7 @@ object RecipeDeeplink {
             .authority(RECIPE_HOST)
             .appendQueryParameter("name", recipeName)
         if (params.isNotEmpty()) {
-            val obj = JSONObject(params.map { (k, v) -> k to v }.toMap())
+            val obj = JSONObject(params)
             builder.appendQueryParameter("params", obj.toString())
         }
         return builder.build().toString()

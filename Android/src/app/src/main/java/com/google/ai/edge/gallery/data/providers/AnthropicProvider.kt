@@ -286,7 +286,10 @@ class AnthropicProvider(
                             put("type", "tool_use")
                             put("id", tc.id)
                             put("name", tc.name)
-                            try { put("input", JSONObject(tc.inputJson)) } catch (_: Exception) { put("input", JSONObject()) }
+                            try { put("input", JSONObject(tc.inputJson)) } catch (e: Exception) {
+                        Log.w(TAG, "Failed to parse tool input JSON for '${tc.name}': ${e.message}")
+                        put("input", JSONObject())
+                    }
                         })
                     }
                     msgObj.put("content", content)

@@ -306,7 +306,7 @@ class OpenAIProvider(
                 val id = tc.optString("id", "")
                 val function = tc.optJSONObject("function")
                 val name = function?.optString("name", "") ?: ""
-                val argsStr = function?.optString("arguments", "{}") ?: "{}"
+                val argsStr = function?.optString("arguments", "{}")
                 val input = try { JSONObject(argsStr) } catch (_: Exception) { JSONObject() }
                 toolCalls.add(ProviderToolCallResult(id, name, input))
             }
