@@ -71,6 +71,70 @@
       ]
     },
     {
+      "name": "Gemma-4-4B-it",
+      "modelId": "litert-community/gemma-4-4b-it-litert-lm",
+      "modelFile": "gemma-4-4b-it.litertlm",
+      "description": "Gemma 4 4B dense instruction-tuned model ready for deployment on Android using [LiteRT-LM](https://github.com/google-ai-edge/LiteRT-LM/blob/main/docs/api/kotlin/getting_started.md). It supports multi-modality input, with up to 32K context length.",
+      "sizeInBytes": 2684354560,
+      "minDeviceMemoryInGb": 12,
+      "commitHash": "pending",
+      "llmSupportImage": true,
+      "llmSupportAudio": false,
+      "llmSupportThinking": true,
+      "defaultConfig": {
+        "topK": 64,
+        "topP": 0.95,
+        "temperature": 1.0,
+        "maxContextLength": 32000,
+        "maxTokens": 4000,
+        "accelerators": "gpu,cpu",
+        "visionAccelerator": "gpu"
+      },
+      "taskTypes": [
+        "llm_chat",
+        "llm_prompt_lab",
+        "llm_agent_chat",
+        "llm_ask_image"
+      ],
+      "bestForTaskTypes": [
+        "llm_chat",
+        "llm_prompt_lab",
+        "llm_agent_chat"
+      ]
+    },
+    {
+      "name": "Gemma-4-12B-it",
+      "modelId": "litert-community/gemma-4-12b-it-litert-lm",
+      "modelFile": "gemma-4-12b-it.litertlm",
+      "description": "Gemma 4 12B dense instruction-tuned model ready for deployment on Android using [LiteRT-LM](https://github.com/google-ai-edge/LiteRT-LM/blob/main/docs/api/kotlin/getting_started.md). It supports multi-modality input, with up to 32K context length.",
+      "sizeInBytes": 8053063680,
+      "minDeviceMemoryInGb": 16,
+      "commitHash": "pending",
+      "llmSupportImage": true,
+      "llmSupportAudio": false,
+      "llmSupportThinking": true,
+      "defaultConfig": {
+        "topK": 64,
+        "topP": 0.95,
+        "temperature": 1.0,
+        "maxContextLength": 32000,
+        "maxTokens": 4000,
+        "accelerators": "gpu,cpu",
+        "visionAccelerator": "gpu"
+      },
+      "taskTypes": [
+        "llm_chat",
+        "llm_prompt_lab",
+        "llm_agent_chat",
+        "llm_ask_image"
+      ],
+      "bestForTaskTypes": [
+        "llm_chat",
+        "llm_prompt_lab",
+        "llm_agent_chat"
+      ]
+    },
+    {
       "name": "Gemma-3n-E2B-it",
       "modelId": "google/gemma-3n-E2B-it-litert-lm",
       "modelFile": "gemma-3n-E2B-it-int4.litertlm",

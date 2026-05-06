@@ -172,6 +172,9 @@ dependencies {
     implementation("io.ktor:ktor-client-core:3.0.3")
     implementation("io.ktor:ktor-client-cio:3.0.3")
     implementation("io.ktor:ktor-client-sse:3.0.3")
+    // OkHttp — used by the Goose engine LLM providers (Anthropic, OpenAI, Google)
+    // for the HTTP+SSE transport layer.
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     // ──────────────────────────────────────────────────────────────────
     
     testImplementation(libs.junit)
