@@ -21,6 +21,7 @@
 package com.google.ai.edge.gallery.customtasks.agentchat
 
 import android.util.Log
+import com.google.ai.edge.gallery.data.context.ContextManager
 import com.google.ai.edge.gallery.data.providers.LlmProvider
 import com.google.ai.edge.gallery.data.providers.ProviderEvent
 import com.google.ai.edge.gallery.data.providers.ProviderMessage
@@ -79,16 +80,19 @@ sealed class AgentEvent {
  * the loop for **cloud providers** ([GeminiProvider], [AnthropicProvider], [OpenAIProvider])
  * and for future on-device models that expose a streaming `LlmProvider` interface.
  *
- * @param provider      The [LlmProvider] (cloud or device-local) that streams tokens
- * @param skillRegistry The [SkillRegistry] for tool dispatch and schema building
- * @param loopManager   Optional [AgentLoopManager] for error-budget enforcement; if null
- *                      a fresh instance is created per [run] call
- * @param maxIterations Hard cap on think→act cycles per user message (default: 25)
+ * @param provider        The [LlmProvider] (cloud or device-local) that streams tokens
+ * @param skillRegistry   The [SkillRegistry] for tool dispatch and schema building
+ * @param loopManager     Optional [AgentLoopManager] for error-budget enforcement; if null
+ *                        a fresh instance is created per [run] call
+ * @param contextManager  Optional [ContextManager] for token-budget enforcement; if null
+ *                        a default instance tuned to [provider.modelId] is created
+ * @param maxIterations   Hard cap on think→act cycles per user message (default: 25)
  */
 class AgentEngineV2(
     private val provider: LlmProvider,
     private val skillRegistry: SkillRegistry,
     private val loopManager: AgentLoopManager = AgentLoopManager(),
+    private val contextManager: ContextManager = ContextManager.forModelId(provider.modelId),
     private val maxIterations: Int = 25,
 ) {
 
@@ -206,8 +210,13 @@ You are CLU — a powerful AI developer assistant running on Android as part of 
             var streamError: String? = null
 
             // ── Stream from the LLM ──────────────────────────────────────
+            // Apply context-window truncation before each request
+            val safeMessages = contextManager.fitToWindow(messages)
+            if (safeMessages !== messages) {
+                Log.w(TAG, "Context truncated: ${contextManager.usageSummary(messages)} → ${contextManager.usageSummary(safeMessages)}")
+            }
             try {
-                provider.streamChat(messages, toolSchemas).collect { event ->
+                provider.streamChat(safeMessages, toolSchemas).collect { event ->
                     currentCoroutineContext().ensureActive()
 
                     when (event) {
