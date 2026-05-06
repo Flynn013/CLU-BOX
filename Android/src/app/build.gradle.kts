@@ -168,9 +168,10 @@ dependencies {
     // (see com.google.ai.edge.gallery.data.lnkbox.LnkBoxBridge.connectSse).
     // CIO engine is the lightest-weight option that supports HTTP/1.1 keep-alive
     // and chunked SSE streams without pulling in OkHttp.
-    implementation("io.ktor:ktor-client-core:2.3.12")
-    implementation("io.ktor:ktor-client-cio:2.3.12")
-    implementation("io.ktor:ktor-client-sse:2.3.12")
+    // NOTE: ktor-client-sse requires Ktor 3.x (the artifact was not published under 2.3.x).
+    implementation("io.ktor:ktor-client-core:3.0.3")
+    implementation("io.ktor:ktor-client-cio:3.0.3")
+    implementation("io.ktor:ktor-client-sse:3.0.3")
     // ──────────────────────────────────────────────────────────────────
     
     testImplementation(libs.junit)
