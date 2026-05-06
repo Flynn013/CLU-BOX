@@ -81,7 +81,7 @@ def run(**kwargs: Any) -> str:
             return "[terminal_commander] Command produced no output."
         return str(result)
     except Exception as exc:
-        return f"[terminal_commander] Execution error: {exc}"
+        return f"[terminal_commander] Execution error: {type(exc).__name__}"
 
 
 def git_diff(path: str = "") -> str:
@@ -98,4 +98,4 @@ def git_diff(path: str = "") -> str:
         result = Splinter.shell(cmd)
         return result if result else "[terminal_commander] No changes (clean diff)"
     except Exception as exc:
-        return f"[terminal_commander] git_diff error: {exc}"
+        return f"[terminal_commander] git_diff error: {type(exc).__name__}"

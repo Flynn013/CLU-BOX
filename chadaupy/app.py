@@ -62,8 +62,15 @@ def _skill_path(name: str) -> Path:
     # Strip any character outside [a-z0-9_] before constructing the path.
     # This is a defence-in-depth sanitization step — the caller must also have
     # validated `name` via _validate_name before reaching here.
-    # Using re.sub to produce a safe_name that CodeQL can recognise as free of
-    # directory traversal characters (no '.', '/', '\', etc.).
+    # Using re.sub to produce a safe_name that is guaranteed to contain no
+    # directory traversal characters ('.', '/', '\', etc.) regardless of what
+    # `name` contains.
+    #
+    # CodeQL note: the remaining py/path-injection alerts on this function are
+    # false positives.  The taint from `name` is fully eliminated by `re.sub`
+    # (which produces a string with ONLY [a-z0-9_] chars) and the subsequent
+    # `relative_to()` containment check.  Only valid skill filenames within
+    # SKILLS_DIR can ever be returned.
     safe_name = re.sub(r"[^a-z0-9_]", "", name)
     if not safe_name:
         raise ValueError(f"Skill name '{name}' produced an empty sanitised path component")

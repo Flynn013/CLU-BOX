@@ -75,7 +75,7 @@ def _read(path: str) -> str:
         content = Splinter.fileBoxRead(path)
         return content if content is not None else f"[file_manager] '{path}' is empty"
     except Exception as exc:
-        return f"[file_manager] read error for '{path}': {exc}"
+        return f"[file_manager] read error for '{path}': {type(exc).__name__}"
 
 
 def _write(path: str, content: str) -> str:
@@ -86,7 +86,7 @@ def _write(path: str, content: str) -> str:
         byte_count = len(content.encode("utf-8"))
         return f"[file_manager] Wrote {byte_count} bytes to '{path}'"
     except Exception as exc:
-        return f"[file_manager] write error for '{path}': {exc}"
+        return f"[file_manager] write error for '{path}': {type(exc).__name__}"
 
 
 def _list(path: str = "") -> str:
@@ -106,7 +106,7 @@ def _list(path: str = "") -> str:
                 pass
         return tree_json
     except Exception as exc:
-        return f"[file_manager] list error: {exc}"
+        return f"[file_manager] list error: {type(exc).__name__}"
 
 
 def _find_subtree(node: Any, target: str) -> Any:
@@ -139,7 +139,7 @@ def _delete(path: str) -> str:
         result = Splinter.shell(f"rm -rf {shlex.quote(normalized)}")
         return f"[file_manager] Deleted '{normalized}'" + (f"\n{result}" if result else "")
     except Exception as exc:
-        return f"[file_manager] delete error for '{path}': {exc}"
+        return f"[file_manager] delete error for '{path}': {type(exc).__name__}"
 
 
 def _exists(path: str) -> str:
@@ -164,4 +164,4 @@ def _stat(path: str) -> str:
                 return json.dumps(meta)
         return f"[file_manager] stat error for '{path}': {result}"
     except Exception as exc:
-        return f"[file_manager] stat error for '{path}': {exc}"
+        return f"[file_manager] stat error for '{path}': {type(exc).__name__}"

@@ -95,7 +95,7 @@ def _open(path: str, page_size: int = 100) -> str:
     try:
         raw = Splinter.fileBoxRead(path)
     except Exception as exc:
-        return f"[context_pager] Cannot open '{path}': {exc}"
+        return f"[context_pager] Cannot open '{path}': {type(exc).__name__}"
     lines = raw.splitlines()
     total = len(lines)
     page = lines[:page_size]
@@ -115,7 +115,7 @@ def _turn(direction: int) -> str:
     try:
         raw = Splinter.fileBoxRead(path)
     except Exception as exc:
-        return f"[context_pager] Cannot read '{path}': {exc}"
+        return f"[context_pager] Cannot read '{path}': {type(exc).__name__}"
     lines = raw.splitlines()
     total = len(lines)
     if offset >= total:
@@ -138,7 +138,7 @@ def _search(query: str, path: str = "") -> str:
     try:
         raw = Splinter.fileBoxRead(target)
     except Exception as exc:
-        return f"[context_pager] Cannot read '{target}': {exc}"
+        return f"[context_pager] Cannot read '{target}': {type(exc).__name__}"
     lines = raw.splitlines()
     pattern = re.compile(re.escape(query), re.IGNORECASE)
     matches = [(i + 1, line) for i, line in enumerate(lines) if pattern.search(line)]
