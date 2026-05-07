@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 from typing import Any
 
 # Injected by PythonBridge.initialize — do not import.
