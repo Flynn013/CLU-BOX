@@ -168,10 +168,10 @@ dependencies {
     // (see com.google.ai.edge.gallery.data.lnkbox.LnkBoxBridge.connectSse).
     // CIO engine is the lightest-weight option that supports HTTP/1.1 keep-alive
     // and chunked SSE streams without pulling in OkHttp.
-    // NOTE: ktor-client-sse requires Ktor 3.x (the artifact was not published under 2.3.x).
+    // NOTE: client-side SSE lives in Ktor's client plugin packages; there is no
+    // published `io.ktor:ktor-client-sse` artifact on Maven Central / Google.
     implementation("io.ktor:ktor-client-core:3.0.3")
     implementation("io.ktor:ktor-client-cio:3.0.3")
-    implementation("io.ktor:ktor-client-sse:3.0.3")
     // OkHttp — used by the Goose engine LLM providers (Anthropic, OpenAI, Google)
     // for the HTTP+SSE transport layer.
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
