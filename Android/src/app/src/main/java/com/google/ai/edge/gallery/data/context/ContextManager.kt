@@ -80,6 +80,9 @@ class ContextManager(
         /** Characters-per-token ratio used for estimation. */
         private const val CHARS_PER_TOKEN = 4
 
+        /** Maximum characters to keep in a single tool result before truncation. */
+        private const val MAX_TOOL_RESULT_CHARS = 4_000
+
         /**
          * Common context-window sizes keyed by well-known model id substrings.
          *
@@ -245,10 +248,5 @@ class ContextManager(
         val used = estimateTokens(messages)
         val pct = if (inputBudget > 0) (used * 100L / inputBudget).coerceAtMost(100) else 0
         return "~${"%,d".format(used)} / ${"%,d".format(inputBudget)} tokens ($pct%)"
-    }
-
-    private companion object {
-        /** Maximum characters to keep in a single tool result before truncation. */
-        private const val MAX_TOOL_RESULT_CHARS = 4_000
     }
 }

@@ -70,6 +70,9 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    kotlinOptions {
+        jvmTarget = "17"
+    }
     
     buildFeatures {
         compose = true
@@ -122,6 +125,10 @@ dependencies {
 
     implementation("io.coil-kt:coil-compose:2.6.0")
     implementation("com.google.accompanist:accompanist-systemuicontroller:0.34.0")
+
+    implementation(libs.kotlinx.serialization.json)
+
+    implementation("androidx.datastore:datastore-preferences:1.1.7")
 
     implementation(libs.androidx.datastore)
     implementation(libs.protobuf.javalite)
