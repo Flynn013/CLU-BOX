@@ -118,7 +118,7 @@ class PermissionManager {
             _permissionRequests.emit(request)
             val result = kotlinx.coroutines.withTimeoutOrNull(30_000L) {
                 request.deferred.await()
-            } ?: PermissionResult.ALLOW // Auto-allow if UI doesn't respond in 30 s
+            } ?: PermissionResult.DENY // Auto-deny if UI doesn't respond in 30 s — safer default
 
             if (result == PermissionResult.ALLOW_ALL_SESSION) {
                 allowAllForSession = true
