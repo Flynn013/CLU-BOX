@@ -20,8 +20,10 @@ object SettingsKeys {
     const val ANTHROPIC_API_KEY  = "goose_anthropic_api_key"
     const val OPENAI_API_KEY     = "goose_openai_api_key"
     const val GOOGLE_API_KEY     = "goose_google_api_key"
+    const val GOOGLE_OAUTH_TOKEN = "goose_google_oauth_token"
     const val MISTRAL_API_KEY    = "goose_mistral_api_key"
     const val OPENROUTER_API_KEY = "goose_openrouter_api_key"
+    const val DATABRICKS_API_KEY = "goose_databricks_api_key"
 
     // Custom / Ollama provider
     const val CUSTOM_PROVIDER_URL   = "goose_custom_provider_url"
@@ -32,6 +34,12 @@ object SettingsKeys {
     // Active provider/model selection
     const val ACTIVE_PROVIDER = "goose_active_provider"
     const val ACTIVE_MODEL    = "goose_active_model"
+
+    // Local (on-device) model selection
+    const val LOCAL_MODEL_ID  = "goose_local_model_id"
+
+    // GitHub integration
+    const val GITHUB_TOKEN = "goose_github_token"
 
     // Working directory
     const val WORKING_DIRECTORY = "goose_working_directory"

@@ -12,6 +12,7 @@ package com.google.ai.edge.gallery.goose.engine
 
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import org.json.JSONObject
 
 /**
  * The core interface that both the Rust binary engine and the Kotlin native engine implement.
@@ -91,12 +92,31 @@ sealed class AgentEvent {
 }
 
 /**
+ * Information about a single tool call made by the assistant.
+ * Stored in [ConversationMessage.toolCalls] so that providers can format
+ * the conversation history correctly (each provider needs tool_use /
+ * function_calling blocks in the assistant message).
+ */
+data class ToolCallInfo(
+    val id: String,
+    val name: String,
+    val input: JSONObject
+)
+
+/**
  * A message in the conversation history.
  * Simplified from ChatMessage — just what the engine needs.
+ *
+ * - role="system"    → only [content] is used
+ * - role="user"      → only [content] is used
+ * - role="assistant" → [content] is the text, [toolCalls] any invocations made
+ * - role="tool"      → [content] is the result, [toolCallId] ties it to the call,
+ *                      [toolName] names the tool
  */
 data class ConversationMessage(
     val role: String,       // "user", "assistant", "system", "tool"
     val content: String,
     val toolCallId: String? = null,
-    val toolName: String? = null
+    val toolName: String? = null,
+    val toolCalls: List<ToolCallInfo>? = null   // For role="assistant": tool calls made
 )

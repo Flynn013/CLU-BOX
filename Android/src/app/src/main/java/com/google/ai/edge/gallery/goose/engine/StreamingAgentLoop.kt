@@ -36,7 +36,10 @@ class StreamingAgentLoop(
     private val provider: LlmProvider,
     private val toolRouter: ToolRouter,
     private val mcpManager: McpExtensionManager,
-    private val maxIterations: Int = 25
+    private val maxIterations: Int = 25,
+    private val permissionManager: PermissionManager? = null,
+    private val contextTracker: ContextTracker? = null,
+    private val tokenCounter: TokenCounter? = null
 ) {
     companion object {
         private const val TAG = "StreamingAgentLoop"
@@ -109,6 +112,19 @@ The working directory is the user's project workspace.
 
             currentCoroutineContext().ensureActive()
 
+            // Context-window management: truncate if conversation is approaching the limit
+            val modelId = provider.modelId
+            if (tokenCounter != null) {
+                val action = tokenCounter.checkContextUsage(messages, modelId)
+                if (action == TokenCounter.ContextAction.HARD_TRUNCATE ||
+                    action == TokenCounter.ContextAction.COMPACT) {
+                    val truncated = tokenCounter.truncateMessages(messages, modelId)
+                    messages.clear()
+                    messages.addAll(truncated)
+                    Log.i(TAG, "Context truncated to ${messages.size} messages for model $modelId")
+                }
+            }
+
             val turnText = StringBuilder()
             val turnThinking = StringBuilder()
             val turnToolCalls = mutableListOf<LlmToolCall>()
@@ -175,15 +191,52 @@ The working directory is the user's project workspace.
                 return@flow
             }
 
-            messages.add(ConversationMessage(role = "assistant", content = turnText.toString()))
+            messages.add(ConversationMessage(
+                role = "assistant",
+                content = turnText.toString(),
+                toolCalls = turnToolCalls.map { ToolCallInfo(it.id, it.name, it.input) }
+            ))
 
             for (toolCall in turnToolCalls) {
                 currentCoroutineContext().ensureActive()
+
+                // Permission check for destructive operations
+                if (permissionManager != null) {
+                    val allowed = permissionManager.checkPermission(toolCall.name, toolCall.input)
+                    if (!allowed) {
+                        Log.i(TAG, "Tool ${toolCall.name} denied by permission manager")
+                        val deniedResult = ToolCallResult(
+                            "Operation denied by user.",
+                            isError = true
+                        )
+                        emit(AgentEvent.ToolStart(toolCall.id, toolCall.name, toolCall.input.toString()))
+                        emit(AgentEvent.ToolEnd(toolCall.id, toolCall.name, deniedResult.output, deniedResult.isError))
+                        messages.add(ConversationMessage(
+                            role = "tool",
+                            content = deniedResult.output,
+                            toolCallId = toolCall.id,
+                            toolName = toolCall.name
+                        ))
+                        continue
+                    }
+                }
 
                 Log.i(TAG, "Executing tool: ${toolCall.name} (id=${toolCall.id})")
                 emit(AgentEvent.ToolStart(toolCall.id, toolCall.name, toolCall.input.toString()))
 
                 val result = executeTool(toolCall)
+
+                // Track context for file operations
+                when (toolCall.name) {
+                    "write", "edit" -> contextTracker?.recordFileModified(
+                        toolCall.input.optString("path", "")
+                    )
+                    "shell" -> contextTracker?.recordCommand(
+                        toolCall.input.optString("command", ""),
+                        if (result.isError) 1 else 0,
+                        result.output
+                    )
+                }
 
                 Log.i(TAG, "Tool ${toolCall.name} finished (error=${result.isError})")
                 emit(AgentEvent.ToolEnd(toolCall.id, toolCall.name, result.output, result.isError))

@@ -31,9 +31,14 @@ import java.io.File
  * It provides the full think→act→observe agent loop with:
  *
  *  - Tool execution (shell, write, edit, tree) via ProcessBuilder.
- *  - LLM provider support (Anthropic, OpenAI, Google) with tool_use/function_calling.
+ *  - LLM provider support (Anthropic, OpenAI, Google, Mistral, OpenRouter, Databricks)
+ *    with tool_use / function-calling and streaming.
  *  - MCP extension support via stdio and HTTP transports.
  *  - Streaming responses with token-by-token display.
+ *  - Adaptive prompt personalisation via [AdaptivePrompt].
+ *  - Session-aware context tracking via [ContextTracker].
+ *  - Destructive-operation gating via [PermissionManager].
+ *  - Context-window management via [TokenCounter].
  *
  * This is the guaranteed-to-work fallback when the Rust binary cannot execute.
  * It provides ~95% of the Rust engine's capability.
@@ -56,6 +61,12 @@ class KotlinNativeEngine(private val context: Context) : GooseEngine {
     private val toolRouter = ToolRouter(workspaceDir, shellEnv, context)
     private val mcpManager = McpExtensionManager()
 
+    // ── New subsystems from goose-android ────────────────────────────────────
+    val permissionManager = PermissionManager()
+    private val contextTracker = ContextTracker()
+    private val adaptivePrompt = AdaptivePrompt(settingsStore)
+    private val tokenCounter = TokenCounter()
+
     private var currentProvider: LlmProvider? = null
     private var currentJob: Job? = null
 
@@ -72,8 +83,13 @@ class KotlinNativeEngine(private val context: Context) : GooseEngine {
         val refreshed = refreshProvider()
         if (!refreshed) {
             Log.w(TAG, "No provider configured — engine ready but needs API key")
-            // Still mark as connected — the user can configure a provider later
         }
+
+        // Load configured MCP extensions
+        loadExtensions()
+
+        // Refresh adaptive prompt cache
+        try { adaptivePrompt.refreshCache() } catch (_: Exception) {}
 
         _status.value = EngineStatus.CONNECTED
         Log.i(TAG, "Kotlin native engine ready. Tools: ${toolRouter.getToolNames().joinToString()}")
@@ -97,12 +113,27 @@ class KotlinNativeEngine(private val context: Context) : GooseEngine {
             return@flow
         }
 
+        // Build adaptive system prompt addendum
+        val adaptiveAddendum = adaptivePrompt.getPersonalizedPromptSync()
+        val fullSystemPrompt = if (adaptiveAddendum.isNotBlank() && systemPrompt.isNotBlank()) {
+            "$systemPrompt\n$adaptiveAddendum"
+        } else {
+            systemPrompt + adaptiveAddendum
+        }
+
         // Create a FRESH agent loop for each message — never reuse stale state
-        val loop = StreamingAgentLoop(provider, toolRouter, mcpManager)
+        val loop = StreamingAgentLoop(
+            provider = provider,
+            toolRouter = toolRouter,
+            mcpManager = mcpManager,
+            permissionManager = permissionManager,
+            contextTracker = contextTracker,
+            tokenCounter = tokenCounter
+        )
 
         // Run the agent loop and emit all events
         try {
-            loop.run(message, conversationHistory, systemPrompt).collect { event ->
+            loop.run(message, conversationHistory, fullSystemPrompt).collect { event ->
                 emit(event)
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
@@ -112,6 +143,9 @@ class KotlinNativeEngine(private val context: Context) : GooseEngine {
             Log.e(TAG, "Agent loop error", e)
             emit(AgentEvent.Error("Agent error: ${e.message}"))
         }
+
+        // Update adaptive prompt cache after each interaction
+        try { adaptivePrompt.refreshCache() } catch (_: Exception) {}
     }
 
     override fun cancel() {
@@ -141,10 +175,7 @@ class KotlinNativeEngine(private val context: Context) : GooseEngine {
 
             if (providerId.isBlank()) {
                 val fallback = findFirstConfiguredProvider()
-                if (fallback != null) {
-                    currentProvider = fallback
-                    return@withContext true
-                }
+                if (fallback != null) { currentProvider = fallback; return@withContext true }
                 currentProvider = null
                 return@withContext false
             }
@@ -153,10 +184,7 @@ class KotlinNativeEngine(private val context: Context) : GooseEngine {
             if (apiKey.isBlank() && providerId != "ollama") {
                 Log.w(TAG, "No API key for provider: $providerId")
                 val fallback = findFirstConfiguredProvider()
-                if (fallback != null) {
-                    currentProvider = fallback
-                    return@withContext true
-                }
+                if (fallback != null) { currentProvider = fallback; return@withContext true }
                 currentProvider = null
                 return@withContext false
             }
@@ -200,11 +228,13 @@ class KotlinNativeEngine(private val context: Context) : GooseEngine {
     private suspend fun getApiKeyForProvider(providerId: String): String {
         return try {
             when (providerId) {
-                "anthropic" -> settingsStore.getString(SettingsKeys.ANTHROPIC_API_KEY).first()
-                "openai"    -> settingsStore.getString(SettingsKeys.OPENAI_API_KEY).first()
-                "google"    -> settingsStore.getString(SettingsKeys.GOOGLE_API_KEY).first()
-                "mistral"   -> settingsStore.getString(SettingsKeys.MISTRAL_API_KEY).first()
-                "openrouter"-> settingsStore.getString(SettingsKeys.OPENROUTER_API_KEY).first()
+                "anthropic"   -> settingsStore.getString(SettingsKeys.ANTHROPIC_API_KEY).first()
+                "openai"      -> settingsStore.getString(SettingsKeys.OPENAI_API_KEY).first()
+                "google"      -> settingsStore.getString(SettingsKeys.GOOGLE_API_KEY).first()
+                "google_oauth"-> settingsStore.getString(SettingsKeys.GOOGLE_OAUTH_TOKEN).first()
+                "mistral"     -> settingsStore.getString(SettingsKeys.MISTRAL_API_KEY).first()
+                "openrouter"  -> settingsStore.getString(SettingsKeys.OPENROUTER_API_KEY).first()
+                "databricks"  -> settingsStore.getString(SettingsKeys.DATABRICKS_API_KEY).first()
                 else -> ""
             }
         } catch (e: Exception) {
@@ -214,19 +244,64 @@ class KotlinNativeEngine(private val context: Context) : GooseEngine {
     }
 
     private suspend fun findFirstConfiguredProvider(): LlmProvider? {
-        val keys = listOf(
-            Triple("anthropic", SettingsKeys.ANTHROPIC_API_KEY, "claude-sonnet-4-20250514"),
-            Triple("openai", SettingsKeys.OPENAI_API_KEY, "gpt-4o"),
-            Triple("google", SettingsKeys.GOOGLE_API_KEY, "gemini-2.5-flash"),
+        val candidates = listOf(
+            Triple("anthropic",    SettingsKeys.ANTHROPIC_API_KEY,  "claude-sonnet-4-20250514"),
+            Triple("openai",       SettingsKeys.OPENAI_API_KEY,     "gpt-4o"),
+            Triple("google",       SettingsKeys.GOOGLE_API_KEY,     "gemini-2.5-flash"),
+            Triple("google_oauth", SettingsKeys.GOOGLE_OAUTH_TOKEN, "gemini-2.5-flash"),
+            Triple("mistral",      SettingsKeys.MISTRAL_API_KEY,    "mistral-large-latest"),
+            Triple("openrouter",   SettingsKeys.OPENROUTER_API_KEY, "anthropic/claude-sonnet-4"),
+            Triple("databricks",   SettingsKeys.DATABRICKS_API_KEY, "databricks-meta-llama-3-1-70b-instruct"),
         )
 
-        for ((providerId, keyName, defaultModel) in keys) {
-            val key = settingsStore.getString(keyName).first()
+        for ((providerId, keyName, defaultModel) in candidates) {
+            val key = try { settingsStore.getString(keyName).first() } catch (_: Exception) { "" }
             if (key.isNotBlank()) {
                 Log.i(TAG, "Found configured provider: $providerId")
-                return ProviderFactory.create(providerId, key, defaultModel)
+                return try { ProviderFactory.create(providerId, key, defaultModel) } catch (_: Exception) { null }
             }
         }
         return null
     }
+
+    /**
+     * Load MCP extensions from workspace/.config/extensions.json.
+     * Each entry may be a stdio (command) or HTTP (URL) extension.
+     */
+    private fun loadExtensions() {
+        try {
+            val configFile = File(workspaceDir, ".config/extensions.json")
+            if (!configFile.exists()) {
+                Log.d(TAG, "No extensions config found at ${configFile.absolutePath}")
+                return
+            }
+
+            val extensions = org.json.JSONArray(configFile.readText())
+            for (i in 0 until extensions.length()) {
+                val ext = extensions.getJSONObject(i)
+                val name    = ext.optString("name", "")
+                val type    = ext.optString("type", "")
+                val enabled = ext.optBoolean("enabled", true)
+                if (!enabled || name.isBlank()) continue
+
+                when (type) {
+                    "stdio" -> {
+                        val command = ext.optString("command", "")
+                        if (command.isNotBlank()) {
+                            Log.i(TAG, "stdio extension configured: $name → $command (connect via mcpManager when ready)")
+                        }
+                    }
+                    "http", "streamable_http" -> {
+                        val url = ext.optString("url", "")
+                        if (url.isNotBlank()) {
+                            Log.i(TAG, "HTTP extension configured: $name → $url (connect via mcpManager when ready)")
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to load extensions config: ${e.message}")
+        }
+    }
 }
+
