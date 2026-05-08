@@ -60,15 +60,6 @@
             </intent-filter>
         </activity>
 
-        <activity
-            android:name="com.google.android.gms.oss.licenses.OssLicensesMenuActivity"
-            android:exported="true"
-            android:theme="@style/Theme.Gallery.OssLicenses" />
-        <activity
-            android:name="com.google.android.gms.oss.licenses.OssLicensesActivity"
-            android:exported="true"
-            android:theme="@style/Theme.Gallery.OssLicenses" />
-
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.provider"

@@ -23,7 +23,6 @@ plugins {
     id("com.google.devtools.ksp")
     id("com.google.protobuf")
     id("com.chaquo.python")
-    id("com.google.android.gms.oss-licenses-plugin")
 }
 
 android {
@@ -138,7 +137,6 @@ dependencies {
     implementation(libs.hilt.navigation.compose)
 
     implementation(libs.openid.appauth)
-    implementation(libs.play.services.oss.licenses)
 
     // Termux terminal-emulator/terminal-view dependencies purged.
     // Shell capabilities are now provided by the embedded arm64-v8a BusyBox binary
