@@ -61,8 +61,9 @@ class RecipeStore(context: Context) {
             val file = fileFor(recipe.name)
             val tmp = File(recipeDir, "${recipe.name}.recipe.tmp")
             tmp.writeText(json.encodeToString(Recipe.serializer(), recipe))
-            tmp.renameTo(file)
+            check(tmp.renameTo(file)) { "Failed to atomically move '${tmp.path}' to '${file.path}'" }
             Log.d(TAG, "Saved recipe '${recipe.name}' → ${file.path}")
+            Unit
         }
     }
 
