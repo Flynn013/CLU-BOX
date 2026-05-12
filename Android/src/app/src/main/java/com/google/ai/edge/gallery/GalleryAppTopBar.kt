@@ -47,7 +47,7 @@ import com.google.ai.edge.gallery.data.AppBarActionType
 /** The top app bar. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun GalleryTopAppBar(
+fun CluTopAppBar(
   title: String,
   modifier: Modifier = Modifier,
   leftAction: AppBarAction? = null,

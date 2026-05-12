@@ -23,7 +23,6 @@ plugins {
     id("com.google.devtools.ksp")
     id("com.google.protobuf")
     id("com.chaquo.python")
-    id("com.google.android.gms.oss-licenses-plugin")
 }
 
 android {
@@ -69,6 +68,9 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = "17"
     }
     
     buildFeatures {
@@ -123,6 +125,10 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.6.0")
     implementation("com.google.accompanist:accompanist-systemuicontroller:0.34.0")
 
+    implementation(libs.kotlinx.serialization.json)
+
+    implementation("androidx.datastore:datastore-preferences:1.1.7")
+
     implementation(libs.androidx.datastore)
     implementation(libs.protobuf.javalite)
     
@@ -131,7 +137,6 @@ dependencies {
     implementation(libs.hilt.navigation.compose)
 
     implementation(libs.openid.appauth)
-    implementation(libs.play.services.oss.licenses)
 
     // Termux terminal-emulator/terminal-view dependencies purged.
     // Shell capabilities are now provided by the embedded arm64-v8a BusyBox binary
@@ -168,9 +173,13 @@ dependencies {
     // (see com.google.ai.edge.gallery.data.lnkbox.LnkBoxBridge.connectSse).
     // CIO engine is the lightest-weight option that supports HTTP/1.1 keep-alive
     // and chunked SSE streams without pulling in OkHttp.
-    implementation("io.ktor:ktor-client-core:2.3.12")
-    implementation("io.ktor:ktor-client-cio:2.3.12")
-    implementation("io.ktor:ktor-client-sse:2.3.12")
+    // NOTE: client-side SSE lives in Ktor's client plugin packages; there is no
+    // published `io.ktor:ktor-client-sse` artifact on Maven Central / Google.
+    implementation("io.ktor:ktor-client-core:3.0.3")
+    implementation("io.ktor:ktor-client-cio:3.0.3")
+    // OkHttp — used by the Goose engine LLM providers (Anthropic, OpenAI, Google)
+    // for the HTTP+SSE transport layer.
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     // ──────────────────────────────────────────────────────────────────
     
     testImplementation(libs.junit)

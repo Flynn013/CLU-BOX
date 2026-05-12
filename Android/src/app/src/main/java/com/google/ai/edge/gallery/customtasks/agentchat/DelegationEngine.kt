@@ -13,6 +13,7 @@ package com.google.ai.edge.gallery.customtasks.agentchat
 import android.content.Context
 import android.util.Log
 import com.google.ai.edge.gallery.data.splinter.SplinterAPI
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -189,6 +190,20 @@ class DelegationEngine(
     override val description: String =
       "Spawn a persona-bound sub-agent to handle a focused subtask in parallel and " +
         "return its synthesis. Personas are managed in CLN_BOX."
+    override val jsonSchema: String = """
+      {
+        "type": "object",
+        "properties": {
+          "persona":   {"type": "string",  "description": "Single persona name (used when 'personas' is omitted)"},
+          "personas":  {"type": "array",   "items": {"type": "string"}, "description": "Fan-out: list of persona names"},
+          "prompt":    {"type": "string",  "description": "Task description for the sub-agent"},
+          "timeoutMs": {"type": "integer", "description": "Hard deadline in milliseconds (default 90000)"}
+        },
+        "required": ["prompt"]
+      }
+    """.trimIndent()
+    override val fewShotExample: String =
+      """{"persona": "kotlin_coder", "prompt": "Refactor X to use coroutines", "timeoutMs": 60000}"""
 
     override suspend fun execute(args: JSONObject): String {
       val personasArr = args.optJSONArray("personas")

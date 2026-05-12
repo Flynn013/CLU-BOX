@@ -18,7 +18,6 @@ package com.google.ai.edge.gallery.ui.osmodules
 
 import android.app.UiModeManager
 import android.content.Context
-import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -87,11 +86,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.google.android.gms.oss.licenses.OssLicensesMenuActivity
 import com.google.ai.edge.gallery.BuildConfig
 import com.google.ai.edge.gallery.data.LogBoxManager
 import com.google.ai.edge.gallery.proto.Theme
-import com.google.ai.edge.gallery.ui.common.ClickableLink
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import com.google.ai.edge.gallery.ui.theme.ThemeSettings
 import com.google.ai.edge.gallery.ui.theme.absoluteBlack
@@ -121,7 +118,7 @@ private val INFERENCE_FILTERS = listOf(
 /**
  * SYS_SETTINGS — Full-screen, multi-tabbed settings and diagnostics hub.
  *
- * Tab 0 (CONFIG)    : Appearance overrides, custom colors, HF token, licenses.
+ * Tab 0 (CONFIG)    : Appearance overrides, custom colors, HF token, open-source notices.
  * Tab 1 (TERMINAL)  : Live logcat stream filtered to shell/PTY tags.
  * Tab 2 (INFERENCE) : Live logcat stream filtered to LLM/inference tags.
  * Tab 3 (SYSTEM)    : Unfiltered logcat — crash stack-traces, OOM events, OS kills.
@@ -537,36 +534,17 @@ private fun ConfigTab(
       }
     }
 
-    // ── Third-party licenses ───────────────────────────────────────
+    // ── Open-source notice ─────────────────────────────────────────
     Column(modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
       Text(
-        "Third-party libraries",
+        "Open-source software",
         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium),
       )
-      OutlinedButton(
-        onClick = {
-          context.startActivity(Intent(context, OssLicensesMenuActivity::class.java))
-        }
-      ) {
-        Text("View licenses")
-      }
-    }
-
-    // ── Gemma ToS links ────────────────────────────────────────────
-    Column(modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
       Text(
-        "Model Terms of Service",
-        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium),
-      )
-      ClickableLink(
-        url = "https://ai.google.dev/gemma/terms",
-        linkText = "Gemma Terms of Use",
+        "CLU/BOX is built on open-source libraries. Licenses for included packages are distributed with the app under their respective terms.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 4.dp),
-      )
-      ClickableLink(
-        url = "https://ai.google.dev/gemma/prohibited_use_policy",
-        linkText = "Gemma Prohibited Use Policy",
-        modifier = Modifier.padding(top = 8.dp),
       )
     }
   }

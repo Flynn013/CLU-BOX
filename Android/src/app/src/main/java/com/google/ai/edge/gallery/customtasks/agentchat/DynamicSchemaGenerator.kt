@@ -25,7 +25,7 @@ private const val TAG = "DynamicSchemaGenerator"
  * Schema Generation** of the bare-metal architecture.
  *
  * # Pipeline
- * 1. Walk `${filesDir}/skill_box/*.py` to discover dynamic skills authored at
+ * 1. Discover `.py` skill files in `${filesDir}/skill_box/` authored at
  *    runtime (typically by the agent itself via [SplinterAPI.skillBoxWrite]).
  * 2. For every file, call [PythonBridge.introspectModule] which uses
  *    `inspect.signature` and `inspect.getdoc` to extract function names,

@@ -64,14 +64,13 @@ fun AppTosDialog(onTosAccepted: () -> Unit, viewingMode: Boolean = false) {
         )
 
         Column(modifier = Modifier.verticalScroll(rememberScrollState()).weight(1f, fill = false)) {
-          // Short content.
           MarkdownText(
-            "By using this app, you agree to the " +
-              "[Google Terms of Service](https://policies.google.com/terms?hl=en-US).\n\n" +
-              "To learn what information we collect and why, how we use it, " +
-              "and how to review and update it, please review the " +
-              "[Google Privacy Policy](https://policies.google.com/privacy?hl=en-US).\n\n" +
-              "Your use of each model is subject to the applicable model license terms.",
+            "**CLU/BOX** is open-source software. All AI inference runs **locally on your device** — " +
+              "no data is sent to external servers unless you explicitly configure a cloud model.\n\n" +
+              "By continuing you agree to use CLU/BOX responsibly and in accordance with the " +
+              "license terms of any models you download. Each model's license is shown in the " +
+              "VENDING_MACHINE screen before download.\n\n" +
+              "CLU/BOX itself is released under the [Apache 2.0 License](https://www.apache.org/licenses/LICENSE-2.0).",
             smallFontSize = true,
             textColor = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 16.dp),

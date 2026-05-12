@@ -60,14 +60,28 @@
             </intent-filter>
         </activity>
 
+        <!--
+            AppAuth redirect handler for Google OAuth PKCE flow.
+            The scheme "clubox" must match GeminiAuthConfig.REDIRECT_URI and the
+            manifestPlaceholders["appAuthRedirectScheme"] value in build.gradle.kts.
+            android:exported="true" is required so the browser can deliver the callback.
+        -->
         <activity
-            android:name="com.google.android.gms.oss.licenses.OssLicensesMenuActivity"
+            android:name="net.openid.appauth.RedirectUriReceiverActivity"
             android:exported="true"
-            android:theme="@style/Theme.Gallery.OssLicenses" />
-        <activity
-            android:name="com.google.android.gms.oss.licenses.OssLicensesActivity"
-            android:exported="true"
-            android:theme="@style/Theme.Gallery.OssLicenses" />
+            tools:node="replace">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <!-- clubox://oauth2callback — Gemini / Google OAuth redirect URI -->
+                <data
+                    android:scheme="clubox"
+                    android:host="oauth2callback" />
+            </intent-filter>
+        </activity>
 
         <provider
             android:name="androidx.core.content.FileProvider"

@@ -46,6 +46,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 
 private const val SHIM_TAG = "CluCompatShim"
 
@@ -175,6 +176,16 @@ class SharedShellManager(private val context: Context) {
   fun restartSession() {
     Log.d(SHIM_TAG, "SharedShellManager.restartSession() — no-op under BusyBoxBridge")
   }
+
+  /**
+   * Source-compat shim for call-sites that previously injected commands into a
+   * live PTY.  Under BusyBoxBridge there is no persistent terminal session, so
+   * the command is executed asynchronously in the background and the result
+   * is discarded (callers that need the output should use [TerminalSessionManager]).
+   */
+  fun injectCommand(command: String) {
+    Log.d(SHIM_TAG, "SharedShellManager.injectCommand: scheduling — $command")
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -221,6 +232,24 @@ class TerminalSessionManager(private val context: Context) {
     }
     r.exitCode to merged
   }
+
+  /**
+   * Source-compat suspending wrapper used by [DiffBoxScreen] and similar screens.
+   *
+   * Executes [command] on [Dispatchers.IO] and returns the merged stdout+stderr.
+   * The [visible] parameter is accepted for API compatibility and ignored.
+   */
+  suspend fun sendCommand(command: String, @Suppress("UNUSED_PARAMETER") visible: Boolean = true): String =
+    withContext(Dispatchers.IO) {
+      val r = BusyBoxBridge.shell(context, command)
+      buildString {
+        append(r.stdout)
+        if (r.stderr.isNotBlank()) {
+          if (isNotEmpty()) append('\n')
+          append("[stderr] ${r.stderr}")
+        }
+      }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────

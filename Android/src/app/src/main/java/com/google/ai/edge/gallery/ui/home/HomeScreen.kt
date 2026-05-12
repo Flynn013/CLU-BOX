@@ -102,7 +102,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import com.google.ai.edge.gallery.GalleryTopAppBar
+import com.google.ai.edge.gallery.CluTopAppBar
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.data.AppBarAction
 import com.google.ai.edge.gallery.data.AppBarActionType
@@ -345,7 +345,7 @@ fun HomeScreen(
                   translationY = ((-16).dp * (1 - progress)).toPx()
                 }
             ) {
-              GalleryTopAppBar(
+              CluTopAppBar(
                 title = stringResource(HomeScreenDestination.titleRes),
                 leftAction =
                   AppBarAction(

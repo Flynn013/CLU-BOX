@@ -71,6 +71,61 @@
       ]
     },
     {
+      "name": "Gemma-3n-E2B-it",
+      "modelId": "google/gemma-3n-E2B-it-litert-lm",
+      "modelFile": "gemma-3n-E2B-it-int4.litertlm",
+      "description": "A variant of Gemma 3n E2B ready for deployment on Android using LiteRT-LM. Supports text, vision, and audio input with 4096 context length.",
+      "sizeInBytes": 3655827456,
+      "minDeviceMemoryInGb": 8,
+      "commitHash": "ba9ca88da013b537b6ed38108be609b8db1c3a16",
+      "llmSupportImage": true,
+      "llmSupportAudio": true,
+      "defaultConfig": {
+        "topK": 64,
+        "topP": 0.95,
+        "temperature": 1.0,
+        "maxTokens": 4096,
+        "accelerators": "cpu,gpu",
+        "visionAccelerator": "gpu"
+      },
+      "taskTypes": [
+        "llm_chat",
+        "llm_prompt_lab",
+        "llm_ask_image",
+        "llm_ask_audio"
+      ],
+      "bestForTaskTypes": [
+        "llm_ask_image",
+        "llm_ask_audio"
+      ]
+    },
+    {
+      "name": "Gemma-3n-E4B-it",
+      "modelId": "google/gemma-3n-E4B-it-litert-lm",
+      "modelFile": "gemma-3n-E4B-it-int4.litertlm",
+      "description": "A variant of Gemma 3n E4B ready for deployment on Android using LiteRT-LM. Supports text, vision, and audio input with 4096 context length.",
+      "sizeInBytes": 4919541760,
+      "minDeviceMemoryInGb": 12,
+      "commitHash": "297ed75955702dec3503e00c2c2ecbbf475300bc",
+      "llmSupportImage": true,
+      "llmSupportAudio": true,
+      "defaultConfig": {
+        "topK": 64,
+        "topP": 0.95,
+        "temperature": 1.0,
+        "maxTokens": 4096,
+        "accelerators": "cpu,gpu",
+        "visionAccelerator": "gpu"
+      },
+      "taskTypes": [
+        "llm_chat",
+        "llm_prompt_lab",
+        "llm_ask_image",
+        "llm_ask_audio"
+      ],
+      "bestForTaskTypes": []
+    },
+    {
       "name": "Gemma3-1B-IT",
       "modelId": "litert-community/Gemma3-1B-IT",
       "modelFile": "gemma3-1b-it-int4.litertlm",
@@ -92,6 +147,226 @@
       "bestForTaskTypes": [
         "llm_chat",
         "llm_prompt_lab"
+      ]
+    },
+    {
+      "name": "Qwen2.5-1.5B-Instruct",
+      "modelId": "litert-community/Qwen2.5-1.5B-Instruct",
+      "modelFile": "Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv4096.litertlm",
+      "description": "Alibaba Qwen2.5 1.5B Instruct model for Android via LiteRT-LM. Excellent balance of performance and size for low-memory devices.",
+      "sizeInBytes": 1597931520,
+      "minDeviceMemoryInGb": 6,
+      "commitHash": "19edb84c69a0212f29a6ef17ba0d6f278b6a1614",
+      "defaultConfig": {
+        "topK": 20,
+        "topP": 0.8,
+        "temperature": 0.7,
+        "maxTokens": 4096,
+        "accelerators": "gpu,cpu"
+      },
+      "taskTypes": [
+        "llm_chat",
+        "llm_prompt_lab",
+        "llm_agent_chat"
+      ],
+      "bestForTaskTypes": [
+        "llm_chat",
+        "llm_agent_chat"
+      ]
+    },
+    {
+      "name": "Phi-4-mini-instruct",
+      "modelId": "litert-community/Phi-4-mini-instruct",
+      "modelFile": "Phi-4-mini-instruct_multi-prefill-seq_q8_ekv4096.litertlm",
+      "description": "Microsoft Phi-4-mini-instruct for Android via LiteRT-LM. Strong reasoning in a compact footprint.",
+      "sizeInBytes": 3910090752,
+      "minDeviceMemoryInGb": 8,
+      "commitHash": "054f4e2694a86f81a129a40596e08b8d74770a9d",
+      "defaultConfig": {
+        "topK": 64,
+        "topP": 0.95,
+        "temperature": 1.0,
+        "maxTokens": 4096,
+        "accelerators": "gpu,cpu"
+      },
+      "taskTypes": [
+        "llm_chat",
+        "llm_prompt_lab",
+        "llm_agent_chat"
+      ],
+      "bestForTaskTypes": [
+        "llm_chat",
+        "llm_agent_chat"
+      ]
+    },
+    {
+      "name": "DeepSeek-R1-Distill-Qwen-1.5B",
+      "modelId": "litert-community/DeepSeek-R1-Distill-Qwen-1.5B",
+      "modelFile": "DeepSeek-R1-Distill-Qwen-1.5B_multi-prefill-seq_q8_ekv4096.litertlm",
+      "description": "DeepSeek-R1 distilled into a 1.5B Qwen-based model for Android via LiteRT-LM. Chain-of-thought reasoning in a compact footprint.",
+      "sizeInBytes": 1833451520,
+      "minDeviceMemoryInGb": 6,
+      "commitHash": "e34bb88632342d1f9640bad579a45134eb1cf988",
+      "defaultConfig": {
+        "topK": 64,
+        "topP": 0.95,
+        "temperature": 1.0,
+        "maxTokens": 4096,
+        "accelerators": "gpu,cpu"
+      },
+      "taskTypes": [
+        "llm_chat",
+        "llm_prompt_lab"
+      ],
+      "bestForTaskTypes": [
+        "llm_chat"
+      ]
+    },
+    {
+      "name": "Gemma3-4B-IT",
+      "modelId": "litert-community/Gemma3-4B-IT",
+      "modelFile": "gemma3-4b-it-int4.litertlm",
+      "description": "A variant of google/Gemma-3-4B-IT with 4-bit quantization ready for deployment on Android using LiteRT-LM.",
+      "sizeInBytes": 2441216000,
+      "minDeviceMemoryInGb": 8,
+      "commitHash": "main",
+      "defaultConfig": {
+        "topK": 64,
+        "topP": 0.95,
+        "temperature": 1.0,
+        "maxTokens": 4096,
+        "accelerators": "gpu,cpu"
+      },
+      "taskTypes": [
+        "llm_chat",
+        "llm_prompt_lab",
+        "llm_agent_chat"
+      ],
+      "bestForTaskTypes": [
+        "llm_chat",
+        "llm_agent_chat"
+      ]
+    },
+    {
+      "name": "Qwen2.5-7B-Instruct",
+      "modelId": "litert-community/Qwen2.5-7B-Instruct",
+      "modelFile": "Qwen2.5-7B-Instruct_multi-prefill-seq_q8_ekv4096.litertlm",
+      "description": "Alibaba Qwen2.5 7B Instruct model for Android via LiteRT-LM. Strong reasoning and instruction-following in a 7B footprint.",
+      "sizeInBytes": 7752417280,
+      "minDeviceMemoryInGb": 12,
+      "commitHash": "main",
+      "defaultConfig": {
+        "topK": 20,
+        "topP": 0.8,
+        "temperature": 0.7,
+        "maxTokens": 4096,
+        "accelerators": "gpu,cpu"
+      },
+      "taskTypes": [
+        "llm_chat",
+        "llm_prompt_lab",
+        "llm_agent_chat"
+      ],
+      "bestForTaskTypes": [
+        "llm_chat",
+        "llm_agent_chat"
+      ]
+    },
+    {
+      "name": "Mistral-7B-Instruct-v0.3",
+      "modelId": "litert-community/Mistral-7B-Instruct-v0.3",
+      "modelFile": "Mistral-7B-Instruct-v0.3_multi-prefill-seq_q8_ekv4096.litertlm",
+      "description": "Mistral 7B Instruct v0.3 for Android via LiteRT-LM. Compact and capable general-purpose 7B model.",
+      "sizeInBytes": 7438540800,
+      "minDeviceMemoryInGb": 12,
+      "commitHash": "main",
+      "defaultConfig": {
+        "topK": 64,
+        "topP": 0.95,
+        "temperature": 1.0,
+        "maxTokens": 4096,
+        "accelerators": "gpu,cpu"
+      },
+      "taskTypes": [
+        "llm_chat",
+        "llm_prompt_lab",
+        "llm_agent_chat"
+      ],
+      "bestForTaskTypes": [
+        "llm_chat"
+      ]
+    },
+    {
+      "name": "DeepSeek-R1-Distill-Qwen-7B",
+      "modelId": "litert-community/DeepSeek-R1-Distill-Qwen-7B",
+      "modelFile": "DeepSeek-R1-Distill-Qwen-7B_multi-prefill-seq_q8_ekv4096.litertlm",
+      "description": "DeepSeek-R1 distilled into a 7B Qwen-based model for Android via LiteRT-LM. Chain-of-thought reasoning at 7B scale.",
+      "sizeInBytes": 7516192768,
+      "minDeviceMemoryInGb": 12,
+      "commitHash": "main",
+      "defaultConfig": {
+        "topK": 64,
+        "topP": 0.95,
+        "temperature": 1.0,
+        "maxTokens": 4096,
+        "accelerators": "gpu,cpu"
+      },
+      "taskTypes": [
+        "llm_chat",
+        "llm_prompt_lab"
+      ],
+      "bestForTaskTypes": [
+        "llm_chat"
+      ]
+    },
+    {
+      "name": "Llama-3.1-8B-Instruct",
+      "modelId": "litert-community/Llama-3.1-8B-Instruct",
+      "modelFile": "Llama-3.1-8B-Instruct_multi-prefill-seq_q8_ekv4096.litertlm",
+      "description": "Meta Llama 3.1 8B Instruct for Android via LiteRT-LM. Balanced 8B model with strong general capabilities.",
+      "sizeInBytes": 8589934592,
+      "minDeviceMemoryInGb": 16,
+      "commitHash": "main",
+      "defaultConfig": {
+        "topK": 64,
+        "topP": 0.95,
+        "temperature": 1.0,
+        "maxTokens": 4096,
+        "accelerators": "gpu,cpu"
+      },
+      "taskTypes": [
+        "llm_chat",
+        "llm_prompt_lab",
+        "llm_agent_chat"
+      ],
+      "bestForTaskTypes": [
+        "llm_chat",
+        "llm_agent_chat"
+      ]
+    },
+    {
+      "name": "Gemma3-12B-IT",
+      "modelId": "litert-community/Gemma3-12B-IT",
+      "modelFile": "gemma3-12b-it-int4.litertlm",
+      "description": "A variant of google/Gemma-3-12B-IT with 4-bit quantization ready for deployment on Android using LiteRT-LM.",
+      "sizeInBytes": 7348224000,
+      "minDeviceMemoryInGb": 16,
+      "commitHash": "main",
+      "defaultConfig": {
+        "topK": 64,
+        "topP": 0.95,
+        "temperature": 1.0,
+        "maxTokens": 4096,
+        "accelerators": "gpu,cpu"
+      },
+      "taskTypes": [
+        "llm_chat",
+        "llm_prompt_lab",
+        "llm_agent_chat"
+      ],
+      "bestForTaskTypes": [
+        "llm_chat",
+        "llm_agent_chat"
       ]
     },
     {

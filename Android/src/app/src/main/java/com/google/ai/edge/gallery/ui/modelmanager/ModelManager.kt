@@ -26,7 +26,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import com.google.ai.edge.gallery.GalleryTopAppBar
+import com.google.ai.edge.gallery.CluTopAppBar
 import com.google.ai.edge.gallery.data.AppBarAction
 import com.google.ai.edge.gallery.data.AppBarActionType
 import com.google.ai.edge.gallery.data.Model
@@ -70,7 +70,7 @@ fun ModelManager(
   Scaffold(
     modifier = modifier,
     topBar = {
-      GalleryTopAppBar(
+      CluTopAppBar(
         title = title,
         leftAction = AppBarAction(actionType = AppBarActionType.NAVIGATE_UP, actionFn = navigateUp),
       )

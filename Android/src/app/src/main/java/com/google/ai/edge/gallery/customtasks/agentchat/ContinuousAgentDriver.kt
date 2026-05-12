@@ -11,6 +11,7 @@
 package com.google.ai.edge.gallery.customtasks.agentchat
 
 import android.util.Log
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
