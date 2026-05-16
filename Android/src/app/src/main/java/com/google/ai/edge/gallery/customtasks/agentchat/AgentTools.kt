@@ -76,17 +76,10 @@ class AgentTools : ToolSet {
 
   /**
    * Dynamically caps tool outputs to prevent KV-cache bloat on local hardware.
-   * Cloud models bypass the tight restriction to leverage their massive context windows.
    */
   fun capOutputWithSpill(rawOutput: String, toolName: String): String {
-    // Flex the pipeline based on the active cognitive engine
-    val maxLimit = if (engine == AgentEngine.CLOUD) {
-      // Cloud models can easily digest entire files. Cap set high just for network sanity.
-      250_000 
-    } else {
-      // Local models will SIGSEGV the device if the token limit overflows.
-      3000 
-    }
+    // Cap output to protect 32K context budget
+    val maxLimit = 4000
 
     if (rawOutput.length <= maxLimit) return rawOutput
     

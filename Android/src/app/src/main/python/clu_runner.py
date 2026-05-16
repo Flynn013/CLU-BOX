@@ -35,17 +35,60 @@ from typing import List, Tuple
 Splinter = None  # type: ignore[assignment]
 
 
+def _build_prelude_namespace() -> dict:
+    """Pre-import common stdlib modules so CLU scripts don't need boilerplate."""
+    ns: dict = {"__name__": "clu_skill", "Splinter": Splinter}
+    stdlib_prelude = {
+        "math": "math",
+        "json": "json",
+        "re": "re",
+        "os": "os",
+        "sys": "sys",
+        "datetime": "datetime",
+        "pathlib": "pathlib",
+        "collections": "collections",
+        "itertools": "itertools",
+        "functools": "functools",
+        "hashlib": "hashlib",
+        "base64": "base64",
+        "csv": "csv",
+        "io": "io",
+        "struct": "struct",
+        "random": "random",
+        "string": "string",
+        "textwrap": "textwrap",
+        "time": "time",
+    }
+    for name, module_name in stdlib_prelude.items():
+        try:
+            import importlib as _il
+            ns[name] = _il.import_module(module_name)
+        except ImportError:
+            pass
+    # Optional: numpy + requests if available
+    for opt in ("numpy", "requests"):
+        try:
+            import importlib as _il
+            ns[opt] = _il.import_module(opt)
+        except ImportError:
+            pass
+    return ns
+
+
 def run(code: str) -> Tuple[str, str]:
     """Execute *code* and return ``(stdout, stderr)`` as plain strings.
 
     The isolated namespace prevents scripts from polluting the interpreter's
-    global state between calls (e.g. clobbering imported modules). The
-    ``Splinter`` God-mode facade is injected so skills can perform CRUD on
+    global state between calls (e.g. clobbering imported modules). Common
+    stdlib modules (math, json, re, os, datetime, etc.) plus numpy and
+    requests (if available) are pre-imported so scripts do not need boilerplate.
+    The ``Splinter`` God-mode facade is injected so skills can perform CRUD on
     every CLU/BOX subsystem.
     """
     buf_out = io.StringIO()
     buf_err = io.StringIO()
-    namespace = {"__name__": "clu_skill", "Splinter": Splinter}
+    namespace = _build_prelude_namespace()
+    namespace["Splinter"] = Splinter
 
     try:
         with contextlib.redirect_stdout(buf_out), contextlib.redirect_stderr(buf_err):

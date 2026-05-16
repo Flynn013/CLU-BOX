@@ -49,22 +49,25 @@ class PythonExecSkill : CluSkill {
   override val name = "PYTHON_EXEC"
 
   override val description =
-    "Execute a Python 3 script natively on-device using the embedded CPython 3.11 interpreter. " +
-      "PREFERRED for math, file parsing, text formatting, data transformation, and local DB queries. " +
-      "Each call runs in an isolated namespace — no state is shared between calls. " +
-      "Output (stdout + stderr) is returned as a string."
+    "Execute a Python 3.11 script on-device using the embedded CPython interpreter. " +
+      "PREFERRED for: math, data analysis, JSON processing, text transformation, file parsing, " +
+      "and any logic expressible in pure Python. " +
+      "Pre-imported: math, json, re, os, datetime, pathlib, collections, itertools, " +
+      "hashlib, base64, csv, random, textwrap, numpy, requests. " +
+      "Also: Splinter (CLU/BOX API for file/memory/shell access). " +
+      "Each call runs isolated — no state shared between calls."
 
   override val jsonSchema =
     """
     {
       "name": "PYTHON_EXEC",
-      "description": "Run a Python 3 script on-device. Returns stdout + stderr as a string.",
+      "description": "Run a Python 3.11 script on-device. Common modules pre-imported. Returns stdout+stderr.",
       "parameters": {
         "type": "object",
         "properties": {
           "python_script": {
             "type": "string",
-            "description": "Complete, valid Python 3 source code to execute."
+            "description": "Complete Python 3 source code to execute. Common modules already imported."
           }
         },
         "required": ["python_script"]
@@ -74,9 +77,12 @@ class PythonExecSkill : CluSkill {
 
   override val fewShotExample =
     """
-    // Example — calculate the hypotenuse of a 3-4-5 triangle:
-    PYTHON_EXEC(python_script="import math\nprint(math.hypot(3, 4))")
-    // → 5.0
+    // Math — no imports needed:
+    PYTHON_EXEC(python_script="print(math.sqrt(144))")  → 12.0
+    // Data — numpy pre-imported:
+    PYTHON_EXEC(python_script="arr=numpy.array([1,2,3]); print(arr.mean())")  → 2.0
+    // File via Splinter:
+    PYTHON_EXEC(python_script="data=Splinter.fileBoxRead('notes.txt'); print(len(data), 'chars')")
     """.trimIndent()
 
   override suspend fun execute(args: JSONObject): String {

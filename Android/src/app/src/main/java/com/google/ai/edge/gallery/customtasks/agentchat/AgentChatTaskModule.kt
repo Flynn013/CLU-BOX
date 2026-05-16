@@ -24,9 +24,7 @@ import com.google.ai.edge.gallery.customtasks.common.CustomTaskDataForBuiltinTas
 import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.Category
 import com.google.ai.edge.gallery.data.Model
-import com.google.ai.edge.gallery.data.RuntimeType
 import com.google.ai.edge.gallery.data.Task
-import com.google.ai.edge.gallery.runtime.geminicloud.GeminiCloudModelHelper
 import com.google.ai.edge.gallery.ui.llmchat.LlmChatModelHelper
 import com.google.ai.edge.litertlm.tool
 import dagger.Module
@@ -48,25 +46,19 @@ class AgentChatTask @Inject constructor() : CustomTask {
       iconVectorResourceId = R.drawable.agent,
       newFeature = true,
       models = mutableListOf(),
-      description = "Chat with LOCAL_CLU (Gemma 4) or CLOUD_CLU (Gemini API) using agentic skills and BrainBox memory",
-      shortDescription = "CLU/BOX agentic chat — LOCAL_CLU & CLOUD_CLU",
+      description = "Chat with CLU (Gemma 4) using agentic skills, Python, BusyBox terminal, and BrainBox long-term memory",
+      shortDescription = "CLU/BOX — on-device Gemma agent with memory",
       docUrl = "https://github.com/Flynn013/CLU-BOX",
       sourceCodeUrl =
         "https://github.com/Flynn013/CLU-BOX",
       textInputPlaceHolderRes = R.string.text_input_placeholder_llm_chat,
       defaultSystemPrompt =
         """
-        You are CLU, an on-device AI assistant. Use recalled MEMORY context when provided.
+        You are CLU, an on-device AI. Use tools to act — do not describe steps.
 
-        TOOLS: Use native function-calling only. No manual JSON/tags.
-
-        WORKFLOW:
-        1. Match request to skill: ___SKILLS___
-        2. If match: call load_skill. If built-in tool fits: use directly.
-        3. Output ONLY final result. No intermediate text.
-
-        FILES: Only fileBoxWrite creates files. Never shell echo/cat/nano.
-        RUN: fileBoxWrite first, then shellExecute.
+        WORKFLOW: memorySearch first for context → act with tools → verify results.
+        TOOLS: ___SKILLS___
+        FILES: fileBoxWrite only. PYTHON: PYTHON_EXEC. SHELL: shellExecute.
         """
           .trimIndent(),
     )
@@ -81,26 +73,27 @@ class AgentChatTask @Inject constructor() : CustomTask {
       ?: run { onDone("SkillManagerViewModel not attached"); return }
     smvm.loadSkills {
       try {
-        // ── Agentic Context Router: set engine and select constraint ──────
-        agentTools.engine = if (model.runtimeType == RuntimeType.GEMINI_CLOUD) {
-          AgentEngine.CLOUD
-        } else {
-          AgentEngine.LOCAL
+        agentTools.engine = AgentEngine.LOCAL
+
+        // ── RAG: inject core memories into system prompt ─────────────────
+        val db = com.google.ai.edge.gallery.data.brainbox.GraphDatabase.getInstance(context)
+        val coreMemContext = try {
+            kotlinx.coroutines.runBlocking {
+                com.google.ai.edge.gallery.data.brainbox.RagInjector.buildCoreContext(db.brainBoxDao())
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("AgentChatTask", "RAG core context failed: ${e.message}")
+            ""
         }
-        
-        val helper = if (model.runtimeType == RuntimeType.GEMINI_CLOUD) {
-          GeminiCloudModelHelper
-        } else {
-          LlmChatModelHelper
-        }
-        
+
         val finalPrompt = SystemPromptManager.build(
           engine = agentTools.engine,
           basePrompt = task.defaultSystemPrompt,
           skillRegistry = agentTools.skillRegistry,
+          coreMemContext = coreMemContext,
         )
         
-        helper.initialize(
+        LlmChatModelHelper.initialize(
           context = context,
           model = model,
           supportImage = true,
@@ -130,12 +123,7 @@ class AgentChatTask @Inject constructor() : CustomTask {
     model: Model,
     onDone: () -> Unit,
   ) {
-    val helper = if (model.runtimeType == RuntimeType.GEMINI_CLOUD) {
-      GeminiCloudModelHelper
-    } else {
-      LlmChatModelHelper
-    }
-    helper.cleanUp(model = model, onDone = onDone)
+    LlmChatModelHelper.cleanUp(model = model, onDone = onDone)
   }
 
   @Composable

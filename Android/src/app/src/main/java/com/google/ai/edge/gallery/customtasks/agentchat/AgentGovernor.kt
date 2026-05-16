@@ -194,21 +194,19 @@ class AgentGovernor(
   //  Backwards-compatible system-prompt constants
   // ─────────────────────────────────────────────────────────────────────────
 
-  companion object {
-    /** System constraint injected when running on a LOCAL engine (~4k context). */
-    val LOCAL_CONSTRAINT: String = """
-[LOCAL ENGINE CONSTRAINT]
-Context window: ~4096 tokens. Be extremely concise in every response.
-Prefer short tool calls over lengthy explanations. Omit preamble.
+    companion object {
+        /** System constraint injected for the LOCAL on-device Gemma engine. */
+        val LOCAL_CONSTRAINT: String = """
+[GEMMA LOCAL ENGINE]
+Context budget: 32K tokens — be concise; short responses preferred.
+Rules: one tool call per turn → observe result → next action.
+Memory: call memorySearch before answering questions about the user or past work.
+Files: always fileBoxWrite — never shell redirection.
 """.trimIndent()
 
-    /** System constraint injected when running on the CLOUD engine. */
-    val CLOUD_CONSTRAINT: String = """
-[CLOUD ENGINE — Full Context Available]
-Gemini API model active. Structured, detailed responses are acceptable.
-Use best practices for code quality and explanations.
-""".trimIndent()
-  }
+        /** Kept for source compatibility — not used in production (cloud removed). */
+        val CLOUD_CONSTRAINT: String = LOCAL_CONSTRAINT
+    }
 }
 
 /** Convenience: subscribe to phase transitions as a hot [Flow] for UI use. */
