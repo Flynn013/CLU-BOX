@@ -157,8 +157,10 @@ class AgentTools : ToolSet {
       }
       if (!target.exists()) return mapOf("lines" to "Error: file not found at $file_path")
       val allLines = target.readLines(Charsets.UTF_8)
-      val slice = allLines.drop(start_line.coerceAtLeast(0))
-        .take((end_line - start_line.coerceAtLeast(0)).coerceAtLeast(1))
+      // Convert 1-indexed inputs to 0-indexed drop/take logic.
+      val startIdx = (start_line - 1).coerceAtLeast(0)
+      val lineCount = (end_line - start_line + 1).coerceAtLeast(1)
+      val slice = allLines.drop(startIdx).take(lineCount)
       val result = slice.joinToString("\n")
       val capped = capOutputWithSpill(result, "fileBoxReadLines")
       mapOf("lines" to capped, "total_lines" to allLines.size.toString())

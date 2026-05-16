@@ -78,6 +78,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.ai.edge.gallery.data.FileBoxManager
@@ -620,6 +621,7 @@ private fun FileTreeNode(
         fontSize = 12.sp,
         color = if (isSelected) Color.White else Color.White.copy(alpha = 0.65f),
         maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
       )
     }
   }
