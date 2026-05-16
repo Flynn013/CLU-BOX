@@ -20,8 +20,8 @@ import android.content.Context
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import com.google.ai.edge.gallery.data.TerminalSessionManager
 import com.google.ai.edge.gallery.data.brainbox.GraphDatabase
+import com.google.ai.edge.gallery.data.busybox.BusyBoxBridge
 
 private const val TAG = "ScdlBoxWorker"
 
@@ -31,7 +31,7 @@ private const val TAG = "ScdlBoxWorker"
  *
  * Execution logic:
  * - If [ScdlBoxEntity.isShellCommand] is `true`, the payload is sent to
- *   [TerminalSessionManager] (the same PRoot sandbox used by the agent).
+ *   [BusyBoxBridge] (the same PRoot sandbox used by the agent).
  * - If `false`, the natural-language payload is logged as a pending LLM
  *   prompt stub.  Full headless LLM dispatch will be wired in a future
  *   session once the inference engine exposes a headless API.
@@ -88,20 +88,25 @@ class ScdlBoxWorker(
 
   // ── Shell execution path ──────────────────────────────────────────────
 
-  private fun executeShellTask(task: ScdlBoxEntity): Result {
-    val tsm = TerminalSessionManager(appContext)
+  private suspend fun executeShellTask(task: ScdlBoxEntity): Result {
     return try {
-      val (exitCode, output) = tsm.executeCommandWithExitCode(task.payload)
-      val truncated = output.take(500)
-      if (exitCode == 0) {
-        Log.i(TAG, "[SCDL_BOX] Executed: '${task.title}' | Status: Success | Output: $truncated")
-        Result.success()
-      } else {
-        Log.w(TAG, "[SCDL_BOX] Executed: '${task.title}' | Status: Failed (exit=$exitCode) | Output: $truncated")
-        // Return success to WorkManager so it doesn't back-off;
-        // the failure is informational, not a scheduling error.
-        Result.success()
+      val r = BusyBoxBridge.shell(appContext, task.payload)
+      val merged = buildString {
+        append(r.stdout)
+        if (r.stderr.isNotBlank()) {
+          if (isNotEmpty()) append('\n')
+          append("[stderr] ${r.stderr}")
+        }
       }
+      val truncated = merged.take(500)
+      if (r.exitCode == 0) {
+        Log.i(TAG, "[SCDL_BOX] Executed: '${task.title}' | Status: Success | Output: $truncated")
+      } else {
+        Log.w(TAG, "[SCDL_BOX] Executed: '${task.title}' | Status: Failed (exit=${r.exitCode}) | Output: $truncated")
+      }
+      // Return success to WorkManager so it doesn't back-off;
+      // non-zero exit codes are informational, not scheduling errors.
+      Result.success()
     } catch (e: Exception) {
       Log.e(TAG, "[SCDL_BOX] Shell execution failed for '${task.title}': ${e.message}", e)
       Result.failure()
@@ -120,7 +125,7 @@ class ScdlBoxWorker(
    * For now, the pending prompt is logged so the operator can see it in
    * the MSTR_CTRL diagnostic panel.
    */
-  private fun executeLlmTask(task: ScdlBoxEntity): Result {
+  private suspend fun executeLlmTask(task: ScdlBoxEntity): Result {
     Log.i(
       TAG,
       "[SCDL_BOX] LLM Task '${task.title}' queued (headless dispatch pending): ${task.payload.take(200)}",
