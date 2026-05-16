@@ -19,6 +19,7 @@ package com.google.ai.edge.gallery
 import android.app.Application
 import android.util.Log
 import com.google.ai.edge.gallery.data.DataStoreRepository
+import com.google.ai.edge.gallery.data.busybox.BusyBoxBridge
 import com.google.ai.edge.gallery.data.python.PythonBridge
 import com.google.ai.edge.gallery.ui.theme.ThemeSettings
 import dagger.hilt.android.HiltAndroidApp
@@ -45,6 +46,23 @@ class GalleryApplication : Application() {
       PythonBridge.initialize(this)
     } catch (e: Exception) {
       Log.e(TAG, "Failed to initialize Python interpreter — PYTHON_EXEC skill unavailable", e)
+    }
+
+    // ── BusyBox — extract the embedded binary on IO thread eagerly ──
+    // BusyBoxBridge.ensureInstalled() is idempotent and locks internally.
+    // Pre-installing at startup avoids a cold-start delay on the first
+    // shellExecute/PYTHON_EXEC call from the agent loop.
+    CoroutineScope(Dispatchers.IO).launch {
+      try {
+        val path = BusyBoxBridge.ensureInstalled(this@GalleryApplication)
+        if (path != null) {
+          Log.d(TAG, "BusyBox ready at $path")
+        } else {
+          Log.e(TAG, "BusyBox install failed — shellExecute skill unavailable (asset busybox/busybox-arm64-v8a missing?)")
+        }
+      } catch (e: Exception) {
+        Log.e(TAG, "BusyBox initialization error", e)
+      }
     }
 
     // IO BYPASS: Shift the DataStore synchronous load off the Main Thread

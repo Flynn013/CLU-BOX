@@ -32,7 +32,7 @@ class ShellExecuteSkill(private val agentTools: AgentTools) : CluSkill {
   override val name: String = "shellExecute"
 
   override val description: String =
-    "Termux bash. PROHIBITED for file creation."
+    "Run POSIX shell commands via BusyBox sh. PROHIBITED for file creation (use fileBoxWrite)."
 
   override val jsonSchema: String =
     """{"name":"shellExecute","parameters":{"command":{"type":"string"}},"required":["command"]}"""
