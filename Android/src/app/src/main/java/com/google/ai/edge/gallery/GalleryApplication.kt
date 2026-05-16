@@ -58,7 +58,7 @@ class GalleryApplication : Application() {
         if (path != null) {
           Log.d(TAG, "BusyBox ready at $path")
         } else {
-          Log.e(TAG, "BusyBox install failed — shellExecute skill unavailable (asset busybox/busybox-arm64-v8a missing?)")
+          Log.e(TAG, "BusyBox install failed — shellExecute skill unavailable (check busybox assets)")
         }
       } catch (e: Exception) {
         Log.e(TAG, "BusyBox initialization error", e)

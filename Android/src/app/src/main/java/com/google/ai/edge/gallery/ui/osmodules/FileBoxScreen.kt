@@ -43,21 +43,19 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -88,7 +86,6 @@ import com.google.ai.edge.gallery.data.SharedShellManager
 import com.google.ai.edge.gallery.data.exportDirectoryAsZip
 import com.google.ai.edge.gallery.ui.theme.absoluteBlack
 import com.google.ai.edge.gallery.ui.theme.neonGreen
-import com.google.ai.edge.gallery.ui.theme.terminalLightGrey
 import com.google.ai.edge.gallery.ui.theme.terminalMidGrey
 import com.google.ai.edge.gallery.ui.theme.terminalOutline
 import java.io.File
@@ -167,7 +164,7 @@ fun FileBoxScreen(
         )
         if (selectedFilePath != null) {
           IconButton(onClick = { fullScreenEditing = true }, modifier = Modifier.size(28.dp)) {
-            Icon(Icons.Default.FullscreenExit, contentDescription = "Full screen",
+            Icon(Icons.Default.Fullscreen, contentDescription = "Open full-screen editor",
               tint = neonGreen.copy(alpha = 0.8f), modifier = Modifier.size(18.dp))
           }
         }
@@ -627,5 +624,3 @@ private fun FileTreeNode(
     }
   }
 }
-
-
