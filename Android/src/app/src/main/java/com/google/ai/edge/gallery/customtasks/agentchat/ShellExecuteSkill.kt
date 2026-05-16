@@ -32,13 +32,29 @@ class ShellExecuteSkill(private val agentTools: AgentTools) : CluSkill {
   override val name: String = "shellExecute"
 
   override val description: String =
-    "Run POSIX shell commands via BusyBox sh. PROHIBITED for file creation (use fileBoxWrite)."
+    "Run POSIX shell commands via BusyBox sh. " +
+    "Use for OS operations, listing files, running binaries. " +
+    "PROHIBITED for file creation or editing — use fileBoxWrite instead."
 
-  override val jsonSchema: String =
-    """{"name":"shellExecute","parameters":{"command":{"type":"string"}},"required":["command"]}"""
+  override val jsonSchema: String = """
+    {
+      "name": "shellExecute",
+      "description": "Run a POSIX shell command via BusyBox sh. Not for file writes — use fileBoxWrite.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "POSIX sh command. BusyBox only — no bash arrays, process substitution, or bash-isms."
+          }
+        },
+        "required": ["command"]
+      }
+    }
+  """.trimIndent()
 
   override val fewShotExample: String =
-    """shellExecute(command="python3 /data/user/0/com.google.ai.edge.gallery/files/clu_file_box/my_app/script.py")"""
+    """shellExecute(command="ls /data/user/0/com.google.ai.edge.gallery/files/clu_file_box/")"""
 
   override suspend fun execute(args: JSONObject): String {
     val command = args.optString("command", "")

@@ -63,15 +63,45 @@ class ScdlBoxSkill(private val agentTools: AgentTools) : CluSkill {
     "LLM payloads are queued as headless prompts."
 
   override val jsonSchema: String = """
-    {"name":"scheduleTask","parameters":{
-      "action":{"type":"string","enum":["CREATE","UPDATE","DELETE","TOGGLE"]},
-      "taskId":{"type":"string"},
-      "title":{"type":"string"},
-      "description":{"type":"string"},
-      "payload":{"type":"string"},
-      "isShellCommand":{"type":"boolean"},
-      "intervalMinutes":{"type":"number"}
-    },"required":["action"]}
+    {
+      "name": "scheduleTask",
+      "description": "Manage recurring background tasks in SCDL_BOX. CREATE/UPDATE/DELETE/TOGGLE.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["CREATE", "UPDATE", "DELETE", "TOGGLE"],
+            "description": "Operation to perform."
+          },
+          "taskId": {
+            "type": "string",
+            "description": "Task UUID — required for UPDATE, DELETE, TOGGLE."
+          },
+          "title": {
+            "type": "string",
+            "description": "Display name — required for CREATE."
+          },
+          "description": {
+            "type": "string",
+            "description": "Optional human-readable task description."
+          },
+          "payload": {
+            "type": "string",
+            "description": "Shell command or LLM prompt to run — required for CREATE."
+          },
+          "isShellCommand": {
+            "type": "boolean",
+            "description": "true = run payload as shell command; false = send as LLM prompt. Required for CREATE."
+          },
+          "intervalMinutes": {
+            "type": "number",
+            "description": "Repeat interval in minutes (minimum 15). Required for CREATE."
+          }
+        },
+        "required": ["action"]
+      }
+    }
   """.trimIndent()
 
   override val fewShotExample: String =

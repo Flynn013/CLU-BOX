@@ -201,6 +201,18 @@ class AgentGovernor(
     _phase.value = Phase.IDLE
   }
 
+  /**
+   * Transition to IDLE without clearing history or resetting loop count.
+   *
+   * Use this after the streaming phase ends to signal the UI that CLU is
+   * no longer actively working, while preserving the tool history for display
+   * in the [ToolExecutionBox] cards above the input field.
+   */
+  fun markIdle() {
+    _activeTool.value = null
+    _phase.value = Phase.IDLE
+  }
+
   /** Snapshot useful for logging/diagnostics. */
   fun debugSnapshot(): String =
     "engine=${_engine.value} phase=${_phase.value} loops=${loopCount.get()}/$maxLoops tool=${_activeTool.value?.name}"
@@ -212,16 +224,13 @@ class AgentGovernor(
     companion object {
         /** System constraint injected for the LOCAL on-device Gemma 4 E4B IT engine. */
         val LOCAL_CONSTRAINT: String = """
-[GEMMA 4 E4B IT — ON-DEVICE ENGINE]
-Context window: 32K tokens. Be concise; prefer short, dense responses.
-Execution model:
-  1. One tool call per turn → observe result → decide next step.
-  2. After each tool result, assess: Is the task complete? If YES → respond to user. If NO → continue with the next tool call.
-  3. Never ask permission to continue unless you are genuinely blocked (missing credentials, unclear intent).
-  4. For multi-file or multi-step tasks, maintain an implicit plan and execute through it autonomously.
-Memory: call memorySearch before answering about user context or past work.
-Files: always fileBoxWrite — never shell redirection.
-Shell: BusyBox sh — POSIX-only, no Bash arrays, no process substitution.
+[GEMMA 4 E4B IT — 32K context. Be concise.]
+1. One tool call per response → observe result → decide next step.
+2. Task complete? YES → reply to user. NO → call next tool immediately.
+3. Never ask permission to continue unless genuinely blocked.
+4. memorySearch before answering questions about user context or past work.
+5. fileBoxWrite for all file writes — never shell redirection.
+6. BusyBox sh only — no Bash arrays, no process substitution.
 """.trimIndent()
 
         /** Kept for source compatibility — not used in production (cloud removed). */

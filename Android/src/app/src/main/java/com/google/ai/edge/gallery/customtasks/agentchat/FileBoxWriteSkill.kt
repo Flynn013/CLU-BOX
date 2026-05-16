@@ -32,13 +32,33 @@ class FileBoxWriteSkill(private val agentTools: AgentTools) : CluSkill {
   override val name: String = "fileBoxWrite"
 
   override val description: String =
-    "ONLY tool for file writes."
+    "Create or overwrite a file in the FileBox workspace. " +
+    "The ONLY tool for file creation and editing — never use shellExecute redirection. " +
+    "Parent directories are created automatically."
 
-  override val jsonSchema: String =
-    """{"name":"fileBoxWrite","parameters":{"file_path":{"type":"string"},"content":{"type":"string"}},"required":["file_path","content"]}"""
+  override val jsonSchema: String = """
+    {
+      "name": "fileBoxWrite",
+      "description": "Create or overwrite a file in the sandboxed FileBox workspace.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Relative path from workspace root, e.g. 'src/main.py'. Parent dirs auto-created."
+          },
+          "content": {
+            "type": "string",
+            "description": "Full file content to write. Replaces any existing file entirely."
+          }
+        },
+        "required": ["file_path", "content"]
+      }
+    }
+  """.trimIndent()
 
   override val fewShotExample: String =
-    """fileBoxWrite(file_path="my_app/script.py", content="print('hi')")"""
+    """fileBoxWrite(file_path="my_app/script.py", content="print('hello world')")"""
 
   override suspend fun execute(args: JSONObject): String {
     val filePath = args.optString("file_path", "")

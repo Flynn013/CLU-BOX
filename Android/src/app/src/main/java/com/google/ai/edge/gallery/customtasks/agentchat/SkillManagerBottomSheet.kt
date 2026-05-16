@@ -107,7 +107,13 @@ import com.google.ai.edge.gallery.common.clearFocusOnKeyboardDismiss
 import com.google.ai.edge.gallery.data.MAX_RECOMMENDED_SKILL_COUNT
 import com.google.ai.edge.gallery.proto.Skill
 import com.google.ai.edge.gallery.ui.common.FloatingBanner
+import com.google.ai.edge.gallery.ui.theme.absoluteBlack
 import com.google.ai.edge.gallery.ui.theme.customColors
+import com.google.ai.edge.gallery.ui.theme.neonGreen
+import com.google.ai.edge.gallery.ui.theme.terminalLightGrey
+import com.google.ai.edge.gallery.ui.theme.terminalMidGrey
+import com.google.ai.edge.gallery.ui.theme.terminalOnSurface
+import com.google.ai.edge.gallery.ui.theme.terminalOutline
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -245,14 +251,14 @@ fun SkillManagerBottomSheet(
       )
     },
     sheetState = sheetState,
-    containerColor = MaterialTheme.colorScheme.surfaceContainer,
+    containerColor = terminalMidGrey,
   ) {
     Box(modifier = Modifier.fillMaxSize()) {
       // Spinner when loading.
       if (uiState.loading) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
           CircularProgressIndicator(
-            trackColor = MaterialTheme.colorScheme.surfaceVariant,
+            trackColor = terminalLightGrey,
             strokeWidth = 3.dp,
             modifier = Modifier.padding(end = 8.dp).size(24.dp),
           )
@@ -320,7 +326,7 @@ fun SkillManagerBottomSheet(
                 Text(
                   stringResource(R.string.manage_skills_description),
                   style = MaterialTheme.typography.bodyMedium,
-                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+                  color = terminalOnSurface.copy(alpha = 0.65f),
                 )
               }
               IconButton(
@@ -384,13 +390,13 @@ fun SkillManagerBottomSheet(
                     searchQuery = ""
                     showAddSkillOptionsSheet = true
                   }
-                  .background(MaterialTheme.colorScheme.primary),
+                  .background(neonGreen),
               contentAlignment = Alignment.Center,
             ) {
               Icon(
                 Icons.Rounded.Add,
                 contentDescription = stringResource(R.string.cd_add_icon),
-                tint = MaterialTheme.colorScheme.onPrimary,
+                tint = absoluteBlack,
               )
             }
           }
@@ -785,7 +791,7 @@ private fun SkillItemRow(
       Modifier.fillMaxWidth()
         .then(if (inMultiSelectMode && skill.builtIn) Modifier.alpha(0.5f) else Modifier)
         .clip(shape = RoundedCornerShape(20.dp))
-        .background(MaterialTheme.colorScheme.surfaceContainerLowest)
+        .background(absoluteBlack)
         .then(
           if (isCustom) {
             Modifier.combinedClickable(
@@ -829,7 +835,7 @@ private fun SkillItemRow(
                   skill.name,
                   style =
                     textStyle.copy(
-                      color = MaterialTheme.colorScheme.primary,
+                      color = neonGreen,
                       textDecoration = TextDecoration.Underline,
                     ),
                   color = MaterialTheme.customColors.linkColor,
@@ -849,7 +855,7 @@ private fun SkillItemRow(
           Text(
             (skill.description ?: "").replace("\n", " "),
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = terminalOnSurface.copy(alpha = 0.65f),
           )
         }
 
@@ -878,7 +884,7 @@ private fun SkillItemRow(
             Icon(
               Icons.Outlined.RemoveRedEye,
               contentDescription = null,
-              tint = MaterialTheme.colorScheme.onSurfaceVariant,
+              tint = terminalOnSurface.copy(alpha = 0.65f),
               modifier = Modifier.size(18.dp),
             )
             Text(
@@ -898,7 +904,7 @@ private fun SkillItemRow(
               Icon(
                 Icons.Outlined.VpnKey,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = terminalOnSurface.copy(alpha = 0.65f),
                 modifier = Modifier.size(18.dp),
               )
               Text(
@@ -920,7 +926,7 @@ private fun SkillItemRow(
               Icon(
                 Icons.Outlined.Delete,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = terminalOnSurface.copy(alpha = 0.65f),
                 modifier = Modifier.size(18.dp),
               )
               Text(
@@ -985,7 +991,7 @@ private fun AddSkillOptionsBottomSheet(
               Text(
                 stringResource(option.descriptionResId),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = terminalOnSurface.copy(alpha = 0.65f),
                 modifier = Modifier.padding(start = 40.dp),
               )
             }

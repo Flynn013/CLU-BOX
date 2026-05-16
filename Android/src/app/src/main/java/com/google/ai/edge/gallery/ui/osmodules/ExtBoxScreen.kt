@@ -326,7 +326,7 @@ private val INTEGRATION_EXTENSIONS = listOf(
     label = "Todo Manager",
     description = "Create, list, and complete persistent to-do items. Tracks CLU's own task queue.",
     icon = Icons.Outlined.Psychology,
-    skillNames = listOf("todoCreate", "todoList", "todoComplete"),
+    skillNames = listOf("todo"),
   ),
   ExtensionDef(
     label = "Scheduled Tasks",
