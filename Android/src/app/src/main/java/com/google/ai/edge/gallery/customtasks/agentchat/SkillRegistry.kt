@@ -52,10 +52,13 @@ class SkillRegistry(private val agentTools: AgentTools) {
       // by ShellExecuteSkill, which delegates to the embedded BusyBoxBridge.
       FileBoxWriteSkill(agentTools),
       FileBoxReadLinesSkill(agentTools),
+      MemorySearchSkill(agentTools),
+      MemoryWriteSkill(agentTools),
       BrainBoxGrepSkill(agentTools),
       TodoSkill(agentTools),
       DelegateSkill(agentTools),
       ScdlBoxSkill(agentTools),
+      WebFetchSkill(),
     )
 
     // Merge with metadata-only entries for all other @Tool methods.

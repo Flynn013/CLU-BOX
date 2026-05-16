@@ -209,7 +209,10 @@ protobuf {
 chaquopy {
     defaultConfig {
         version = "3.11"
-        pip { }
+        pip {
+            install("numpy")         // Numerical computing — arrays, math, statistics
+            install("requests")      // HTTP client for web access in Python scripts
+        }
     }
     productFlavors { }
 }
