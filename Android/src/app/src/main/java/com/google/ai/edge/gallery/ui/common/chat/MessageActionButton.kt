@@ -24,16 +24,18 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.google.ai.edge.gallery.ui.theme.bodySmallNarrow
+import com.google.ai.edge.gallery.ui.theme.brutalistGrey
+import com.google.ai.edge.gallery.ui.theme.neonGreen
+import com.google.ai.edge.gallery.ui.theme.terminalLightGrey
+import com.google.ai.edge.gallery.ui.theme.terminalMidGrey
 
 /** Composable function to display an action button below a chat message. */
 @Composable
@@ -44,29 +46,28 @@ fun MessageActionButton(
   modifier: Modifier = Modifier,
   enabled: Boolean = true,
 ) {
+  val bgColor = if (enabled) terminalLightGrey else terminalMidGrey
+  val iconTint = if (enabled) neonGreen else brutalistGrey
   val curModifier =
     modifier
       .padding(top = 4.dp)
       .clip(CircleShape)
-      .background(
-        if (enabled) MaterialTheme.colorScheme.secondaryContainer
-        else MaterialTheme.colorScheme.surfaceContainerHigh
-      )
-  val alpha: Float = if (enabled) 1.0f else 0.3f
+      .background(bgColor)
   Row(
-    modifier = if (enabled) curModifier.clickable { onClick() } else modifier,
+    modifier = if (enabled) curModifier.clickable { onClick() } else curModifier,
     verticalAlignment = Alignment.CenterVertically,
   ) {
     Icon(
       icon,
       contentDescription = null,
-      modifier = Modifier.size(16.dp).offset(x = 6.dp).alpha(alpha),
+      modifier = Modifier.size(16.dp).offset(x = 6.dp),
+      tint = iconTint,
     )
     Text(
       label,
-      color = MaterialTheme.colorScheme.onSecondaryContainer,
+      color = iconTint,
       style = bodySmallNarrow,
-      modifier = Modifier.padding(start = 10.dp, end = 8.dp, top = 4.dp, bottom = 4.dp).alpha(alpha),
+      modifier = Modifier.padding(start = 10.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
     )
   }
 }

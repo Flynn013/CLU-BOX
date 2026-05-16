@@ -61,6 +61,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.google.ai.edge.gallery.R
+import com.google.ai.edge.gallery.ui.theme.terminalMidGrey
 
 private const val MAX_DESCRIPTION_LINES = 5
 
@@ -169,7 +170,7 @@ fun MessageBodyCollapsableProgressPanel(message: ChatMessageCollapsableProgressP
               modifier =
                 Modifier.size(12.dp)
                   .clip(shape = CircleShape)
-                  .background(MaterialTheme.colorScheme.secondaryContainer)
+                  .background(terminalMidGrey)
             )
             Column() {
               // Title.

@@ -24,6 +24,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -51,6 +52,7 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -64,7 +66,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -85,6 +86,9 @@ import com.google.ai.edge.gallery.ui.common.tos.TosViewModel
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import com.google.ai.edge.gallery.ui.modelmanager.TokenRequestResultType
 import com.google.ai.edge.gallery.ui.modelmanager.TokenStatus
+import com.google.ai.edge.gallery.ui.theme.brutalistGrey
+import com.google.ai.edge.gallery.ui.theme.neonGreen
+import com.google.ai.edge.gallery.ui.theme.terminalMidGrey
 import java.net.HttpURLConnection
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -351,27 +355,19 @@ fun DownloadAndTryButton(
     if (!compact) {
       buttonModifier = buttonModifier.then(modifierWhenExpanded)
     }
-    Button(
+    OutlinedButton(
       modifier = buttonModifier,
-      colors =
-        ButtonDefaults.buttonColors(
-          containerColor =
-            if (
-              (!downloadSucceeded || !canShowTryIt) &&
-                model.localFileRelativeDirPathOverride.isEmpty()
-            ) {
-
-              MaterialTheme.colorScheme.surfaceContainer
-            } else if (task != null) {
-              getTaskBgGradientColors(task = task)[1]
-            } else {
-              MaterialTheme.colorScheme.primary
-            }
-        ),
+      border = BorderStroke(1.dp, if (enabled) neonGreen else brutalistGrey),
+      colors = ButtonDefaults.outlinedButtonColors(
+        containerColor = terminalMidGrey,
+        contentColor = if (enabled) neonGreen else brutalistGrey,
+        disabledContainerColor = terminalMidGrey,
+        disabledContentColor = brutalistGrey,
+      ),
       contentPadding = PaddingValues(horizontal = 12.dp),
       onClick = {
         if (!enabled || checkingToken) {
-          return@Button
+          return@OutlinedButton
         }
 
         // Check TOS before downloading.
@@ -386,17 +382,7 @@ fun DownloadAndTryButton(
         }
       },
     ) {
-      val textColor =
-        if (!enabled) {
-          // Define the color for disabled button.
-          MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-        } else if (!downloadSucceeded && model.localFileRelativeDirPathOverride.isEmpty()) {
-          MaterialTheme.colorScheme.onSurface
-        } else if (task != null) {
-          Color.White
-        } else {
-          MaterialTheme.colorScheme.onPrimary
-        }
+      val textColor = if (enabled) neonGreen else brutalistGrey
       Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),

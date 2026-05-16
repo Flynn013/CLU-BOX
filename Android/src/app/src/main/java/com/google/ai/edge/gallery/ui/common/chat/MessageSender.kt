@@ -33,6 +33,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.ui.theme.bodySmallNarrow
+import com.google.ai.edge.gallery.ui.theme.neonGreen
 
 data class MessageLayoutConfig(
   val horizontalArrangement: Arrangement.Horizontal,
@@ -68,8 +69,10 @@ fun MessageSender(message: ChatMessage, agentName: String = "", imageHistoryCurI
     horizontalArrangement = horizontalArrangement,
   ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-      // Sender label.
-      Text(userLabel, style = MaterialTheme.typography.titleSmall)
+      // Sender label: neonGreen for agent, default onSurface for user.
+      val senderColor = if (message.side == ChatSide.AGENT) neonGreen
+                        else MaterialTheme.colorScheme.onSurface
+      Text(userLabel, style = MaterialTheme.typography.titleSmall, color = senderColor)
 
       when (message) {
         // Benchmark running status.

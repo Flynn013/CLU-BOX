@@ -34,15 +34,19 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.ai.edge.gallery.data.AppBarAction
 import com.google.ai.edge.gallery.data.AppBarActionType
+import com.google.ai.edge.gallery.ui.theme.absoluteBlack
+import com.google.ai.edge.gallery.ui.theme.neonGreen
 
 /** The top app bar. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -55,8 +59,12 @@ fun CluTopAppBar(
   scrollBehavior: TopAppBarScrollBehavior? = null,
   subtitle: String = "",
 ) {
-  val titleColor = MaterialTheme.colorScheme.onSurface
+  val titleColor = neonGreen
   CenterAlignedTopAppBar(
+    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+      containerColor = absoluteBlack,
+      titleContentColor = neonGreen,
+    ),
     title = {
       Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Row(
@@ -67,7 +75,7 @@ fun CluTopAppBar(
             text = title,
             maxLines = 1,
             color = { titleColor },
-            style = MaterialTheme.typography.titleMedium,
+            style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Monospace),
             autoSize =
               TextAutoSize.StepBased(minFontSize = 14.sp, maxFontSize = 16.sp, stepSize = 1.sp),
           )

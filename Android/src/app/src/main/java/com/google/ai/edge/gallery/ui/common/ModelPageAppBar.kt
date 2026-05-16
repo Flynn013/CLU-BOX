@@ -38,6 +38,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -62,6 +63,9 @@ import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.data.convertValueToTargetType
 import com.google.ai.edge.gallery.ui.modelmanager.ModelInitializationStatusType
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
+import com.google.ai.edge.gallery.ui.theme.absoluteBlack
+import com.google.ai.edge.gallery.ui.theme.neonGreen
+import com.google.ai.edge.gallery.ui.theme.terminalOnSurface
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -101,6 +105,9 @@ fun ModelPageAppBar(
     modelInitializationStatus?.status == ModelInitializationStatusType.INITIALIZED
 
   CenterAlignedTopAppBar(
+    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+      containerColor = absoluteBlack,
+    ),
     title = {
       Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -112,7 +119,7 @@ fun ModelPageAppBar(
           horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
           val tintColor =
-            if (useThemeColor) MaterialTheme.colorScheme.onSurface
+            if (useThemeColor) neonGreen
             else getTaskIconColor(task = task)
           Icon(
             task.icon ?: ImageVector.vectorResource(task.iconVectorResourceId!!),
@@ -144,6 +151,7 @@ fun ModelPageAppBar(
         Icon(
           imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
           contentDescription = stringResource(R.string.cd_navigate_back_icon),
+          tint = terminalOnSurface,
         )
       }
     },
