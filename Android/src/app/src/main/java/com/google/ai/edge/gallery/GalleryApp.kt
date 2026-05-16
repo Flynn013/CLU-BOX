@@ -104,7 +104,6 @@ import com.google.ai.edge.gallery.ui.osmodules.ScdlBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.SkillBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.SystemSettingsScreen
 import com.google.ai.edge.gallery.data.mcp.McpConnectionManager
-import com.google.ai.edge.gallery.customtasks.agentchat.McpDynamicSkill
 import com.google.ai.edge.gallery.ui.theme.absoluteBlack
 import com.google.ai.edge.gallery.ui.theme.neonGreen
 import com.google.ai.edge.gallery.ui.theme.terminalLightGrey

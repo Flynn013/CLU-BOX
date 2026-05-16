@@ -99,6 +99,7 @@ fun ChatView(
   onSkillClicked: () -> Unit = {},
   showStopButtonInInputWhenInProgress: Boolean = false,
   composableBelowMessageList: @Composable (Model) -> Unit = {},
+  composableAboveInput: @Composable () -> Unit = {},
   showImagePicker: Boolean = false,
   showAudioPicker: Boolean = false,
   emptyStateComposable: @Composable (Model) -> Unit = {},
@@ -265,6 +266,7 @@ fun ChatView(
                   showImagePicker = showImagePicker,
                   showAudioPicker = showAudioPicker,
                   emptyStateComposable = emptyStateComposable,
+                  composableAboveInput = composableAboveInput,
                 )
               }
             // Model download

@@ -98,6 +98,16 @@ class AgentGovernor(
   /** Currently-executing tool (or `null` when idle / streaming pure tokens). */
   val activeTool: StateFlow<ToolExecution?> = _activeTool.asStateFlow()
 
+  private val _toolHistory = MutableStateFlow<List<ToolExecution>>(emptyList())
+
+  /**
+   * Ordered list of all tool executions in the current session.
+   * Grows with each completed [onToolResult] / [onToolError] call and is
+   * cleared by [reset].  Compose collectors in the chat screen use this to
+   * render expandable [ToolExecutionBox] cards below the message list.
+   */
+  val toolHistory: StateFlow<List<ToolExecution>> = _toolHistory.asStateFlow()
+
   private val _engine = MutableStateFlow(AgentEngine.LOCAL)
 
   /** Currently-active engine. Settable by the chat screen when the user toggles. */
@@ -157,11 +167,13 @@ class AgentGovernor(
   fun onToolResult(execId: String, resultPreview: String) {
     val current = _activeTool.value
     if (current != null && current.id == execId) {
-      _activeTool.value = current.copy(
+      val finished = current.copy(
         phase = Phase.RESUMING_STREAM,
         resultPreview = resultPreview.take(2_000),
         finishedAtMs = System.currentTimeMillis(),
       )
+      _activeTool.value = finished
+      _toolHistory.value = _toolHistory.value + finished
     }
     _phase.value = Phase.RESUMING_STREAM
   }
@@ -170,11 +182,13 @@ class AgentGovernor(
   fun onToolError(execId: String, errorMessage: String) {
     val current = _activeTool.value
     if (current != null && current.id == execId) {
-      _activeTool.value = current.copy(
+      val finished = current.copy(
         phase = Phase.ERROR,
         errorMessage = errorMessage.take(2_000),
         finishedAtMs = System.currentTimeMillis(),
       )
+      _activeTool.value = finished
+      _toolHistory.value = _toolHistory.value + finished
     }
     _phase.value = Phase.ERROR
   }
@@ -183,6 +197,7 @@ class AgentGovernor(
   fun reset() {
     loopCount.set(0)
     _activeTool.value = null
+    _toolHistory.value = emptyList()
     _phase.value = Phase.IDLE
   }
 
@@ -195,13 +210,18 @@ class AgentGovernor(
   // ─────────────────────────────────────────────────────────────────────────
 
     companion object {
-        /** System constraint injected for the LOCAL on-device Gemma engine. */
+        /** System constraint injected for the LOCAL on-device Gemma 4 E4B IT engine. */
         val LOCAL_CONSTRAINT: String = """
-[GEMMA LOCAL ENGINE]
-Context budget: 32K tokens — be concise; short responses preferred.
-Rules: one tool call per turn → observe result → next action.
-Memory: call memorySearch before answering questions about the user or past work.
+[GEMMA 4 E4B IT — ON-DEVICE ENGINE]
+Context window: 32K tokens. Be concise; prefer short, dense responses.
+Execution model:
+  1. One tool call per turn → observe result → decide next step.
+  2. After each tool result, assess: Is the task complete? If YES → respond to user. If NO → continue with the next tool call.
+  3. Never ask permission to continue unless you are genuinely blocked (missing credentials, unclear intent).
+  4. For multi-file or multi-step tasks, maintain an implicit plan and execute through it autonomously.
+Memory: call memorySearch before answering about user context or past work.
 Files: always fileBoxWrite — never shell redirection.
+Shell: BusyBox sh — POSIX-only, no Bash arrays, no process substitution.
 """.trimIndent()
 
         /** Kept for source compatibility — not used in production (cloud removed). */
