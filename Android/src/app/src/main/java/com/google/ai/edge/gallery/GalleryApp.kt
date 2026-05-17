@@ -44,6 +44,7 @@ import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.DashboardCustomize
 import androidx.compose.material.icons.outlined.Difference
+import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Psychology
@@ -81,7 +82,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.compose.rememberNavController
 import androidx.compose.runtime.collectAsState
 import com.google.ai.edge.gallery.customtasks.agentchat.AgentTools
-import com.google.ai.edge.gallery.customtasks.agentchat.SkillManagerBottomSheet
+import com.google.ai.edge.gallery.customtasks.agentchat.McpDynamicSkill
 import com.google.ai.edge.gallery.customtasks.agentchat.SkillManagerViewModel
 import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.FileBoxManager
@@ -95,13 +96,14 @@ import com.google.ai.edge.gallery.data.TerminalSessionManager
 import com.google.ai.edge.gallery.data.SharedShellManager
 import com.google.ai.edge.gallery.ui.osmodules.BrainBoxModuleScreen
 import com.google.ai.edge.gallery.ui.osmodules.DiffBoxScreen
+import com.google.ai.edge.gallery.ui.osmodules.ExtBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.FileBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.LnkBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.MstrCtrlScreen
 import com.google.ai.edge.gallery.ui.osmodules.ScdlBoxScreen
+import com.google.ai.edge.gallery.ui.osmodules.SkillBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.SystemSettingsScreen
 import com.google.ai.edge.gallery.data.mcp.McpConnectionManager
-import com.google.ai.edge.gallery.customtasks.agentchat.McpDynamicSkill
 import com.google.ai.edge.gallery.ui.theme.absoluteBlack
 import com.google.ai.edge.gallery.ui.theme.neonGreen
 import com.google.ai.edge.gallery.ui.theme.terminalLightGrey
@@ -116,6 +118,7 @@ private enum class OsModule(val label: String, val icon: ImageVector) {
   DIFF_BOX("DIFF_BOX", Icons.Outlined.Difference),
   MSTR_CTRL("MSTR_CTRL", Icons.Outlined.Terminal),
   SKILL_BOX("SKILL_BOX", Icons.Outlined.Psychology),
+  EXT_BOX("EXT_BOX", Icons.Outlined.Extension),
   SCDL_BOX("SCDL_BOX", Icons.Outlined.Schedule),
   LNK_BOX("LNK_BOX", Icons.Outlined.Link),
   VENDING_MACHINE("VENDING_MACHINE", Icons.Outlined.DashboardCustomize),
@@ -131,8 +134,6 @@ fun GalleryApp(
   val drawerState = rememberDrawerState(DrawerValue.Closed)
   val scope = rememberCoroutineScope()
   var activeModule by remember { mutableStateOf(OsModule.CHAT_BOX) }
-  // True when the SKILL_BOX drawer item is tapped — shows the SkillManagerBottomSheet overlay.
-  var showSkillBoxSheet by remember { mutableStateOf(false) }
   val db = remember { GraphDatabase.getInstance(context) }
   val fileBoxManager = remember { FileBoxManager(context) }
   val terminalSessionManager = remember { TerminalSessionManager(context) }
@@ -141,7 +142,7 @@ fun GalleryApp(
   // persists across module switches without restarting the shell.
   val sharedShellManager = remember { SharedShellManager(context) }
   val skillManagerViewModel: SkillManagerViewModel = hiltViewModel()
-  // AgentTools instance used by the SkillManagerBottomSheet for skill testing.
+  // AgentTools instance for MCP dynamic skill registration.
   val agentTools = remember {
     AgentTools().apply {
       this.skillManagerViewModel = skillManagerViewModel
@@ -214,12 +215,7 @@ fun GalleryApp(
               module = module,
               selected = activeModule == module,
               onClick = {
-                if (module == OsModule.SKILL_BOX) {
-                  // Show the Skill Manager bottom sheet over the current module.
-                  showSkillBoxSheet = true
-                } else {
-                  activeModule = module
-                }
+                activeModule = module
                 scope.launch { drawerState.close() }
               },
             )
@@ -318,6 +314,12 @@ fun GalleryApp(
                     sessionManager = terminalSessionManager,
                     sharedShellManager = sharedShellManager,
                   )
+                  OsModule.SKILL_BOX -> SkillBoxScreen(
+                    skillManagerViewModel = skillManagerViewModel,
+                  )
+                  OsModule.EXT_BOX -> ExtBoxScreen(
+                    skillManagerViewModel = skillManagerViewModel,
+                  )
                   OsModule.SCDL_BOX -> ScdlBoxScreen(db = db)
                   OsModule.LNK_BOX -> LnkBoxScreen(mcpConnectionManager = mcpConnectionManager)
                   OsModule.SYS_SETTINGS -> SystemSettingsScreen(
@@ -359,15 +361,7 @@ fun GalleryApp(
         )
       }
 
-      // ── SKILL_BOX skill manager bottom sheet ───────────────────
-      // Shown as an overlay when the user taps the SKILL_BOX drawer item.
-      if (showSkillBoxSheet) {
-        SkillManagerBottomSheet(
-          agentTools = agentTools,
-          skillManagerViewModel = skillManagerViewModel,
-          onDismiss = { _ -> showSkillBoxSheet = false },
-        )
-      }
+      // (no overlay sheets — SKILL_BOX and EXT_BOX are full-screen modules)
     }
   }
 }

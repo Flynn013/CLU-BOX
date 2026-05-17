@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -97,6 +98,7 @@ import com.google.ai.edge.gallery.ui.llmchat.LlmChatScreen
 import com.google.ai.edge.gallery.ui.llmchat.LlmChatViewModel
 import com.google.ai.edge.gallery.ui.modelmanager.ModelInitializationStatusType
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
+import com.google.ai.edge.gallery.customtasks.agentchat.ui.ToolExecutionBox
 import com.google.ai.edge.gallery.data.brainbox.GraphDatabase
 import com.google.ai.edge.gallery.runtime.geminicloud.GeminiApiKeyDialog
 import com.google.ai.edge.gallery.runtime.geminicloud.GeminiApiKeyStore
@@ -496,6 +498,29 @@ fun AgentChatScreen(
     },
     sendMessageTrigger = sendMessageTrigger,
     onChatHistoryClicked = { showChatHistorySheet = true },
+    composableAboveInput = {
+      // Show the active tool execution card above the input while a tool runs,
+      // then show the last N completed cards so the user can see recent work.
+      val activeTool by agentTools.governor.activeTool.collectAsState()
+      val toolHistory by agentTools.governor.toolHistory.collectAsState()
+      // Render at most 3 recent completed cards + the active card (if any).
+      val recentHistory = toolHistory.takeLast(3)
+      if (recentHistory.isNotEmpty() || activeTool != null) {
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+          verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+          recentHistory.forEach { exec ->
+            ToolExecutionBox(execution = exec)
+          }
+          activeTool?.let { exec ->
+            ToolExecutionBox(execution = exec)
+          }
+        }
+      }
+    },
   )
 
   if (showAskInfoDialog && currentAskInfoAction != null) {

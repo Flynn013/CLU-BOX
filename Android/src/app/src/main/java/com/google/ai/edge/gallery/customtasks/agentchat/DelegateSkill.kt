@@ -59,13 +59,34 @@ class DelegateSkill(private val agentTools: AgentTools) : CluSkill {
       "that runs even after this session ends. " +
       "intervalMinutes sets the repeat interval (minimum 15, enforced by WorkManager)."
 
-  override val jsonSchema: String =
-    """{"name":"delegate","parameters":{
-      "task":{"type":"string"},
-      "isBackground":{"type":"boolean"},
-      "isShellCommand":{"type":"boolean"},
-      "intervalMinutes":{"type":"number","description":"Repeat interval in minutes. Minimum 15 (enforced by WorkManager)."}
-    },"required":["task"]}"""
+  override val jsonSchema: String = """
+    {
+      "name": "delegate",
+      "description": "Offload a sub-task. isBackground=false chains it now; isBackground=true schedules it via SCDL_BOX.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "description": "Description of the sub-task to perform."
+          },
+          "isBackground": {
+            "type": "boolean",
+            "description": "false (default) = execute in current loop; true = schedule as persistent WorkManager task."
+          },
+          "isShellCommand": {
+            "type": "boolean",
+            "description": "For background tasks: true = run payload as shell command; false = LLM prompt."
+          },
+          "intervalMinutes": {
+            "type": "number",
+            "description": "Repeat interval for background tasks in minutes (minimum 15)."
+          }
+        },
+        "required": ["task"]
+      }
+    }
+  """.trimIndent()
 
   override val fewShotExample: String =
     """delegate(task="Run the unit tests and report any failures")"""

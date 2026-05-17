@@ -18,9 +18,15 @@ package com.google.ai.edge.gallery.ui.common.chat
 
 import android.graphics.Bitmap
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.VisibilityThreshold
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -39,8 +45,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -96,6 +104,7 @@ import com.google.ai.edge.gallery.ui.common.RotationalLoader
 import com.google.ai.edge.gallery.ui.modelmanager.ModelInitializationStatusType
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import com.google.ai.edge.gallery.ui.theme.customColors
+import com.google.ai.edge.gallery.ui.theme.neonGreen
 import kotlinx.coroutines.delay
 
 /** Composable function for the main chat panel, displaying messages and handling user input. */
@@ -122,6 +131,7 @@ fun ChatPanel(
   showImagePicker: Boolean = false,
   showAudioPicker: Boolean = false,
   emptyStateComposable: @Composable (Model) -> Unit = {},
+  composableAboveInput: @Composable () -> Unit = {},
 ) {
   val uiState by viewModel.uiState.collectAsState()
   val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
@@ -545,6 +555,12 @@ fun ChatPanel(
         )
       }
 
+      // ── Slot: caller-provided content above input (e.g. tool cards) ──────
+      composableAboveInput()
+
+      // ── Pulsing "CLU is working…" indicator ──────────────────────────────
+      CluWorkingIndicator(visible = uiState.inProgress)
+
       MessageInputText(
         task = task,
         modelManagerViewModel = modelManagerViewModel,
@@ -624,6 +640,52 @@ private suspend fun scrollToBottom(listState: LazyListState, animate: Boolean = 
       listState.animateScrollToItem(itemCount - 1, scrollOffset = 1000000)
     } else {
       listState.scrollToItem(itemCount - 1, scrollOffset = 1000000)
+    }
+  }
+}
+
+/**
+ * Pulsing "CLU is working on it…" banner shown while inference is in progress.
+ *
+ * Fades in/out with [AnimatedVisibility] and uses an infinite alpha oscillation
+ * (35 % → 100 % at 700 ms) to give a heartbeat feel that matches the CLU/BOX
+ * terminal aesthetic without distracting scrolling motion.
+ */
+@Composable
+internal fun CluWorkingIndicator(visible: Boolean) {
+  AnimatedVisibility(
+    visible = visible,
+    enter = fadeIn(tween(200)),
+    exit = fadeOut(tween(300)),
+  ) {
+    val pulse by rememberInfiniteTransition(label = "clu-pulse").animateFloat(
+      initialValue = 0.35f,
+      targetValue = 1f,
+      animationSpec = infiniteRepeatable(
+        animation = tween(700, easing = LinearEasing),
+        repeatMode = RepeatMode.Reverse,
+      ),
+      label = "clu-pulse-alpha",
+    )
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .background(neonGreen.copy(alpha = 0.06f))
+        .padding(horizontal = 16.dp, vertical = 6.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      Box(
+        modifier = Modifier
+          .size(8.dp)
+          .background(neonGreen.copy(alpha = pulse), CircleShape),
+      )
+      Text(
+        text = "CLU is working on it…",
+        color = neonGreen.copy(alpha = pulse),
+        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+        style = MaterialTheme.typography.labelSmall,
+      )
     }
   }
 }

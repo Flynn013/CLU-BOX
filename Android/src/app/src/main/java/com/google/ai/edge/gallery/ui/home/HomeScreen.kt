@@ -95,10 +95,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -155,7 +153,6 @@ fun HomeScreen(
   onModelsClicked: () -> Unit,
   enableAnimation: Boolean,
   modifier: Modifier = Modifier,
-  gm4: Boolean = false,
 ) {
   val uiState by modelManagerViewModel.uiState.collectAsState()
   var showSettingsDialog by remember { mutableStateOf(false) }
@@ -363,13 +360,7 @@ fun HomeScreen(
             contentAlignment = Alignment.TopCenter,
             modifier =
               Modifier.fillMaxSize()
-                .background(
-                  if (gm4) {
-                    MaterialTheme.colorScheme.surface
-                  } else {
-                    MaterialTheme.colorScheme.surfaceContainer
-                  }
-                ),
+                .background(MaterialTheme.colorScheme.surfaceContainer),
           ) {
             // Inner box to hold content.
             Box(
@@ -406,7 +397,6 @@ fun HomeScreen(
 
                 // Task list in a horizontal pager. Each page shows the list of tasks for the
                 // category.
-                val grid = gm4
                 TaskList(
                   modelManagerViewModel = modelManagerViewModel,
                   pagerState = pagerState,
@@ -414,8 +404,6 @@ fun HomeScreen(
                   tasksByCategories = uiState.tasksByCategory,
                   enableAnimation = enableAnimation,
                   navigateToTaskScreen = navigateToTaskScreen,
-                  gm4 = gm4,
-                  grid = grid,
                 )
 
                 Spacer(modifier = Modifier.height(innerPadding.calculateBottomPadding() + 10.dp))
@@ -557,31 +545,7 @@ private fun AppTitle(enableAnimation: Boolean) {
 }
 
 @Composable
-fun AppTitleGm4(enableAnimation: Boolean) {
-  val text1 = "CLU"
-  val text2 = "/BOX"
-  val annotatedText = buildAnnotatedString {
-    withStyle(style = SpanStyle(color = MaterialTheme.colorScheme.onSurface)) { append(text1) }
-    withStyle(style = SpanStyle(color = MaterialTheme.colorScheme.primary)) { append(text2) }
-  }
-
-  RevealingText(
-    text = "",
-    annotatedText = annotatedText,
-    style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Medium),
-    animationDelay = 0,
-    animationDurationMs =
-      if (enableAnimation) {
-        (TITLE_FIRST_LINE_ANIMATION_DURATION + TITLE_SECOND_LINE_ANIMATION_DURATION)
-      } else {
-        0
-      },
-    extraTextPadding = 0.dp,
-  )
-}
-
-@Composable
-private fun IntroText(enableAnimation: Boolean, gm4: Boolean) {
+private fun IntroText(enableAnimation: Boolean) {
   // Intro text animation:
   //
   // fade in + slide up.
@@ -597,65 +561,10 @@ private fun IntroText(enableAnimation: Boolean, gm4: Boolean) {
     }
 
   val introText = buildAnnotatedString {
-    if (gm4) {
-      append("CLU/BOX — your on-device AI workspace. All models run locally, offline, and private.")
-    } else {
-      append("${stringResource(R.string.app_intro)} ")
-    }
+    append("${stringResource(R.string.app_intro)} ")
   }
   Text(
     introText,
-    style = MaterialTheme.typography.bodyMedium,
-    modifier =
-      Modifier.graphicsLayer {
-        alpha = progress
-        translationY = (CONTENT_COMPOSABLES_OFFSET_Y.dp * (1 - progress)).toPx()
-      },
-  )
-}
-
-@Composable
-private fun TryGm4IntroText(enableAnimation: Boolean) {
-  // fade in + slide up.
-  val progress =
-    if (!enableAnimation) {
-      1f
-    } else {
-      rememberDelayedAnimationProgress(
-        initialDelay = TITLE_SECOND_LINE_ANIMATION_START,
-        animationDurationMs = CONTENT_COMPOSABLES_ANIMATION_DURATION,
-        animationLabel = "intro text animation",
-      )
-    }
-  Row(
-    modifier =
-      Modifier.padding(top = 24.dp).graphicsLayer {
-        alpha = progress
-        translationY = (CONTENT_COMPOSABLES_OFFSET_Y.dp * (1 - progress)).toPx()
-      },
-    verticalAlignment = Alignment.CenterVertically,
-    horizontalArrangement = Arrangement.spacedBy(8.dp),
-  ) {
-    Icon(
-      Icons.Rounded.ListAlt,
-      contentDescription = null,
-      modifier = Modifier.size(24.dp),
-      tint = neonGreen,
-    )
-    Text(
-      text = "CLU/BOX — latest models",
-      style =
-        MaterialTheme.typography.headlineSmall.copy(
-          fontWeight = FontWeight.Medium,
-          fontSize = 20.sp,
-          lineHeight = 24.sp,
-        ),
-      color = MaterialTheme.colorScheme.onSurface,
-    )
-  }
-
-  Text(
-    "New models available. Try them in CLU/BOX Chat, or the use cases below.",
     style = MaterialTheme.typography.bodyMedium,
     modifier =
       Modifier.graphicsLayer {
@@ -748,8 +657,6 @@ private fun TaskList(
   tasksByCategories: Map<String, List<Task>>,
   enableAnimation: Boolean,
   navigateToTaskScreen: (Task) -> Unit,
-  gm4: Boolean = false,
-  grid: Boolean = false,
 ) {
   // Model list animation:
   //
@@ -825,67 +732,23 @@ private fun TaskList(
     contentPadding = PaddingValues(horizontal = 20.dp),
   ) { pageIndex ->
     val tasks = tasksByCategories[sortedCategories[pageIndex].id]!!
-    if (grid) {
-      Column(
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-        modifier =
-          Modifier.fillMaxWidth().padding(4.dp).graphicsLayer {
-            translationY = (CONTENT_COMPOSABLES_OFFSET_Y.dp * (1 - progress)).toPx()
-          },
-      ) {
-        for (i in tasks.indices step 2) {
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-          ) {
-            // First item in the row
-            TaskCard(
-              task = tasks[i],
-              index = i,
-              animate =
-                (pageIndex == 0 || pageIndex == 1) && !initialAnimationDone && enableAnimation,
-              onClick = { navigateToTaskScreen(tasks[i]) },
-              modifier = Modifier.weight(1f),
-              square = true,
-            )
-
-            // Second item in the row, if it exists
-            if (i + 1 < tasks.size) {
-              TaskCard(
-                task = tasks[i + 1],
-                index = i + 1,
-                animate =
-                  (pageIndex == 0 || pageIndex == 1) && !initialAnimationDone && enableAnimation,
-                onClick = { navigateToTaskScreen(tasks[i + 1]) },
-                modifier = Modifier.weight(1f),
-                square = true,
-              )
-            } else {
-              // Add a spacer to fill the remaining space if there's only one item in the last row
-              Spacer(modifier = Modifier.weight(1f))
-            }
-          }
-        }
-      }
-    } else {
-      Column(
-        modifier =
-          Modifier.fillMaxWidth().padding(4.dp).graphicsLayer {
-            translationY = (CONTENT_COMPOSABLES_OFFSET_Y.dp * (1 - progress)).toPx()
-          },
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-      ) {
-        for ((index, task) in tasks.withIndex()) {
-          TaskCard(
-            task = task,
-            index = index,
-            animate =
-              (pageIndex == 0 || pageIndex == 1) && !initialAnimationDone && enableAnimation,
-            onClick = { navigateToTaskScreen(task) },
-            modifier = Modifier.fillMaxWidth(),
-            square = false,
-          )
-        }
+    Column(
+      modifier =
+        Modifier.fillMaxWidth().padding(4.dp).graphicsLayer {
+          translationY = (CONTENT_COMPOSABLES_OFFSET_Y.dp * (1 - progress)).toPx()
+        },
+      verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+      for ((index, task) in tasks.withIndex()) {
+        TaskCard(
+          task = task,
+          index = index,
+          animate =
+            (pageIndex == 0 || pageIndex == 1) && !initialAnimationDone && enableAnimation,
+          onClick = { navigateToTaskScreen(task) },
+          modifier = Modifier.fillMaxWidth(),
+          square = false,
+        )
       }
     }
   }

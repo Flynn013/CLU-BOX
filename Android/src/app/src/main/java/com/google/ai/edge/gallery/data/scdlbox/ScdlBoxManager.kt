@@ -18,7 +18,6 @@ package com.google.ai.edge.gallery.data.scdlbox
 
 import android.content.Context
 import android.util.Log
-import androidx.work.Constraints
 import androidx.work.Data
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequest
@@ -48,8 +47,8 @@ class ScdlBoxManager(context: Context) {
    * Schedule (or re-schedule) a periodic work request for [task].
    *
    * If the task already has a scheduled request (same unique name), it is
-   * replaced using [ExistingPeriodicWorkPolicy.REPLACE] so that interval
-   * changes take effect immediately.
+   * replaced using [ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE] so that
+   * interval changes take effect immediately.
    *
    * No-ops if [task.isEnabled] is false — callers should call [cancel] instead.
    */
@@ -77,7 +76,7 @@ class ScdlBoxManager(context: Context) {
 
     workManager.enqueueUniquePeriodicWork(
       uniqueWorkName(task.id),
-      ExistingPeriodicWorkPolicy.REPLACE,
+      ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE,
       request,
     )
   }

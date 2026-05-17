@@ -98,6 +98,16 @@ class AgentGovernor(
   /** Currently-executing tool (or `null` when idle / streaming pure tokens). */
   val activeTool: StateFlow<ToolExecution?> = _activeTool.asStateFlow()
 
+  private val _toolHistory = MutableStateFlow<List<ToolExecution>>(emptyList())
+
+  /**
+   * Ordered list of all tool executions in the current session.
+   * Grows with each completed [onToolResult] / [onToolError] call and is
+   * cleared by [reset].  Compose collectors in the chat screen use this to
+   * render expandable [ToolExecutionBox] cards below the message list.
+   */
+  val toolHistory: StateFlow<List<ToolExecution>> = _toolHistory.asStateFlow()
+
   private val _engine = MutableStateFlow(AgentEngine.LOCAL)
 
   /** Currently-active engine. Settable by the chat screen when the user toggles. */
@@ -157,11 +167,13 @@ class AgentGovernor(
   fun onToolResult(execId: String, resultPreview: String) {
     val current = _activeTool.value
     if (current != null && current.id == execId) {
-      _activeTool.value = current.copy(
+      val finished = current.copy(
         phase = Phase.RESUMING_STREAM,
         resultPreview = resultPreview.take(2_000),
         finishedAtMs = System.currentTimeMillis(),
       )
+      _activeTool.value = finished
+      _toolHistory.value = _toolHistory.value + finished
     }
     _phase.value = Phase.RESUMING_STREAM
   }
@@ -170,11 +182,13 @@ class AgentGovernor(
   fun onToolError(execId: String, errorMessage: String) {
     val current = _activeTool.value
     if (current != null && current.id == execId) {
-      _activeTool.value = current.copy(
+      val finished = current.copy(
         phase = Phase.ERROR,
         errorMessage = errorMessage.take(2_000),
         finishedAtMs = System.currentTimeMillis(),
       )
+      _activeTool.value = finished
+      _toolHistory.value = _toolHistory.value + finished
     }
     _phase.value = Phase.ERROR
   }
@@ -182,6 +196,19 @@ class AgentGovernor(
   /** Reset the governor between conversations / sessions. */
   fun reset() {
     loopCount.set(0)
+    _activeTool.value = null
+    _toolHistory.value = emptyList()
+    _phase.value = Phase.IDLE
+  }
+
+  /**
+   * Transition to IDLE without clearing history or resetting loop count.
+   *
+   * Use this after the streaming phase ends to signal the UI that CLU is
+   * no longer actively working, while preserving the tool history for display
+   * in the [ToolExecutionBox] cards above the input field.
+   */
+  fun markIdle() {
     _activeTool.value = null
     _phase.value = Phase.IDLE
   }
@@ -195,13 +222,15 @@ class AgentGovernor(
   // ─────────────────────────────────────────────────────────────────────────
 
     companion object {
-        /** System constraint injected for the LOCAL on-device Gemma engine. */
+        /** System constraint injected for the LOCAL on-device Gemma 4 E4B IT engine. */
         val LOCAL_CONSTRAINT: String = """
-[GEMMA LOCAL ENGINE]
-Context budget: 32K tokens — be concise; short responses preferred.
-Rules: one tool call per turn → observe result → next action.
-Memory: call memorySearch before answering questions about the user or past work.
-Files: always fileBoxWrite — never shell redirection.
+[GEMMA 4 E4B IT — 32K context. Be concise.]
+1. One tool call per response → observe result → decide next step.
+2. Task complete? YES → reply to user. NO → call next tool immediately.
+3. Never ask permission to continue unless genuinely blocked.
+4. memorySearch before answering questions about user context or past work.
+5. fileBoxWrite for all file writes — never shell redirection.
+6. BusyBox sh only — no Bash arrays, no process substitution.
 """.trimIndent()
 
         /** Kept for source compatibility — not used in production (cloud removed). */

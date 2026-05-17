@@ -46,8 +46,27 @@ class TodoSkill(private val agentTools: AgentTools) : CluSkill {
     "Manages a persistent to-do / plan checklist stored in agent_plan.md. Actions: add, done, list, clear. " +
       "Call with action='list' at the start of any complex multi-step request to recall the current plan."
 
-  override val jsonSchema: String =
-    """{"name":"todo","parameters":{"action":{"type":"string","enum":["add","done","list","clear"]},"item":{"type":"string"}},"required":["action"]}"""
+  override val jsonSchema: String = """
+    {
+      "name": "todo",
+      "description": "Manage a persistent task checklist. Use 'list' to review plan before starting multi-step work.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["add", "done", "list", "clear"],
+            "description": "add=create task, done=mark complete, list=show all, clear=delete all."
+          },
+          "item": {
+            "type": "string",
+            "description": "Task description for 'add', or keyword to match for 'done'. Omit for 'list'/'clear'."
+          }
+        },
+        "required": ["action"]
+      }
+    }
+  """.trimIndent()
 
   override val fewShotExample: String =
     """todo(action="add", item="Write unit tests for auth module")"""

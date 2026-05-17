@@ -16,14 +16,20 @@
 
 package com.google.ai.edge.gallery.ui.common.chat
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.dp
+import com.google.ai.edge.gallery.ui.theme.absoluteBlack
+import com.google.ai.edge.gallery.ui.theme.neonGreen
 
 /**
  * Composable function to display a button to download model if the model has not been downloaded.
@@ -35,7 +41,16 @@ fun ModelNotDownloaded(modifier: Modifier = Modifier, onClicked: () -> Unit) {
     verticalArrangement = Arrangement.Center,
     horizontalAlignment = Alignment.CenterHorizontally,
   ) {
-    Button(onClick = onClicked) { Text("Download & Try it", maxLines = 1) }
+    OutlinedButton(
+      onClick = onClicked,
+      border = BorderStroke(1.dp, neonGreen),
+      colors = ButtonDefaults.outlinedButtonColors(
+        containerColor = absoluteBlack,
+        contentColor = neonGreen,
+      ),
+    ) {
+      Text("▸ DOWNLOAD MODEL", maxLines = 1, fontFamily = FontFamily.Monospace)
+    }
   }
 }
 

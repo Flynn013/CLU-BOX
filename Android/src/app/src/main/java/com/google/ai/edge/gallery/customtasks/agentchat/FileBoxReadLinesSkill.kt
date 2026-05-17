@@ -31,13 +31,36 @@ class FileBoxReadLinesSkill(private val agentTools: AgentTools) : CluSkill {
   override val name: String = "fileBoxReadLines"
 
   override val description: String =
-    "Reads a line range from a file to save memory. Use when a file/log is too large."
+    "Read a range of lines from a FileBox file. " +
+    "Use to inspect large files without exhausting the context window. Lines are 1-indexed."
 
-  override val jsonSchema: String =
-    """{"name":"fileBoxReadLines","parameters":{"file_path":{"type":"string"},"start_line":{"type":"integer"},"end_line":{"type":"integer"}},"required":["file_path","start_line","end_line"]}"""
+  override val jsonSchema: String = """
+    {
+      "name": "fileBoxReadLines",
+      "description": "Read a specific line range from a FileBox file (1-indexed lines).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Relative path within FileBox workspace, e.g. 'src/output.log'."
+          },
+          "start_line": {
+            "type": "integer",
+            "description": "First line to read (1-indexed, inclusive)."
+          },
+          "end_line": {
+            "type": "integer",
+            "description": "Last line to read (1-indexed, inclusive). Max 200 lines per call."
+          }
+        },
+        "required": ["file_path", "start_line", "end_line"]
+      }
+    }
+  """.trimIndent()
 
   override val fewShotExample: String =
-    """fileBoxReadLines(file_path="BrainBox/temp_out/spill_123.txt", start_line=0, end_line=50)"""
+    """fileBoxReadLines(file_path="src/output.log", start_line=1, end_line=50)"""
 
   override suspend fun execute(args: JSONObject): String {
     val filePath = args.optString("file_path", "")

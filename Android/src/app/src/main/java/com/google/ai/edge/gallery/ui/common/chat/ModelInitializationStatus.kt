@@ -36,6 +36,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.google.ai.edge.gallery.R
+import com.google.ai.edge.gallery.ui.theme.neonGreen
+import com.google.ai.edge.gallery.ui.theme.terminalMidGrey
 
 /**
  * Composable function to display a visual indicator for model initialization status.
@@ -51,7 +53,7 @@ fun ModelInitializationStatusChip() {
       modifier =
         Modifier.padding(8.dp)
           .clip(CircleShape)
-          .background(MaterialTheme.colorScheme.secondaryContainer)
+          .background(terminalMidGrey)
     ) {
       Row(
         modifier = Modifier.padding(top = 4.dp, bottom = 4.dp, start = 8.dp, end = 8.dp),
@@ -62,7 +64,7 @@ fun ModelInitializationStatusChip() {
         CircularProgressIndicator(
           modifier = Modifier.size(14.dp),
           strokeWidth = 2.dp,
-          color = MaterialTheme.colorScheme.onSecondaryContainer,
+          color = neonGreen,
         )
 
         Spacer(modifier = Modifier.width(8.dp))
@@ -71,7 +73,7 @@ fun ModelInitializationStatusChip() {
         Text(
           stringResource(R.string.model_is_initializing_msg),
           style = MaterialTheme.typography.bodySmall,
-          color = MaterialTheme.colorScheme.onSecondaryContainer,
+          color = neonGreen,
         )
       }
     }
