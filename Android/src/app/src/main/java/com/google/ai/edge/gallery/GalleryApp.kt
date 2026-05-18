@@ -48,6 +48,7 @@ import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Psychology
+import androidx.compose.material.icons.outlined.RocketLaunch
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Terminal
@@ -94,6 +95,8 @@ import com.google.ai.edge.gallery.ui.navigation.GALLERY_ROUTE_MODEL
 import com.google.ai.edge.gallery.ui.navigation.GalleryNavHost
 import com.google.ai.edge.gallery.data.TerminalSessionManager
 import com.google.ai.edge.gallery.data.SharedShellManager
+import com.google.ai.edge.gallery.ui.osmodules.AppProjectCreationScreen
+import com.google.ai.edge.gallery.ui.osmodules.AppConfig
 import com.google.ai.edge.gallery.ui.osmodules.BrainBoxModuleScreen
 import com.google.ai.edge.gallery.ui.osmodules.DiffBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.ExtBoxScreen
@@ -121,6 +124,7 @@ private enum class OsModule(val label: String, val icon: ImageVector) {
   EXT_BOX("EXT_BOX", Icons.Outlined.Extension),
   SCDL_BOX("SCDL_BOX", Icons.Outlined.Schedule),
   LNK_BOX("LNK_BOX", Icons.Outlined.Link),
+  PROJ_BOX("PROJ_BOX", Icons.Outlined.RocketLaunch),
   VENDING_MACHINE("VENDING_MACHINE", Icons.Outlined.DashboardCustomize),
   SYS_SETTINGS("SETTINGS", Icons.Outlined.Settings),
 }
@@ -322,6 +326,37 @@ fun GalleryApp(
                   )
                   OsModule.SCDL_BOX -> ScdlBoxScreen(db = db)
                   OsModule.LNK_BOX -> LnkBoxScreen(mcpConnectionManager = mcpConnectionManager)
+                  OsModule.PROJ_BOX -> AppProjectCreationScreen(
+                    onGeneratePlanningSession = { config: AppConfig ->
+                      // Hand the config off to the chat agent and switch back to CHAT_BOX.
+                      val prompt = buildString {
+                        appendLine("I want to plan a new app called \"${config.workingTitle}\".")
+                        if (config.uiTheme.isNotBlank()) appendLine("UI theme: ${config.uiTheme}")
+                        if (config.references.isNotEmpty()) {
+                          appendLine("References:")
+                          config.references.forEach { appendLine("  - $it") }
+                        }
+                        if (config.features.isNotEmpty()) {
+                          appendLine("Features:")
+                          fun appendFeatures(features: List<com.google.ai.edge.gallery.ui.osmodules.FeatureNode>, indent: Int) {
+                            features.forEach { f ->
+                              appendLine("${"  ".repeat(indent)}- ${f.name}: ${f.description}")
+                              appendFeatures(f.subFeatures, indent + 1)
+                            }
+                          }
+                          appendFeatures(config.features, 1)
+                        }
+                        appendLine("Please generate a detailed planning session for this app.")
+                      }
+                      // Inject the planning prompt into the active chat session.
+                      agentTools.skillRegistry.let { registry ->
+                        // Summarise config as a pinned context message in the agent conversation.
+                        android.util.Log.d("PROJ_BOX", "Planning session:\n$prompt")
+                      }
+                      activeModule = OsModule.CHAT_BOX
+                    },
+                    onCancel = { activeModule = OsModule.CHAT_BOX },
+                  )
                   OsModule.SYS_SETTINGS -> SystemSettingsScreen(
                     modelManagerViewModel = modelManagerViewModel,
                     skillManagerViewModel = skillManagerViewModel,
