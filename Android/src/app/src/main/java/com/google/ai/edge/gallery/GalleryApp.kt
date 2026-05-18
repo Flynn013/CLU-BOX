@@ -348,11 +348,8 @@ fun GalleryApp(
                         }
                         appendLine("Please generate a detailed planning session for this app.")
                       }
-                      // Inject the planning prompt into the active chat session.
-                      agentTools.skillRegistry.let { registry ->
-                        // Summarise config as a pinned context message in the agent conversation.
-                        android.util.Log.d("PROJ_BOX", "Planning session:\n$prompt")
-                      }
+                      // Log the planning config; the user can paste it into the chat agent.
+                      android.util.Log.d("PROJ_BOX", "Planning session:\n$prompt")
                       activeModule = OsModule.CHAT_BOX
                     },
                     onCancel = { activeModule = OsModule.CHAT_BOX },
