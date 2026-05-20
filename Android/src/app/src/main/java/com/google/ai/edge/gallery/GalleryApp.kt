@@ -104,7 +104,7 @@ private enum class OsModule(val label: String, val icon: ImageVector) {
   BRAIN_BOX("BRAIN_BOX", Icons.Outlined.Hub),
   SKILL_BOX("SKILL_BOX", Icons.Outlined.Psychology),
   MODELS("MODELS", Icons.Outlined.DashboardCustomize),
-  LNK_BOX("LNK_BOX", Icons.Outlined.Link),
+  LNK_BOX("MCP EXTENSIONS", Icons.Outlined.Link),
   SYS_SETTINGS("SETTINGS", Icons.Outlined.Settings),
 }
 

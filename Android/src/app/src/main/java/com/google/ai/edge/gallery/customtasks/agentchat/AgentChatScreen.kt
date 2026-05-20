@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -49,6 +50,7 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Text
@@ -100,6 +102,7 @@ import com.google.ai.edge.gallery.ui.common.chat.ChatSide
 import com.google.ai.edge.gallery.ui.common.chat.LogMessage
 import com.google.ai.edge.gallery.ui.common.chat.LogMessageLevel
 import com.google.ai.edge.gallery.ui.common.chat.SendMessageTrigger
+import com.google.ai.edge.gallery.ui.llmchat.ContextWindowPager
 import com.google.ai.edge.gallery.ui.llmchat.LlmChatScreen
 import com.google.ai.edge.gallery.ui.llmchat.LlmChatViewModel
 import com.google.ai.edge.gallery.ui.modelmanager.ModelInitializationStatusType
@@ -123,7 +126,7 @@ private const val TAG = "AGAgentChatScreen"
  * Maximum number of consecutive autonomous loop iterations allowed before the
  * loop is forcibly halted.
  */
-private const val MAX_AUTONOMOUS_ITERATIONS = 25
+private const val MAX_AUTONOMOUS_ITERATIONS = 100
 
 /**
  * Cooldown delay (ms) inserted between consecutive autonomous loop iterations.
@@ -300,17 +303,49 @@ fun AgentChatScreen(
           autonomousIterationCount++
           agentTools.pendingTaskDescription = null
           Log.d(TAG, "Autonomous loop: iteration $autonomousIterationCount — re-triggering inference with task='$pendingTask'")
-          autonomousLoopScope.launch {
-            delay(AUTONOMOUS_LOOP_COOLDOWN_MS)
-            sendMessageTrigger = SendMessageTrigger(
-              model = model,
-              messages = listOf(
-                ChatMessageText(
-                  content = "[CONTINUE] $pendingTask",
-                  side = ChatSide.USER,
+
+          // Auto-compress context if near capacity before continuing the loop.
+          val allMsgs = viewModel.uiState.value.messagesByModel[model.name] ?: mutableListOf()
+          val textMsgs = allMsgs.filterIsInstance<ChatMessageText>().toMutableList()
+          val engine = agentTools.engine
+
+          if (ContextWindowPager.shouldPrune(textMsgs, engine)) {
+            Log.d(TAG, "Context near full — auto-compressing before iteration $autonomousIterationCount")
+            autonomousLoopScope.launch {
+              val retained = ContextWindowPager.pruneAndArchive(
+                messages = textMsgs,
+                engine = engine,
+                brainBoxDao = agentTools.brainBoxDao,
+                sessionLabel = "ctx_${System.currentTimeMillis()}",
+              )
+              resetSessionWithCurrentSkills(
+                viewModel, modelManagerViewModel, skillManagerViewModel,
+                task, curSystemPrompt, agentTools,
+                onDone = { resetModel ->
+                  retained.forEach { msg -> viewModel.addMessage(model = resetModel, message = msg) }
+                  autonomousLoopScope.launch {
+                    delay(AUTONOMOUS_LOOP_COOLDOWN_MS)
+                    sendMessageTrigger = SendMessageTrigger(
+                      model = resetModel,
+                      messages = listOf(ChatMessageText(content = "[CONTINUE] $pendingTask", side = ChatSide.USER)),
+                    )
+                  }
+                },
+              )
+            }
+          } else {
+            autonomousLoopScope.launch {
+              delay(AUTONOMOUS_LOOP_COOLDOWN_MS)
+              sendMessageTrigger = SendMessageTrigger(
+                model = model,
+                messages = listOf(
+                  ChatMessageText(
+                    content = "[CONTINUE] $pendingTask",
+                    side = ChatSide.USER,
+                  ),
                 ),
-              ),
-            )
+              )
+            }
           }
         }
       } else {
@@ -478,10 +513,27 @@ fun AgentChatScreen(
       val selectedSkills = skillsState.skills.filter { it.skill.selected }
 
       Column(modifier = Modifier.fillMaxWidth()) {
+        // ── Context fill progress bar ──────────────────────────────────────
+        // Thin 2dp bar under the chat banner. Green → orange → red as context fills.
+        val chatUiStateCtx by viewModel.uiState.collectAsState()
+        val modelMgrCtx by modelManagerViewModel.uiState.collectAsState()
+        val ctxMsgs = chatUiStateCtx.messagesByModel[modelMgrCtx.selectedModel.name]
+          ?.filterIsInstance<ChatMessageText>() ?: emptyList()
+        val ctxFill = (ctxMsgs.sumOf { it.content.length }.toFloat()
+          / (ContextWindowPager.budgetFor(agentTools.engine) * 4)).coerceIn(0f, 1f)
+        val ctxBarColor = when {
+          ctxFill >= 0.85f -> MaterialTheme.colorScheme.error
+          ctxFill >= 0.60f -> Color(0xFFFF9800)
+          else -> neonGreen
+        }
+        LinearProgressIndicator(
+          progress = ctxFill,
+          modifier = Modifier.fillMaxWidth().height(2.dp),
+          color = ctxBarColor,
+          trackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        )
+
         // ── Thinking mode toggle + live skill chip rail ─────────────────
-        // THINK chip lets the user enable/disable Gemma 4 extended thinking
-        // at runtime.  Skill chips show what tools are active and open the
-        // skill manager on tap.
         Row(
           modifier = Modifier
             .fillMaxWidth()

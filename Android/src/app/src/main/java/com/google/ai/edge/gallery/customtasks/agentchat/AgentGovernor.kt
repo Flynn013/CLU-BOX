@@ -58,10 +58,10 @@ private const val TAG = "AgentGovernor"
 class AgentGovernor(
   /**
    * Maximum consecutive autonomous iterations before the circuit breaker halts
-   * the loop to protect device stability. 25 strikes a balance: enough for
-   * deep multi-step plans, short enough to prevent runaway battery drain.
+   * the loop to protect device stability. 100 allows deep multi-step plans
+   * while still providing a safety ceiling.
    */
-  val maxLoops: Int = 25,
+  val maxLoops: Int = 100,
 ) {
   // ─────────────────────────────────────────────────────────────────────────
   //  State machine
