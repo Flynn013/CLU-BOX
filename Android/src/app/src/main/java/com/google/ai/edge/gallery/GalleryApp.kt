@@ -41,17 +41,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Chat
-import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.DashboardCustomize
-import androidx.compose.material.icons.outlined.Difference
-import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Psychology
-import androidx.compose.material.icons.outlined.RocketLaunch
-import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -86,7 +80,6 @@ import com.google.ai.edge.gallery.customtasks.agentchat.AgentTools
 import com.google.ai.edge.gallery.customtasks.agentchat.McpDynamicSkill
 import com.google.ai.edge.gallery.customtasks.agentchat.SkillManagerViewModel
 import com.google.ai.edge.gallery.data.BuiltInTaskId
-import com.google.ai.edge.gallery.data.FileBoxManager
 import com.google.ai.edge.gallery.data.brainbox.GraphDatabase
 import com.google.ai.edge.gallery.ui.modelmanager.GlobalModelManager
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
@@ -94,16 +87,8 @@ import com.google.ai.edge.gallery.ui.navigation.GALLERY_ROUTE_BENCHMARK
 import com.google.ai.edge.gallery.ui.navigation.GALLERY_ROUTE_MODEL
 import com.google.ai.edge.gallery.ui.navigation.GalleryNavHost
 import com.google.ai.edge.gallery.data.TerminalSessionManager
-import com.google.ai.edge.gallery.data.SharedShellManager
-import com.google.ai.edge.gallery.ui.osmodules.AppProjectCreationScreen
-import com.google.ai.edge.gallery.ui.osmodules.AppConfig
 import com.google.ai.edge.gallery.ui.osmodules.BrainBoxModuleScreen
-import com.google.ai.edge.gallery.ui.osmodules.DiffBoxScreen
-import com.google.ai.edge.gallery.ui.osmodules.ExtBoxScreen
-import com.google.ai.edge.gallery.ui.osmodules.FileBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.LnkBoxScreen
-import com.google.ai.edge.gallery.ui.osmodules.MstrCtrlScreen
-import com.google.ai.edge.gallery.ui.osmodules.ScdlBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.SkillBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.SystemSettingsScreen
 import com.google.ai.edge.gallery.data.mcp.McpConnectionManager
@@ -117,15 +102,9 @@ import kotlinx.coroutines.launch
 private enum class OsModule(val label: String, val icon: ImageVector) {
   CHAT_BOX("CHAT_BOX", Icons.Outlined.Chat),
   BRAIN_BOX("BRAIN_BOX", Icons.Outlined.Hub),
-  FILE_BOX("FILE_BOX", Icons.Outlined.Code),
-  DIFF_BOX("DIFF_BOX", Icons.Outlined.Difference),
-  MSTR_CTRL("MSTR_CTRL", Icons.Outlined.Terminal),
   SKILL_BOX("SKILL_BOX", Icons.Outlined.Psychology),
-  EXT_BOX("EXT_BOX", Icons.Outlined.Extension),
-  SCDL_BOX("SCDL_BOX", Icons.Outlined.Schedule),
+  MODELS("MODELS", Icons.Outlined.DashboardCustomize),
   LNK_BOX("LNK_BOX", Icons.Outlined.Link),
-  PROJ_BOX("PROJ_BOX", Icons.Outlined.RocketLaunch),
-  VENDING_MACHINE("VENDING_MACHINE", Icons.Outlined.DashboardCustomize),
   SYS_SETTINGS("SETTINGS", Icons.Outlined.Settings),
 }
 
@@ -139,12 +118,7 @@ fun GalleryApp(
   val scope = rememberCoroutineScope()
   var activeModule by remember { mutableStateOf(OsModule.CHAT_BOX) }
   val db = remember { GraphDatabase.getInstance(context) }
-  val fileBoxManager = remember { FileBoxManager(context) }
   val terminalSessionManager = remember { TerminalSessionManager(context) }
-  // SharedShellManager holds the single PTY session that both MSTR_CTRL UI and
-  // AI agents share.  Created here (not inside MstrCtrlScreen) so the session
-  // persists across module switches without restarting the shell.
-  val sharedShellManager = remember { SharedShellManager(context) }
   val skillManagerViewModel: SkillManagerViewModel = hiltViewModel()
   // AgentTools instance for MCP dynamic skill registration.
   val agentTools = remember {
@@ -156,7 +130,7 @@ fun GalleryApp(
   agentTools.brainBoxDao = remember(context) { GraphDatabase.getInstance(context).brainBoxDao() }
   agentTools.vectorEngine = remember(context) { com.google.ai.edge.gallery.data.brainbox.VectorEngine(context) }
   agentTools.terminalSessionManager = terminalSessionManager
-  
+
   // MCP connection manager — persists server configs in the encrypted vault and manages
   // the live stdio bridges.  Initialised here so it survives module navigation.
   val mcpConnectionManager = remember { McpConnectionManager(context) }
@@ -188,7 +162,7 @@ fun GalleryApp(
             .background(absoluteBlack)
             .verticalScroll(rememberScrollState()),
         ) {
-          // Drawer header — elevated surface with bottom divider
+          // Drawer header
           Box(
             modifier = Modifier
               .fillMaxWidth()
@@ -203,7 +177,7 @@ fun GalleryApp(
                 fontFamily = FontFamily.Monospace,
               )
               Text(
-                "OS v0.5 — offline AI",
+                "OS v1.0 — offline AI",
                 style = MaterialTheme.typography.bodySmall,
                 color = neonGreen.copy(alpha = 0.55f),
                 fontFamily = FontFamily.Monospace,
@@ -213,7 +187,6 @@ fun GalleryApp(
 
           Spacer(Modifier.height(4.dp))
 
-          // Module items.
           OsModule.entries.forEach { module ->
             DrawerItem(
               module = module,
@@ -236,7 +209,7 @@ fun GalleryApp(
       .fillMaxSize()
       .pointerInput(Unit) {
         detectHorizontalDragGestures { _, dragAmount ->
-          // Right-to-left swipe (finger moving left) → return to CHAT_BOX
+          // Right-to-left swipe → return to CHAT_BOX
           if (dragAmount < -50f && activeModule != OsModule.CHAT_BOX) {
             activeModule = OsModule.CHAT_BOX
           }
@@ -247,8 +220,6 @@ fun GalleryApp(
       // The chat NavHost stays mounted so that LLM inference,
       // conversation state, scroll position, and streaming continue
       // uninterrupted even when the user visits another module.
-      // When another module is active we hide it visually (alpha 0)
-      // but it remains composed and its ViewModel keeps running.
       val chatBoxVisible = activeModule == OsModule.CHAT_BOX
       Box(
         modifier = Modifier
@@ -265,8 +236,8 @@ fun GalleryApp(
       // ── Other modules: rendered on top when active ─────────────
       if (!chatBoxVisible) {
         when (activeModule) {
-          // VENDING_MACHINE: full-screen, manages own Scaffold.
-          OsModule.VENDING_MACHINE -> GlobalModelManager(
+          // MODELS: full-screen model manager with benchmark access.
+          OsModule.MODELS -> GlobalModelManager(
             viewModel = modelManagerViewModel,
             navigateUp = { activeModule = OsModule.CHAT_BOX },
             onModelSelected = { task, model ->
@@ -307,58 +278,15 @@ fun GalleryApp(
                     dao = db.brainBoxDao(),
                     vectorEngine = remember(context) { com.google.ai.edge.gallery.data.brainbox.VectorEngine(context) },
                   )
-                  OsModule.FILE_BOX -> FileBoxScreen(
-                    fileBoxManager = fileBoxManager,
-                    sharedShellManager = sharedShellManager,
-                  )
-                  OsModule.DIFF_BOX -> DiffBoxScreen(
-                    sessionManager = terminalSessionManager,
-                  )
-                  OsModule.MSTR_CTRL -> MstrCtrlScreen(
-                    sessionManager = terminalSessionManager,
-                    sharedShellManager = sharedShellManager,
-                  )
                   OsModule.SKILL_BOX -> SkillBoxScreen(
                     skillManagerViewModel = skillManagerViewModel,
                   )
-                  OsModule.EXT_BOX -> ExtBoxScreen(
-                    skillManagerViewModel = skillManagerViewModel,
-                  )
-                  OsModule.SCDL_BOX -> ScdlBoxScreen(db = db)
                   OsModule.LNK_BOX -> LnkBoxScreen(mcpConnectionManager = mcpConnectionManager)
-                  OsModule.PROJ_BOX -> AppProjectCreationScreen(
-                    onGeneratePlanningSession = { config: AppConfig ->
-                      // Hand the config off to the chat agent and switch back to CHAT_BOX.
-                      val prompt = buildString {
-                        appendLine("I want to plan a new app called \"${config.workingTitle}\".")
-                        if (config.uiTheme.isNotBlank()) appendLine("UI theme: ${config.uiTheme}")
-                        if (config.references.isNotEmpty()) {
-                          appendLine("References:")
-                          config.references.forEach { appendLine("  - $it") }
-                        }
-                        if (config.features.isNotEmpty()) {
-                          appendLine("Features:")
-                          fun appendFeatures(features: List<com.google.ai.edge.gallery.ui.osmodules.FeatureNode>, indent: Int) {
-                            features.forEach { f ->
-                              appendLine("${"  ".repeat(indent)}- ${f.name}: ${f.description}")
-                              appendFeatures(f.subFeatures, indent + 1)
-                            }
-                          }
-                          appendFeatures(config.features, 1)
-                        }
-                        appendLine("Please generate a detailed planning session for this app.")
-                      }
-                      // Log the planning config; the user can paste it into the chat agent.
-                      android.util.Log.d("PROJ_BOX", "Planning session:\n$prompt")
-                      activeModule = OsModule.CHAT_BOX
-                    },
-                    onCancel = { activeModule = OsModule.CHAT_BOX },
-                  )
                   OsModule.SYS_SETTINGS -> SystemSettingsScreen(
                     modelManagerViewModel = modelManagerViewModel,
                     skillManagerViewModel = skillManagerViewModel,
                   )
-                  else -> {} // all modules covered above
+                  else -> {}
                 }
               }
             }
@@ -367,8 +295,6 @@ fun GalleryApp(
       }
 
       // ── Right-edge tab button ──────────────────────────────────
-      // A tall slender tab anchored to the vertical middle of the
-      // right edge.  Tapping it opens the ModalNavigationDrawer.
       val tabShape = RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp)
       Box(
         modifier = Modifier
@@ -382,7 +308,6 @@ fun GalleryApp(
           .clickable { scope.launch { drawerState.open() } },
         contentAlignment = Alignment.Center,
       ) {
-        // Vertical "CLU" text
         Text(
           text = "C\nL\nU",
           color = neonGreen,
@@ -392,8 +317,6 @@ fun GalleryApp(
           textAlign = TextAlign.Center,
         )
       }
-
-      // (no overlay sheets — SKILL_BOX and EXT_BOX are full-screen modules)
     }
   }
 }
