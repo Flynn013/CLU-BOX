@@ -184,7 +184,8 @@ fun AgentChatScreen(
   val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
   val selectedModel = modelManagerUiState.selectedModel
   LaunchedEffect(selectedModel) {
-    agentTools.engine = if (selectedModel.runtimeType == RuntimeType.GEMINI_CLOUD) {
+    agentTools.engine = if (selectedModel.runtimeType == RuntimeType.GEMINI_CLOUD
+        || selectedModel.runtimeType == RuntimeType.ANTHROPIC_CLOUD) {
       AgentEngine.CLOUD
     } else {
       AgentEngine.LOCAL

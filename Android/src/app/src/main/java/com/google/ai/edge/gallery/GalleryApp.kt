@@ -46,6 +46,7 @@ import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -89,6 +90,7 @@ import com.google.ai.edge.gallery.ui.navigation.GalleryNavHost
 import com.google.ai.edge.gallery.data.TerminalSessionManager
 import com.google.ai.edge.gallery.ui.osmodules.BrainBoxModuleScreen
 import com.google.ai.edge.gallery.ui.osmodules.LnkBoxScreen
+import com.google.ai.edge.gallery.ui.osmodules.MstrCtrlScreen
 import com.google.ai.edge.gallery.ui.osmodules.SkillBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.SystemSettingsScreen
 import com.google.ai.edge.gallery.data.mcp.McpConnectionManager
@@ -105,6 +107,7 @@ private enum class OsModule(val label: String, val icon: ImageVector) {
   SKILL_BOX("SKILL_BOX", Icons.Outlined.Psychology),
   MODELS("MODELS", Icons.Outlined.DashboardCustomize),
   LNK_BOX("MCP EXTENSIONS", Icons.Outlined.Link),
+  MSTR_CTRL("MSTR_CTRL", Icons.Outlined.Terminal),
   SYS_SETTINGS("SETTINGS", Icons.Outlined.Settings),
 }
 
@@ -282,6 +285,7 @@ fun GalleryApp(
                     skillManagerViewModel = skillManagerViewModel,
                   )
                   OsModule.LNK_BOX -> LnkBoxScreen(mcpConnectionManager = mcpConnectionManager)
+                  OsModule.MSTR_CTRL -> MstrCtrlScreen()
                   OsModule.SYS_SETTINGS -> SystemSettingsScreen(
                     modelManagerViewModel = modelManagerViewModel,
                     skillManagerViewModel = skillManagerViewModel,

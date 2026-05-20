@@ -19,6 +19,7 @@ package com.google.ai.edge.gallery.runtime
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.RuntimeType
 import com.google.ai.edge.gallery.runtime.aicore.AICoreModelHelper
+import com.google.ai.edge.gallery.runtime.cloudproviders.AnthropicCloudModelHelper
 import com.google.ai.edge.gallery.runtime.geminicloud.GeminiCloudModelHelper
 import com.google.ai.edge.gallery.runtime.manualapi.ManualApiModelHelper
 import com.google.ai.edge.gallery.ui.llmchat.LlmChatModelHelper
@@ -30,6 +31,9 @@ val Model.runtimeHelper: LlmModelHelper
     }
     if (this.runtimeType == RuntimeType.GEMINI_CLOUD) {
       return GeminiCloudModelHelper
+    }
+    if (this.runtimeType == RuntimeType.ANTHROPIC_CLOUD) {
+      return AnthropicCloudModelHelper
     }
     if (this.runtimeType == RuntimeType.MANUAL_API) {
       return ManualApiModelHelper

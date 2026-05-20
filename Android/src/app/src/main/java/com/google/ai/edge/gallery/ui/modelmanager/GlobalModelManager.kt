@@ -32,6 +32,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -46,6 +47,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.NoteAdd
+import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.automirrored.rounded.ListAlt
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.rounded.Close
@@ -53,6 +55,8 @@ import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -80,8 +84,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -92,11 +98,18 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.RuntimeType
 import com.google.ai.edge.gallery.data.Task
+import com.google.ai.edge.gallery.runtime.cloudproviders.ClaudeConnectButton
+import com.google.ai.edge.gallery.runtime.cloudproviders.ClaudeCredentialStore
+import com.google.ai.edge.gallery.runtime.geminicloud.GeminiApiKeyStore
+import com.google.ai.edge.gallery.runtime.geminicloud.GeminiConnectButton
+import com.google.ai.edge.gallery.runtime.geminicloud.GeminiTokenManager
+import com.google.ai.edge.gallery.runtime.manualapi.ManualApiKeyStore
 import com.google.ai.edge.gallery.proto.ImportedModel
 import com.google.ai.edge.gallery.ui.common.TaskIcon
 import com.google.ai.edge.gallery.ui.common.modelitem.ModelItem
@@ -125,6 +138,8 @@ fun GlobalModelManager(
   val importedModels = remember { mutableStateListOf<Model>() }
   // CLOUD_CLU: Gemini Cloud models added by the user (persisted in DataStore).
   val geminiModels = remember { mutableStateListOf<Model>() }
+  // CLOUD_CLU: Anthropic Cloud models added by the user (persisted in DataStore).
+  val anthropicModels = remember { mutableStateListOf<Model>() }
   val taskCandidates = remember { mutableStateListOf<Task>() }
   var modelForTaskCandidate by remember { mutableStateOf<Model?>(null) }
   var showTaskSelectorBottomSheet by remember { mutableStateOf(false) }
@@ -184,14 +199,19 @@ fun GlobalModelManager(
     // CLOUD_CLU: User-added Gemini Cloud API models (via API key in CLOUD_CLU tab)
     // AICore/BESPOKE/MANUAL_API models are excluded from the CLU/BOX vending machine.
     val persistedGeminiIds = viewModel.dataStoreRepository.readGeminiCloudModels().map { it.modelId }.toSet()
+    val persistedAnthropicIds = viewModel.dataStoreRepository.readAnthropicCloudModels().map { it.modelId }.toSet()
     localModels.clear()
     importedModels.clear()
     geminiModels.clear()
+    anthropicModels.clear()
     for (model in sortedModels) {
       when {
         model.runtimeType == RuntimeType.GEMINI_CLOUD && persistedGeminiIds.contains(model.name) ->
           geminiModels.add(model)
+        model.runtimeType == RuntimeType.ANTHROPIC_CLOUD && persistedAnthropicIds.contains(model.name) ->
+          anthropicModels.add(model)
         model.runtimeType == RuntimeType.GEMINI_CLOUD ||
+          model.runtimeType == RuntimeType.ANTHROPIC_CLOUD ||
           model.runtimeType == RuntimeType.AICORE ||
           model.runtimeType == RuntimeType.MANUAL_API -> { /* excluded from vending machine */ }
         model.imported -> importedModels.add(model)
@@ -238,7 +258,7 @@ fun GlobalModelManager(
               )
               Text(
                 text =
-                  "${stringResource(R.string.drawer_models_label)} (${localModels.size + importedModels.size + geminiModels.size})",
+                  "${stringResource(R.string.drawer_models_label)} (${localModels.size + importedModels.size + geminiModels.size + anthropicModels.size})",
                 color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.titleMedium,
                 fontFamily = FontFamily.Monospace,
@@ -392,6 +412,12 @@ fun GlobalModelManager(
 
             // ── Tab 1: CLOUD_CLU ─────────────────────────────────
             1 -> {
+              // ── Credential hub ───────────────────────────────
+              item(key = "cloud_credential_hub") {
+                CloudCredentialHub(context = context)
+              }
+
+              // ── Gemini section ───────────────────────────────
               item(key = "gemini_api_tab") {
                 GeminiApiTab(
                   viewModel = viewModel,
@@ -401,16 +427,15 @@ fun GlobalModelManager(
                       displayName = displayName,
                     )
                     scope.launch {
-                      snackbarHostState.showSnackbar("Cloud model '$displayName' added to chat")
+                      snackbarHostState.showSnackbar("Gemini model '$displayName' added to chat")
                     }
                   },
                 )
               }
-              // Show already-added Gemini models so they can be selected / navigated to.
               if (geminiModels.isNotEmpty()) {
-                item(key = "cloud_models_label") {
+                item(key = "gemini_active_label") {
                   Text(
-                    "Active Cloud Models",
+                    "Active Gemini Models",
                     color = neonGreen,
                     style = MaterialTheme.typography.labelLarge,
                     fontFamily = FontFamily.Monospace,
@@ -419,6 +444,53 @@ fun GlobalModelManager(
                 }
               }
               items(geminiModels) { model ->
+                val expanded = modelItemExpandedStates.getOrDefault(model.name, true)
+                ModelItem(
+                  model = model,
+                  task = null,
+                  modelManagerViewModel = viewModel,
+                  onModelClicked = handleClickModel,
+                  onBenchmarkClicked = onBenchmarkClicked,
+                  expanded = expanded,
+                  showBenchmarkButton = false,
+                  onExpanded = { modelItemExpandedStates[model.name] = it },
+                )
+              }
+
+              // ── Claude section ───────────────────────────────
+              item(key = "claude_models_header") {
+                ClaudeModelsTab(
+                  viewModel = viewModel,
+                  addedModelIds = anthropicModels.map { it.name }.toSet(),
+                  onModelAdded = { modelId, displayName ->
+                    viewModel.addAnthropicCloudModel(
+                      modelId = modelId,
+                      displayName = displayName,
+                    )
+                    scope.launch {
+                      snackbarHostState.showSnackbar("Claude model '$displayName' added to chat")
+                    }
+                  },
+                  onModelRemoved = { modelId ->
+                    viewModel.removeAnthropicCloudModel(modelId)
+                    scope.launch {
+                      snackbarHostState.showSnackbar("Model removed")
+                    }
+                  },
+                )
+              }
+              if (anthropicModels.isNotEmpty()) {
+                item(key = "claude_active_label") {
+                  Text(
+                    "Active Claude Models",
+                    color = neonGreen,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
+                  )
+                }
+              }
+              items(anthropicModels) { model ->
                 val expanded = modelItemExpandedStates.getOrDefault(model.name, true)
                 ModelItem(
                   model = model,
@@ -621,6 +693,153 @@ fun GlobalModelManager(
         }
       },
     )
+  }
+}
+
+// ── Cloud credential hub ────────────────────────────────────────────────────────
+
+@Composable
+private fun CloudCredentialHub(context: Context) {
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+      .border(1.dp, neonGreen.copy(alpha = 0.2f), RoundedCornerShape(12.dp))
+      .padding(12.dp),
+    verticalArrangement = Arrangement.spacedBy(8.dp),
+  ) {
+    Text(
+      "CLOUD CREDENTIALS",
+      style = MaterialTheme.typography.labelSmall,
+      fontFamily = FontFamily.Monospace,
+      color = neonGreen.copy(alpha = 0.7f),
+    )
+
+    // Gemini credential row
+    Row(
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.SpaceBetween,
+      modifier = Modifier.fillMaxWidth(),
+    ) {
+      Column(modifier = Modifier.weight(1f)) {
+        Text("Gemini", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+        val geminiStatus = when {
+          GeminiTokenManager.hasValidAccessToken(context) -> "OAUTH"
+          !GeminiApiKeyStore.getApiKey(context).isNullOrBlank() -> "API KEY"
+          else -> "NOT SET"
+        }
+        val geminiStatusColor = when (geminiStatus) {
+          "OAUTH" -> neonGreen
+          "API KEY" -> Color(0xFFFFBB00)
+          else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+        }
+        Text(geminiStatus, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = geminiStatusColor)
+      }
+      GeminiConnectButton()
+    }
+
+    // Claude credential row
+    Row(
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.SpaceBetween,
+      modifier = Modifier.fillMaxWidth(),
+    ) {
+      Column(modifier = Modifier.weight(1f)) {
+        Text("Claude", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+        val claudeStatus = when {
+          ClaudeCredentialStore.hasValidCredentials(context) -> "OAUTH"
+          !ManualApiKeyStore.getApiKey(context, "anthropic").isNullOrBlank() -> "API KEY"
+          else -> "NOT SET"
+        }
+        val claudeStatusColor = when (claudeStatus) {
+          "OAUTH" -> neonGreen
+          "API KEY" -> Color(0xFFFFBB00)
+          else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+        }
+        Text(claudeStatus, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = claudeStatusColor)
+      }
+      ClaudeConnectButton()
+    }
+  }
+}
+
+// Preset Claude model IDs with display names.
+private val CLAUDE_PRESETS = listOf(
+  "claude-opus-4-7" to "Claude Opus 4.7",
+  "claude-sonnet-4-6" to "Claude Sonnet 4.6",
+  "claude-haiku-4-5-20251001" to "Claude Haiku 4.5",
+)
+
+@Composable
+private fun ClaudeModelsTab(
+  viewModel: ModelManagerViewModel,
+  addedModelIds: Set<String>,
+  onModelAdded: (modelId: String, displayName: String) -> Unit,
+  onModelRemoved: (modelId: String) -> Unit,
+) {
+  Column(
+    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+    verticalArrangement = Arrangement.spacedBy(12.dp),
+  ) {
+    Row(
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      Icon(Icons.Outlined.Cloud, contentDescription = null, tint = neonGreen, modifier = Modifier.size(20.dp))
+      Text(
+        "CLOUD_CLU — Anthropic Claude",
+        style = MaterialTheme.typography.titleMedium,
+        fontFamily = FontFamily.Monospace,
+        color = neonGreen,
+      )
+    }
+
+    Text(
+      "Add Claude models to the agentic chat. Credentials are configured in the section above.",
+      style = MaterialTheme.typography.bodySmall,
+      color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+    )
+
+    CLAUDE_PRESETS.forEach { (modelId, displayName) ->
+      val isAdded = addedModelIds.contains(modelId)
+      Box(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(8.dp))
+          .background(if (isAdded) neonGreen.copy(alpha = 0.08f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+          .border(1.dp, if (isAdded) neonGreen else MaterialTheme.colorScheme.outline.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+          .padding(horizontal = 12.dp, vertical = 8.dp),
+      ) {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.SpaceBetween,
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          Column(modifier = Modifier.weight(1f)) {
+            Text(
+              displayName,
+              style = MaterialTheme.typography.bodyMedium,
+              fontFamily = FontFamily.Monospace,
+              fontWeight = FontWeight.Bold,
+              color = if (isAdded) neonGreen else MaterialTheme.colorScheme.onSurface,
+            )
+            Text(modelId, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+          }
+          if (isAdded) {
+            OutlinedButton(onClick = { onModelRemoved(modelId) }, colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
+              Text("Remove", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelSmall)
+            }
+          } else {
+            Button(
+              onClick = { onModelAdded(modelId, displayName) },
+              colors = ButtonDefaults.buttonColors(containerColor = neonGreen, contentColor = MaterialTheme.colorScheme.surface),
+            ) {
+              Text("Add", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelSmall)
+            }
+          }
+        }
+      }
+    }
   }
 }
 

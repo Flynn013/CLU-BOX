@@ -38,6 +38,7 @@ enum class RuntimeType {
   @SerializedName("aicore") AICORE,
   @SerializedName("gemini_cloud") GEMINI_CLOUD,
   @SerializedName("manual_api") MANUAL_API,
+  @SerializedName("anthropic_cloud") ANTHROPIC_CLOUD,
 }
 
 enum class AICoreModelReleaseStage {
