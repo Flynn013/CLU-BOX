@@ -18,8 +18,13 @@ package com.google.ai.edge.gallery.data.providers
 
 import android.content.Context
 import android.util.Log
+import com.google.ai.edge.gallery.runtime.cloudproviders.ClaudeAuthManager
+import com.google.ai.edge.gallery.runtime.cloudproviders.ClaudeCredentialStore
 import com.google.ai.edge.gallery.runtime.geminicloud.GeminiApiKeyStore
+import com.google.ai.edge.gallery.runtime.geminicloud.GeminiAuthManager
+import com.google.ai.edge.gallery.runtime.geminicloud.GeminiTokenManager
 import com.google.ai.edge.gallery.runtime.manualapi.ManualApiKeyStore
+import kotlinx.coroutines.runBlocking
 
 /**
  * Singleton factory and registry for all CLU/BOX [LlmProvider] implementations.
@@ -89,22 +94,54 @@ object ProviderRegistry {
 
         val provider: LlmProvider? = when (providerId) {
             "gemini" -> {
-                val apiKey = GeminiApiKeyStore.getApiKey(context)
-                if (apiKey.isNullOrBlank()) {
-                    Log.w(TAG, "No Gemini API key stored — cannot create GeminiProvider")
-                    null
+                // OAuth bearer takes precedence over API key.
+                val hasOAuth = GeminiTokenManager.hasValidAccessToken(context)
+                    || GeminiTokenManager.getRefreshToken(context) != null
+                if (hasOAuth) {
+                    val token = runCatching {
+                        runBlocking { GeminiAuthManager(context).getValidAccessToken() }
+                    }.getOrNull()
+                    if (token != null) {
+                        Log.d(TAG, "Creating GeminiProvider with OAuth bearer token")
+                        GeminiProvider(apiKey = "", modelId = modelId, bearerToken = token)
+                    } else {
+                        Log.w(TAG, "Gemini OAuth token retrieval failed, falling back to API key")
+                        val apiKey = GeminiApiKeyStore.getApiKey(context)
+                        if (apiKey.isNullOrBlank()) { Log.w(TAG, "No Gemini API key stored"); null }
+                        else GeminiProvider(apiKey, modelId)
+                    }
                 } else {
-                    GeminiProvider(apiKey, modelId)
+                    val apiKey = GeminiApiKeyStore.getApiKey(context)
+                    if (apiKey.isNullOrBlank()) {
+                        Log.w(TAG, "No Gemini auth configured — cannot create GeminiProvider")
+                        null
+                    } else {
+                        GeminiProvider(apiKey, modelId)
+                    }
                 }
             }
 
             "anthropic" -> {
-                val apiKey = ManualApiKeyStore.getApiKey(context, "anthropic")
-                if (apiKey.isNullOrBlank()) {
-                    Log.w(TAG, "No Anthropic API key stored — cannot create AnthropicProvider")
-                    null
-                } else {
-                    AnthropicProvider(apiKey, modelId)
+                // OAuth bearer takes precedence over API key.
+                val oauthCreds = ClaudeCredentialStore.load(context)
+                when {
+                    oauthCreds != null && !oauthCreds.isExpired -> {
+                        Log.d(TAG, "Creating AnthropicProvider with OAuth bearer token")
+                        AnthropicProvider(apiKey = "", modelId = modelId, bearerToken = oauthCreds.accessToken)
+                    }
+                    oauthCreds != null && oauthCreds.isExpired -> {
+                        val refreshed = runCatching {
+                            runBlocking { ClaudeAuthManager(context).refreshIfNeeded() }
+                        }.getOrNull()
+                        if (refreshed != null) {
+                            Log.d(TAG, "Creating AnthropicProvider with refreshed OAuth token")
+                            AnthropicProvider(apiKey = "", modelId = modelId, bearerToken = refreshed.accessToken)
+                        } else {
+                            Log.w(TAG, "Claude token refresh failed, falling back to API key")
+                            fallbackToAnthropicApiKey(context, modelId)
+                        }
+                    }
+                    else -> fallbackToAnthropicApiKey(context, modelId)
                 }
             }
 
@@ -160,6 +197,16 @@ object ProviderRegistry {
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────
+
+    private fun fallbackToAnthropicApiKey(context: Context, modelId: String): LlmProvider? {
+        val apiKey = ManualApiKeyStore.getApiKey(context, "anthropic")
+        return if (apiKey.isNullOrBlank()) {
+            Log.w(TAG, "No Anthropic auth configured — cannot create AnthropicProvider")
+            null
+        } else {
+            AnthropicProvider(apiKey, modelId)
+        }
+    }
 
     private fun cacheKey(providerId: String, modelId: String) = "$providerId:$modelId"
 }

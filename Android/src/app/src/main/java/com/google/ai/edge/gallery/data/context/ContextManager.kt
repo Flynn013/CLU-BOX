@@ -90,6 +90,7 @@ class ContextManager(
          * the full model config object.
          */
         private val MODEL_CONTEXT_MAP: Map<String, Int> = mapOf(
+            "gemini-3.5-flash" to 1_048_576,
             "gemini-2.0-flash" to 1_048_576,
             "gemini-2.5-flash" to 1_048_576,
             "gemini-2.5-pro"   to 1_048_576,

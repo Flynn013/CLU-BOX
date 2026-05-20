@@ -15,6 +15,7 @@ import android.content.Intent
 import androidx.activity.result.ActivityResult
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.ai.edge.gallery.data.providers.ProviderRegistry
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -115,7 +116,7 @@ class GeminiAuthViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 authManager.handleAuthorizationResponse(response, exception)
-                // Optionally extract email from the id_token here.
+                ProviderRegistry.invalidateAll()
                 _uiState.update { GeminiAuthUiState.Authenticated(email = null) }
             } catch (ex: Exception) {
                 val msg = ex.message ?: "Unknown error during token exchange."
@@ -127,6 +128,7 @@ class GeminiAuthViewModel @Inject constructor(
     /** Sign out: wipe stored tokens and reset to [GeminiAuthUiState.Idle]. */
     fun signOut() {
         GeminiTokenManager.clearAll(authManagerFactory.applicationContext)
+        ProviderRegistry.invalidateAll()
         _uiState.update { GeminiAuthUiState.Idle }
     }
 }

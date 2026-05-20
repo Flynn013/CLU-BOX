@@ -49,7 +49,7 @@ import kotlinx.coroutines.launch
 
 private const val TAG = "GeminiCloudModelHelper"
 private const val API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
-private const val GEMINI_MODEL_FALLBACK = "gemini-2.0-flash"
+private const val GEMINI_MODEL_FALLBACK = "gemini-3.5-flash"
 private const val MAX_FUNCTION_CALL_ROUNDS = 10
 
 /**
@@ -323,22 +323,40 @@ object GeminiCloudModelHelper : LlmModelHelper {
   // Gemini REST API communication
   // ──────────────────────────────────────────────────────────────────────────
 
-  private fun callGeminiApi(model: Model, instance: GeminiCloudInstance): String {
-    // DYNAMIC FETCH: Grabs the key exactly when inference starts to prevent lockups.
-    val apiKey = GeminiApiKeyStore.getApiKey(instance.context)
-    if (apiKey.isNullOrBlank()) {
-      throw IllegalStateException("Gemini API key not configured. Please enter your API key.")
+  private suspend fun callGeminiApi(model: Model, instance: GeminiCloudInstance): String {
+    val ctx = instance.context
+
+    // Auth selection: OAuth bearer takes precedence over API key.
+    val oauthToken: String? = runCatching {
+      if (GeminiTokenManager.hasValidAccessToken(ctx) ||
+          GeminiTokenManager.getRefreshToken(ctx) != null) {
+        GeminiAuthManager(ctx).getValidAccessToken()
+      } else null
+    }.getOrNull()
+
+    val apiKey: String? = if (oauthToken == null) GeminiApiKeyStore.getApiKey(ctx) else null
+
+    if (oauthToken == null && apiKey.isNullOrBlank()) {
+      throw IllegalStateException(
+        "No Gemini auth configured. Add an API key or sign in with Google in SETTINGS → CLOUD."
+      )
     }
 
     val geminiModelId = model.name.takeIf { it.isNotBlank() && !it.contains('/') }
       ?: GEMINI_MODEL_FALLBACK
-    val url = URL("$API_BASE/$geminiModelId:generateContent?key=$apiKey")
-    val requestBody = buildRequestBody(instance)
 
+    val url = if (oauthToken != null) {
+      URL("$API_BASE/$geminiModelId:generateContent")
+    } else {
+      URL("$API_BASE/$geminiModelId:generateContent?key=$apiKey")
+    }
+
+    val requestBody = buildRequestBody(instance)
     val conn = url.openConnection() as HttpURLConnection
     try {
       conn.requestMethod = "POST"
       conn.setRequestProperty("Content-Type", "application/json")
+      if (oauthToken != null) conn.setRequestProperty("Authorization", "Bearer $oauthToken")
       conn.doOutput = true
       conn.connectTimeout = 30_000
       conn.readTimeout = 120_000

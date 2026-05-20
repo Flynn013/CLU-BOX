@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 Flynn013 / CLU/BOX
+ * Copyright 2026 Flynn013 / CLU-BOX
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -11,12 +11,14 @@
 package com.google.ai.edge.gallery.customtasks.agentchat
 
 import org.json.JSONObject
+import java.io.File
 
 /**
- * Runs BusyBox `diff -u` on two sandbox files and returns the unified diff.
+ * CluSkill: compare two files and return a unified diff.
  *
- * Exit codes: 0 = identical, 1 = differ (diff in stdout), 2+ = error.
- * Both paths are resolved relative to the `clu_file_box` sandbox root.
+ * Paths are resolved relative to the `clu_file_box` workspace root if they
+ * don't start with `/`.  Absolute paths outside the workspace are allowed so
+ * the agent can compare, e.g., a downloaded reference against an edited copy.
  */
 class FileDiffSkill(private val agentTools: AgentTools) : CluSkill {
 
@@ -24,49 +26,50 @@ class FileDiffSkill(private val agentTools: AgentTools) : CluSkill {
 
     override val description =
         "Compare two files and return a unified diff. " +
-        "Call after editing a file to verify the change is exactly what was intended."
+        "Relative paths resolve to the clu_file_box workspace root."
 
     override val jsonSchema = """
         {
-          "name": "fileDiff",
-          "description": "Compare two files and return a unified diff.",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "file1_path": {
-                "type": "string",
-                "description": "Path to the first file (original). Relative to the clu_file_box workspace."
-              },
-              "file2_path": {
-                "type": "string",
-                "description": "Path to the second file (modified). Relative to the clu_file_box workspace."
-              }
+          "type": "object",
+          "properties": {
+            "file1_path": {
+              "type": "string",
+              "description": "Path of the first (old) file."
             },
-            "required": ["file1_path", "file2_path"]
-          }
+            "file2_path": {
+              "type": "string",
+              "description": "Path of the second (new) file."
+            }
+          },
+          "required": ["file1_path", "file2_path"]
         }
     """.trimIndent()
 
     override val fewShotExample =
-        """fileDiff(file1_path="backup/main.py", file2_path="main.py")"""
+        """{"file1_path":"old_main.kt","file2_path":"main.kt"}"""
 
     override suspend fun execute(args: JSONObject): String {
-        val f1 = args.optString("file1_path", "").ifBlank { return "[Error: file1_path required]" }
-        val f2 = args.optString("file2_path", "").ifBlank { return "[Error: file2_path required]" }
+        val raw1 = args.optString("file1_path", "")
+        val raw2 = args.optString("file2_path", "")
+        if (raw1.isBlank()) return "[Error: file1_path required]"
+        if (raw2.isBlank()) return "[Error: file2_path required]"
 
-        val ctx = agentTools.context ?: return "[Error: context not available]"
-        val root = java.io.File(ctx.filesDir, "clu_file_box").canonicalPath
-        val abs1 = java.io.File(root, f1.trimStart('/')).canonicalPath
-        val abs2 = java.io.File(root, f2.trimStart('/')).canonicalPath
+        val abs1 = resolvePath(raw1)
+        val abs2 = resolvePath(raw2)
 
-        val result   = agentTools.shellExecute("diff -u \"$abs1\" \"$abs2\"")
-        val exitCode = result["exit_code"]?.toIntOrNull() ?: 0
-        val stdout   = result["stdout"] ?: ""
-
+        val result = agentTools.shellExecute("""diff -u "$abs1" "$abs2"""")
+        val exitCode = result["exit_code"]?.trim()?.toIntOrNull() ?: -1
         return when (exitCode) {
-            0    -> "Files are identical."
-            1    -> stdout.ifBlank { "[No diff output]" }
-            else -> "[diff error (exit $exitCode): ${stdout.take(300)}]"
+            0 -> "Files are identical."
+            1 -> result["stdout"]?.ifBlank { "[No diff output]" } ?: "[No diff output]"
+            else -> "[diff error (exit $exitCode): ${result["stdout"].orEmpty().take(300)} ${result["stderr"].orEmpty().take(200)}]"
         }
+    }
+
+    private fun resolvePath(path: String): String {
+        if (path.startsWith("/")) return path
+        val ctx = agentTools.context ?: return path
+        val root = File(ctx.filesDir, "clu_file_box")
+        return File(root, path).canonicalPath
     }
 }
