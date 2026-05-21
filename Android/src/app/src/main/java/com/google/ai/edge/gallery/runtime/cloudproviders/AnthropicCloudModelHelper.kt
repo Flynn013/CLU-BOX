@@ -331,7 +331,16 @@ object AnthropicCloudModelHelper : LlmModelHelper {
       val paramValues = mutableListOf<Any?>(toolSet)
       for (param in fn.valueParameters) {
         val paramName = param.name ?: ""
-        paramValues.add(if (args.has(paramName)) args.optString(paramName) else "")
+        val strVal = if (args.has(paramName)) args.optString(paramName) else ""
+        val coerced: Any? = when (param.type.classifier) {
+          Int::class     -> strVal.toIntOrNull() ?: 0
+          Long::class    -> strVal.toLongOrNull() ?: 0L
+          Double::class  -> strVal.toDoubleOrNull() ?: 0.0
+          Float::class   -> strVal.toFloatOrNull() ?: 0f
+          Boolean::class -> strVal.lowercase() == "true"
+          else           -> strVal
+        }
+        paramValues.add(coerced)
       }
       val result = fn.call(*paramValues.toTypedArray())
       when (result) {

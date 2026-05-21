@@ -46,6 +46,7 @@ import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
@@ -92,6 +93,7 @@ import com.google.ai.edge.gallery.ui.osmodules.BrainBoxModuleScreen
 import com.google.ai.edge.gallery.ui.osmodules.LnkBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.MstrCtrlScreen
 import com.google.ai.edge.gallery.ui.osmodules.SkillBoxScreen
+import com.google.ai.edge.gallery.ui.osmodules.FileBoxScreen
 import com.google.ai.edge.gallery.ui.osmodules.SystemSettingsScreen
 import com.google.ai.edge.gallery.data.mcp.McpConnectionManager
 import com.google.ai.edge.gallery.ui.theme.absoluteBlack
@@ -104,6 +106,7 @@ import kotlinx.coroutines.launch
 private enum class OsModule(val label: String, val icon: ImageVector) {
   CHAT_BOX("CHAT_BOX", Icons.Outlined.Chat),
   BRAIN_BOX("BRAIN_BOX", Icons.Outlined.Hub),
+  FILE_BOX("FILE_BOX", Icons.Outlined.FolderOpen),
   SKILL_BOX("SKILL_BOX", Icons.Outlined.Psychology),
   MODELS("MODELS", Icons.Outlined.DashboardCustomize),
   LNK_BOX("MCP EXTENSIONS", Icons.Outlined.Link),
@@ -277,6 +280,7 @@ fun GalleryApp(
             ) { innerPadding ->
               Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
                 when (activeModule) {
+                  OsModule.FILE_BOX -> FileBoxScreen(context = context)
                   OsModule.BRAIN_BOX -> BrainBoxModuleScreen(
                     dao = db.brainBoxDao(),
                     vectorEngine = remember(context) { com.google.ai.edge.gallery.data.brainbox.VectorEngine(context) },

@@ -23,9 +23,10 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import okhttp3.FormBody
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -39,10 +40,9 @@ import android.util.Base64 as AndroidBase64
  * Flow:
  *  1. Generate PKCE verifier + challenge.
  *  2. Open browser to the Anthropic consent screen.
- *  3. Anthropic redirects to `https://console.anthropic.com/oauth/callback` which displays
- *     an authorisation code. The user copies and pastes it into the dialog shown by
- *     [ClaudeConnectButton].
- *  4. [exchangeCodeForTokens] POST to the token endpoint.
+ *  3. Anthropic redirects to `REDIRECT_URI` which displays an authorisation code.
+ *     The user copies and pastes it into the dialog shown by [ClaudeConnectButton].
+ *  4. [exchangeCodeForTokens] POST to the token endpoint (JSON body, not form-encoded).
  *  5. Credentials are persisted via [ClaudeCredentialStore].
  *
  * Uses Anthropic's public CLI client ID — no user-side OAuth setup is required.
@@ -56,13 +56,14 @@ class ClaudeAuthManager(private val context: Context) {
         private const val TOKEN_ENDPOINT = "https://console.anthropic.com/v1/oauth/token"
 
         // Anthropic public installed-app client (same as Claude CLI — not a secret).
-        private const val CLIENT_ID      = "9d1c250a-e61b-48f7-9f87-25f0b6b9f9ea"
-        private const val REDIRECT_URI   = "https://console.anthropic.com/oauth/callback"
+        private const val CLIENT_ID      = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+        private const val REDIRECT_URI   = "https://console.anthropic.com/oauth/code/callback"
 
-        // Anthropic public OAuth scopes (matches Claude CLI ≥ 1.x and console.anthropic.com)
+        // Scopes matching Claude CLI / console.anthropic.com
         private val OAUTH_SCOPES = listOf("org:create_api_key", "user:profile", "user:inference")
 
-        private const val OAUTH_TIMEOUT_MS = 180_000L
+        // 10-minute window gives the user plenty of time to copy the code from the browser
+        private const val OAUTH_TIMEOUT_MS = 600_000L
         private const val BASE64_URL_FLAGS =
             AndroidBase64.URL_SAFE or AndroidBase64.NO_WRAP or AndroidBase64.NO_PADDING
     }
@@ -77,6 +78,7 @@ class ClaudeAuthManager(private val context: Context) {
 
     @Volatile private var pendingCodeEntry: CompletableDeferred<String>? = null
     @Volatile private var activePkceVerifier: String? = null
+    @Volatile private var activeState: String? = null
 
     // ── Public API ─────────────────────────────────────────────────────────────
 
@@ -95,6 +97,7 @@ class ClaudeAuthManager(private val context: Context) {
         pendingCodeEntry?.completeExceptionally(RuntimeException("Sign-in cancelled by user"))
         pendingCodeEntry = null
         activePkceVerifier = null
+        activeState = null
     }
 
     /**
@@ -105,26 +108,34 @@ class ClaudeAuthManager(private val context: Context) {
         val pkce = generatePkce()
         activePkceVerifier = pkce.verifier
 
+        val state = UUID.randomUUID().toString().replace("-", "")
+        activeState = state
+
         val deferred = CompletableDeferred<String>()
         pendingCodeEntry = deferred
 
-        val authUrl = buildAuthUrl(pkce, UUID.randomUUID().toString().replace("-", ""))
+        val authUrl = buildAuthUrl(pkce, state)
         launchBrowser(authUrl)
 
         Log.i(TAG, "Browser opened for Anthropic OAuth consent")
 
-        val code: String? = try {
+        val rawCode: String? = try {
             withTimeoutOrNull(OAUTH_TIMEOUT_MS) { deferred.await() }
         } finally {
             pendingCodeEntry = null
             activePkceVerifier = null
+            activeState = null
         }
 
-        if (code == null) throw RuntimeException("OAuth timed out — please try again.")
+        if (rawCode == null) throw RuntimeException("OAuth timed out — please try again.")
+
+        // Anthropic may append the state after '#' in the code string shown to the user
+        val parts = rawCode.split("#", limit = 2)
+        val code = parts[0].trim()
 
         Log.i(TAG, "Received authorisation code, exchanging for tokens")
 
-        val tokens = withContext(Dispatchers.IO) { exchangeCodeForTokens(code, pkce) }
+        val tokens = withContext(Dispatchers.IO) { exchangeCodeForTokens(code, pkce, state) }
         ClaudeCredentialStore.save(context, tokens)
         Log.i(TAG, "Anthropic credentials saved")
         tokens
@@ -184,6 +195,7 @@ class ClaudeAuthManager(private val context: Context) {
             "code_challenge"        to pkce.challenge,
             "code_challenge_method" to "S256",
             "state"                 to state,
+            "code"                  to "true",
         )
         val query = params.entries.joinToString("&") { (k, v) ->
             "${Uri.encode(k)}=${Uri.encode(v)}"
@@ -208,15 +220,24 @@ class ClaudeAuthManager(private val context: Context) {
     private fun exchangeCodeForTokens(
         code: String,
         pkce: PkceChallenge,
+        state: String,
     ): ClaudeCredentialStore.Credentials {
-        val body = FormBody.Builder()
-            .add("grant_type",    "authorization_code")
-            .add("code",          code)
-            .add("redirect_uri",  REDIRECT_URI)
-            .add("client_id",     CLIENT_ID)
-            .add("code_verifier", pkce.verifier)
+        val jsonBody = JSONObject().apply {
+            put("grant_type",    "authorization_code")
+            put("code",          code)
+            put("redirect_uri",  REDIRECT_URI)
+            put("client_id",     CLIENT_ID)
+            put("code_verifier", pkce.verifier)
+            if (state.isNotEmpty()) put("state", state)
+        }.toString()
+
+        val body = jsonBody.toRequestBody("application/json".toMediaType())
+        val request = Request.Builder()
+            .url(TOKEN_ENDPOINT)
+            .post(body)
+            .header("Content-Type", "application/json")
             .build()
-        val request = Request.Builder().url(TOKEN_ENDPOINT).post(body).build()
+
         val response = httpClient.newCall(request).execute()
         val responseBody = response.body?.string()
             ?: throw RuntimeException("Empty token response from Anthropic")
@@ -239,12 +260,18 @@ class ClaudeAuthManager(private val context: Context) {
     ): ClaudeCredentialStore.Credentials? {
         if (stored.refreshToken.isBlank()) return null
 
-        val body = FormBody.Builder()
-            .add("grant_type",    "refresh_token")
-            .add("refresh_token", stored.refreshToken)
-            .add("client_id",     CLIENT_ID)
+        val jsonBody = JSONObject().apply {
+            put("grant_type",    "refresh_token")
+            put("refresh_token", stored.refreshToken)
+            put("client_id",     CLIENT_ID)
+        }.toString()
+
+        val body = jsonBody.toRequestBody("application/json".toMediaType())
+        val request = Request.Builder()
+            .url(TOKEN_ENDPOINT)
+            .post(body)
+            .header("Content-Type", "application/json")
             .build()
-        val request = Request.Builder().url(TOKEN_ENDPOINT).post(body).build()
 
         return try {
             val response = httpClient.newCall(request).execute()
