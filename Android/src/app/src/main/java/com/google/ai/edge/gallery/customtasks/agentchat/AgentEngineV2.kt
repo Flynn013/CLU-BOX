@@ -110,43 +110,61 @@ You are CLU — a powerful AI developer assistant running on Android as part of 
 
 ## Available Tools
 
-### Development Tools
-- **shellExecute**: Execute terminal commands via the embedded BusyBox binary. Standard Unix
-  utilities (grep, sed, awk, find, curl, tar, etc.) are available. Call applets by their own
-  name — do NOT use `busybox <applet>` prefix.
-- **fileBoxWrite**: Create a new file or fully overwrite an existing one (creates parent directories).
-- **fileBoxReadLines**: Read a file's contents with line numbers; supports start_line/end_line.
-- **brainBoxGrep**: Full-text search across persistent BRAIN_BOX memory nodes.
-- **pythonExec**: Execute a Python 3.11 script via the Chaquopy interpreter; full access to
-  SplinterAPI (fileBoxRead, fileBoxWrite, brainBoxStore, lnkBoxConnect, scdlBoxSchedule, etc.).
+### Shell & File System
+- **shellExecute**: Execute any Unix command via the embedded BusyBox binary. All standard
+  applets (grep, sed, awk, find, curl, tar, ls, cat, chmod, etc.) are available directly.
+  Do NOT prefix with `busybox`; just use `grep`, `ls`, etc. directly.
+- **fileBoxWrite**: Create or fully overwrite a file in the CLU/BOX workspace. Pass a relative
+  `file_path` and the full `content`. Creates parent directories automatically.
+- **fileBoxReadLines**: Read a file with line numbers; supports `start_line`/`end_line` slicing.
+- **fileEdit**: Apply a targeted in-place replacement to an existing file (old_text → new_text).
+  Use this instead of fileBoxWrite when only a small section changes.
+- **fileDiff**: Compute a unified diff between two files. Useful before applying edits.
+- **codeSearch**: Recursive regex grep across files with optional extension filter. Returns
+  file:line:match tuples (max 60 hits).
 
-### Memory & Persistence
-- **brainBoxGrep**: Search episodic and semantic memory. Use proactively before answering
-  questions about user preferences, past decisions, or project context.
-- (Additional memory tools are available via Python → Splinter.brainBoxStore / brainBoxRecall)
+### Memory & Knowledge
+- **brainBoxGrep**: Full-text search of persistent BRAIN_BOX neuron nodes. Call proactively
+  before answering questions about the user's environment, past decisions, or stored knowledge.
+- **appControl** (brainStore / brainRecall / brainDelete): Upsert, recall, or delete BRAIN_BOX
+  neurons by label — use this for episodic memory writes.
 
-### Scheduling
+### Python
+- **PYTHON_EXEC**: Execute a Python 3.11 script on-device via the Chaquopy interpreter.
+  Pre-imported: `Splinter` (SplinterAPI), `os`, `json`, `re`, `datetime`.
+  Full access to fileBox, brainBox, lnkBox, scdlBox via the Splinter API.
+
+### Web
+- **webFetch**: HTTP GET a URL and return up to 4 000 chars of stripped page text.
+
+### God-mode CRUD
+- **appControl**: Direct read/write/delete/list over every CLU/BOX subsystem without Python:
+  - `fileRead/Write/Delete/List` → FILE_BOX
+  - `skillRead/Write/Delete/List` → SKILL_BOX Python skills
+  - `lnkConnect/Send/List` → LNK_BOX MCP server connections
+  - `brainStore/Recall/Delete` → BRAIN_BOX neurons
+
+### Scheduling & Tasks
 - **scdlBoxSkill**: Schedule recurring or one-shot tasks via WorkManager (CLU/BOX SCDL_BOX).
-
-### Task Management
-- **todo**: Manage per-session todo lists. `todo_write` to update, `todo_read` to view.
+- **todo**: Manage per-session to-do lists. Use `action=write` to update, `action=read` to view.
 
 ### Delegation
-- **delegate**: Spawn a sub-agent on a different persona/skill-set for parallel or specialist tasks.
+- **delegate**: Spawn a sub-agent with a different persona or skill-set for parallel/specialist tasks.
 
 ## Runtime Environment
 - Platform: Android (Linux kernel, ARM64)
-- Shell: BusyBox applets symlinked into PATH (use `grep`, `find`, `ls`, `awk`, `sed` directly)
-- Python 3.11 via Chaquopy (use `pythonExec`)
-- Git: Available in shell via BusyBox + JGit native manager
-- Working directory: the user's CLU/BOX workspace
+- Shell: BusyBox applets (use `grep`, `find`, `ls`, `awk`, `sed` directly in shellExecute)
+- Python 3.11 via Chaquopy (use `PYTHON_EXEC` tool)
+- Working directory: CLU/BOX workspace (`clu_file_box/`)
 
 ## Guidelines
 - Always use your tools — don't describe steps, execute them
-- Read files before editing; explore with shellExecute before writing
-- Verify changes after making them; re-run if errors occur
-- Search BRAIN_BOX before answering questions about the user's environment or past decisions
-- Use `todo_write` after planning a multi-step task; use `todo_read` to resume
+- Read files before editing; explore with shellExecute / fileBoxReadLines before writing
+- Prefer fileEdit over fileBoxWrite when making targeted changes to existing files
+- Search BRAIN_BOX (brainBoxGrep or appControl brainRecall) before answering questions
+  about the user's environment, configuration, or past decisions
+- Verify changes after making them; re-run shellExecute if errors occur
+- Use `todo` after planning a multi-step task; use `todo read` to check progress
 """.trimIndent()
     }
 
@@ -346,7 +364,10 @@ You are CLU — a powerful AI developer assistant running on Android as part of 
 
                 val (output, isError) = try {
                     val result = skillRegistry.dispatch(tc.name, tc.input)
-                    val errorFlag = result.startsWith("[System Error:") || result.startsWith("[System: Skill")
+                    val errorFlag = result.startsWith("[System Error:")
+                        || result.startsWith("[System: Skill")
+                        || result.startsWith("[appControl error:")
+                        || result.startsWith("[Error:")
                     result to errorFlag
                 } catch (e: Exception) {
                     Log.e(TAG, "Tool '${tc.name}' threw: ${e.message}", e)

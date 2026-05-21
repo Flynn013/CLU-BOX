@@ -715,28 +715,28 @@ private fun updateProgressPanel(viewModel: LlmChatViewModel, model: Model, agent
     )
   if (
     lastProgressPanelMessage != null &&
-            lastProgressPanelMessage is ChatMessageCollapsableProgressPanel
+            lastProgressPanelMessage is ChatMessageCollapsableProgressPanel &&
+            lastProgressPanelMessage.inProgress
   ) {
-    if (lastProgressPanelMessage.title.startsWith("Loading")) {
+    // Finalize any in-progress panel by replacing the active verb with its past tense.
+    val title = lastProgressPanelMessage.title
+    val doneTitle = when {
+      title.startsWith("Loading")    -> title.replaceFirst("Loading", "Loaded")
+      title.startsWith("Calling")    -> title.replaceFirst("Calling", "Called")
+      title.startsWith("Executing")  -> title.replaceFirst("Executing", "Executed")
+      title.startsWith("Writing")    -> title.replaceFirst("Writing", "Written")
+      title.startsWith("Reading")    -> title.replaceFirst("Reading", "Read")
+      title.startsWith("Searching")  -> title.replaceFirst("Searching", "Searched")
+      title.startsWith("AppControl") -> title.replaceFirst("AppControl", "Done")
+      title.startsWith("appControl") -> title.replaceFirst("appControl", "Done")
+      title.startsWith("Fetching")   -> title.replaceFirst("Fetching", "Fetched")
+      title.startsWith("Diff")       -> title.replaceFirst("Diff", "Diffed")
+      title.startsWith("PYTHON_EXEC")-> "Python executed"
+      else                           -> title // already final or unknown pattern
+    }
+    if (doneTitle != title) {
       agentTools.sendAgentAction(
-        SkillProgressAgentAction(
-          label = lastProgressPanelMessage.title.replace("Loading", "Loaded"),
-          inProgress = false,
-        )
-      )
-    } else if (lastProgressPanelMessage.title.startsWith("Calling")) {
-      agentTools.sendAgentAction(
-        SkillProgressAgentAction(
-          label = lastProgressPanelMessage.title.replace("Calling", "Called"),
-          inProgress = false,
-        )
-      )
-    } else if (lastProgressPanelMessage.title.startsWith("Executing")) {
-      agentTools.sendAgentAction(
-        SkillProgressAgentAction(
-          label = lastProgressPanelMessage.title.replace("Executing", "Executed"),
-          inProgress = false,
-        )
+        SkillProgressAgentAction(label = doneTitle, inProgress = false)
       )
     }
   }
