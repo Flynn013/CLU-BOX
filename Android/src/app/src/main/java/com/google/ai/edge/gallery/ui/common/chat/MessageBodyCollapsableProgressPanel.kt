@@ -54,6 +54,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -81,7 +82,7 @@ fun MessageBodyCollapsableProgressPanel(message: ChatMessageCollapsableProgressP
   // it while running, that choice is preserved until inProgress flips again.
   // Using `rememberSaveable` keyed on `inProgress` resets only when the task
   // starts/stops — not on every item-added recomposition.
-  var isExpanded by remember(message.inProgress) { mutableStateOf(message.inProgress) }
+  var isExpanded by rememberSaveable { mutableStateOf(true) }
   var showLogsViewer by remember { mutableStateOf(false) }
 
   val displayTitle = when {

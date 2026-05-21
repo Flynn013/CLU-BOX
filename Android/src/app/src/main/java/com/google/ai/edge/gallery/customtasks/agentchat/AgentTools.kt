@@ -151,6 +151,7 @@ class AgentTools : ToolSet {
     if (file_path.isBlank()) return mapOf("lines" to "Error: file_path argument is required")
     val ctx = context ?: return mapOf("lines" to "Error: context not available")
     Log.d(TAG, "fileBoxReadLines: $file_path [$start_line..$end_line]")
+    sendAgentAction(SkillProgressAgentAction(label = "Reading: $file_path", inProgress = true))
     return try {
       val safeRelative = file_path.trimStart('/')
       val root = File(ctx.filesDir, "clu_file_box")
@@ -166,6 +167,7 @@ class AgentTools : ToolSet {
       val slice = allLines.drop(startIdx).take(lineCount)
       val result = slice.joinToString("\n")
       val capped = capOutputWithSpill(result, "fileBoxReadLines")
+      sendAgentAction(SkillProgressAgentAction(label = "Read: $file_path (${allLines.size} lines)", inProgress = false))
       mapOf("lines" to capped, "total_lines" to allLines.size.toString())
     } catch (e: Exception) {
       Log.e(TAG, "fileBoxReadLines failed", e)
@@ -179,6 +181,7 @@ class AgentTools : ToolSet {
     if (keyword.isBlank()) return mapOf("matches" to "Error: keyword argument is required")
     val ctx = context ?: return mapOf("matches" to "Error: context not available")
     Log.d(TAG, "brainBoxGrep: $file_path keyword='$keyword'")
+    sendAgentAction(SkillProgressAgentAction(label = "Searching: $keyword in $file_path", inProgress = true))
     return try {
       val safeRelative = file_path.trimStart('/')
       val root = File(ctx.filesDir, "clu_file_box")
@@ -200,6 +203,7 @@ class AgentTools : ToolSet {
         if (isEmpty()) append("(no matches)")
       }
       val capped = capOutputWithSpill(result, "brainBoxGrep")
+      sendAgentAction(SkillProgressAgentAction(label = "Searched: $keyword in $file_path", inProgress = false))
       mapOf("matches" to capped)
     } catch (e: Exception) {
       Log.e(TAG, "brainBoxGrep failed", e)

@@ -25,11 +25,12 @@ Tools: Python 3.11 (PYTHON_EXEC), BusyBox sh (shellExecute), FileBox (fileBoxWri
 
 PLAN: For multi-step tasks, state a one-sentence plan, then execute step by step.
 MEMORY: Call memorySearch FIRST before answering questions about the user, their projects, or past decisions.
-TOOL: One tool call per response. Wait for the result before the next action.
+TOOL: One tool call per response. The system automatically returns the result — do not wait for user input between tool calls.
 FILES: Always use fileBoxWrite — never shell echo, heredoc, or cat redirection.
 PYTHON: Use PYTHON_EXEC for logic/math/data. Use shellExecute only for OS/binary commands.
 CONTINUE: After every tool result, if the task is NOT complete, immediately state the next step and call the next tool. Do not ask permission to continue.
 CONTEXT: Track what you have done this session. Avoid calling the same tool twice with the same inputs.
 CODE: For code edits prefer fileEdit over full fileBoxWrite rewrites. Before editing: codeSearch or fileGrep to find existing code. After editing: fileDiff to verify the change. Use PYTHON_EXEC for Python syntax checks; shellExecute 'kotlinc -script' for Kotlin snippets.
+DONE: When all steps of the task are complete, output "✓ Done:" followed by a concise one-sentence summary of what was accomplished.
 """.trimIndent()
 }

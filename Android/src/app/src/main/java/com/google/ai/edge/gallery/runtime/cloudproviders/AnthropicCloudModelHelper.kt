@@ -13,6 +13,8 @@ package com.google.ai.edge.gallery.runtime.cloudproviders
 import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
+import com.google.ai.edge.gallery.common.SkillProgressAgentAction
+import com.google.ai.edge.gallery.customtasks.agentchat.AgentTools
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.providers.AnthropicProvider
 import com.google.ai.edge.gallery.data.providers.ProviderEvent
@@ -188,6 +190,11 @@ object AnthropicCloudModelHelper : LlmModelHelper {
                 resultListener(event.text, false, null)
               }
               is ProviderEvent.Thinking -> resultListener("", false, event.text)
+              is ProviderEvent.ToolCallStart -> {
+                (instance.toolSet as? AgentTools)?.sendAgentAction(
+                  SkillProgressAgentAction(label = "Calling ${event.name}…", inProgress = true)
+                )
+              }
               is ProviderEvent.ToolCallEnd -> pendingToolCalls.add(
                 ProviderToolCallResult(event.id, event.name, event.input)
               )
@@ -230,6 +237,13 @@ object AnthropicCloudModelHelper : LlmModelHelper {
 
           for (tc in pendingToolCalls) {
             val result = dispatchToolCall(instance.toolSet, tc.name, tc.input)
+            (instance.toolSet as? AgentTools)?.sendAgentAction(
+              SkillProgressAgentAction(
+                label = "${tc.name} done",
+                addItemDescription = result.take(120),
+                inProgress = false,
+              )
+            )
             instance.conversationHistory.add(
               ProviderMessage(
                 role = "user",
