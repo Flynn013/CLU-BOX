@@ -663,18 +663,28 @@ private fun CloudTab(context: Context) {
         onValueChange = { geminiKeyInput = it },
         onSave = {
           GeminiApiKeyStore.setApiKey(context, geminiKeyInput.trim())
-          com.google.ai.edge.gallery.data.providers.ProviderRegistry.invalidate("gemini", "*")
+          com.google.ai.edge.gallery.data.providers.ProviderRegistry.invalidateAll()
           focusManager.clearFocus()
         },
         onClear = {
           GeminiApiKeyStore.clearApiKey(context)
           geminiKeyInput = ""
-          com.google.ai.edge.gallery.data.providers.ProviderRegistry.invalidate("gemini", "*")
+          com.google.ai.edge.gallery.data.providers.ProviderRegistry.invalidateAll()
         },
       )
 
-      // OAuth connect button
-      GeminiConnectButton()
+      // OAuth connect button — disabled when CLIENT_ID is the placeholder
+      if (geminiPlaceholder) {
+        OutlinedButton(
+          onClick = {},
+          enabled = false,
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          Text("Connect Gemini — Client ID required", fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+        }
+      } else {
+        GeminiConnectButton()
+      }
     }
 
     // ── CLAUDE section ───────────────────────────────────────────────
@@ -704,13 +714,13 @@ private fun CloudTab(context: Context) {
         onValueChange = { claudeKeyInput = it },
         onSave = {
           ManualApiKeyStore.setApiKey(context, "anthropic", claudeKeyInput.trim())
-          com.google.ai.edge.gallery.data.providers.ProviderRegistry.invalidate("anthropic", "*")
+          com.google.ai.edge.gallery.data.providers.ProviderRegistry.invalidateAll()
           focusManager.clearFocus()
         },
         onClear = {
           ManualApiKeyStore.clearApiKey(context, "anthropic")
           claudeKeyInput = ""
-          com.google.ai.edge.gallery.data.providers.ProviderRegistry.invalidate("anthropic", "*")
+          com.google.ai.edge.gallery.data.providers.ProviderRegistry.invalidateAll()
         },
       )
 

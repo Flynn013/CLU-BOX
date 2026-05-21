@@ -59,7 +59,8 @@ class ClaudeAuthManager(private val context: Context) {
         private const val CLIENT_ID      = "9d1c250a-e61b-48f7-9f87-25f0b6b9f9ea"
         private const val REDIRECT_URI   = "https://console.anthropic.com/oauth/callback"
 
-        private val OAUTH_SCOPES = listOf("read", "write")
+        // Anthropic public OAuth scopes (matches Claude CLI ≥ 1.x and console.anthropic.com)
+        private val OAUTH_SCOPES = listOf("org:create_api_key", "user:profile", "user:inference")
 
         private const val OAUTH_TIMEOUT_MS = 180_000L
         private const val BASE64_URL_FLAGS =
