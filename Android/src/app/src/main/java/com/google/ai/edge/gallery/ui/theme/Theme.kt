@@ -146,7 +146,7 @@ val LocalCustomColors = staticCompositionLocalOf { CustomColors() }
 
 val lightCustomColors =
   CustomColors(
-    appTitleGradientColors = listOf(neonGreen, Color(0xFFCCCCCC)),
+    appTitleGradientColors = listOf(neonGreen, cyberAcmeCyan, marathonBlue),
     tabHeaderBgColor = absoluteBlack,
     taskCardBgColor = terminalMidGrey,
     taskBgColors =
@@ -159,28 +159,29 @@ val lightCustomColors =
         listOf(terminalMidGrey, absoluteBlack),
       ),
     taskIconColors =
-      listOf(neonGreen, neonGreen, neonGreen, neonGreen),
+      listOf(neonGreen, cyberAcmeCyan, neonGreen, marathonBlue),
     taskIconShapeBgColor = terminalDarkGrey,
     homeBottomGradient = listOf(Color(0x00000000), absoluteBlack),
     agentBubbleBgColor = terminalDarkGrey,
-    userBubbleBgColor = terminalMidGrey,
-    linkColor = neonGreen,
+    userBubbleBgColor = Color(0xFF0A0A1A),
+    linkColor = cyberAcmeCyan,
     successColor = neonGreen,
     recordButtonBgColor = neonGreen,
     waveFormBgColor = terminalOutline,
     modelInfoIconColor = brutalistGrey,
-    warningContainerColor = terminalMidGrey,
-    warningTextColor = neonGreen,
+    warningContainerColor = Color(0xFF1A0D00),
+    warningTextColor = marathonOrange,
     errorContainerColor = terminalErrorContainer,
     errorTextColor = terminalError,
-    newFeatureContainerColor = terminalLightGrey,
+    newFeatureContainerColor = Color(0xFF0A1A0A),
     newFeatureTextColor = neonGreen,
-    bgStarColor = Color(0x14FFFFFF),
+    bgStarColor = Color(0x14C8FF00),
     promoBannerBgBrush =
       Brush.linearGradient(
         colorStops =
           arrayOf(
-            0.0f to Color(0xFF111111),
+            0.0f to Color(0xFF080814),
+            0.5f to Color(0xFF0A0A0A),
             1.0f to absoluteBlack,
           ),
         start = Offset(0f, 0f),
@@ -190,7 +191,7 @@ val lightCustomColors =
       Brush.linearGradient(
         colorStops =
           arrayOf(
-            0.0f to Color(0xFF1E1E1E),
+            0.0f to Color(0xFF141428),
             1.0f to absoluteBlack,
           ),
         start = Offset(0f, 1f),

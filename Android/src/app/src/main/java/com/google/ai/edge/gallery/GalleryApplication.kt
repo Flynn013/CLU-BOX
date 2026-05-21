@@ -19,6 +19,7 @@ package com.google.ai.edge.gallery
 import android.app.Application
 import android.util.Log
 import com.google.ai.edge.gallery.data.DataStoreRepository
+import com.google.ai.edge.gallery.data.brainbox.BrainBoxSeeder
 import com.google.ai.edge.gallery.data.busybox.BusyBoxBridge
 import com.google.ai.edge.gallery.data.python.PythonBridge
 import com.google.ai.edge.gallery.ui.theme.ThemeSettings
@@ -69,6 +70,17 @@ class GalleryApplication : Application() {
     // so the app bootloader doesn't choke out on cold start.
     CoroutineScope(Dispatchers.IO).launch {
       ThemeSettings.themeOverride.value = dataStoreRepository.readTheme()
+    }
+
+    // ── BrainBox — seed core reference neurons on first run ──
+    // BrainBoxSeeder is idempotent: it only inserts when fewer than
+    // MIN_CORE_COUNT core neurons exist, preserving all user data.
+    CoroutineScope(Dispatchers.IO).launch {
+      try {
+        BrainBoxSeeder.seed(this@GalleryApplication)
+      } catch (e: Exception) {
+        Log.e(TAG, "BrainBox seeding error", e)
+      }
     }
   }
 }
