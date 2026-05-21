@@ -176,24 +176,42 @@ object BusyBoxBridge {
     timeoutMs: Long = DEFAULT_TIMEOUT_MS,
   ): Result = withContext(Dispatchers.IO) {
     val bin = ensureInstalled(context)
-      ?: return@withContext Result(
-        exitCode = 127,
-        stdout = "",
-        stderr = "[BusyBoxBridge] busybox binary not installed",
-        durationMs = 0,
-      )
 
-    val cmd = buildList<String> {
-      add(bin)
-      add(applet)
-      addAll(args)
+    // BusyBox binary is optional — fall back to Android's always-present
+    // /system/bin/sh when the asset isn't bundled in the APK.
+    val cmd: List<String>
+    val pathPrefix: String
+    if (bin != null) {
+      cmd = buildList { add(bin); add(applet); addAll(args) }
+      pathPrefix = "${File(bin).parent}:"
+    } else {
+      val sysShell = listOf("/system/bin/sh", "/bin/sh").firstOrNull { File(it).exists() }
+        ?: return@withContext Result(
+          exitCode = 127,
+          stdout = "",
+          stderr = "[BusyBoxBridge] BusyBox not installed and no system shell found. " +
+            "Add busybox-arm64-v8a to app/src/main/assets/busybox/ for full capability.",
+          durationMs = 0,
+        )
+      Log.w(TAG, "exec: BusyBox not installed — falling back to $sysShell")
+      // Route through the system shell: applet=="sh" runs directly, other
+      // applets are re-quoted and passed as a -c argument so the system PATH
+      // (which has toybox equivalents) resolves them.
+      cmd = if (applet == "sh") {
+        listOf(sysShell) + args
+      } else {
+        val quotedArgs = (listOf(applet) + args).joinToString(" ") { a ->
+          if (a.contains(' ') || a.contains('"')) "'$a'" else a
+        }
+        listOf(sysShell, "-c", quotedArgs)
+      }
+      pathPrefix = ""
     }
 
     val pb = ProcessBuilder(cmd).apply {
       directory(workDir ?: defaultWorkDir(context))
-      // Merge environment.
       val merged = environment()
-      merged["PATH"] = "${File(bin).parent}:${merged["PATH"] ?: "/system/bin:/system/xbin"}"
+      if (pathPrefix.isNotEmpty()) merged["PATH"] = "$pathPrefix${merged["PATH"] ?: "/system/bin:/system/xbin"}"
       merged["HOME"] = (workDir ?: defaultWorkDir(context)).absolutePath
       env.forEach { (k, v) -> merged[k] = v }
       redirectErrorStream(false)
@@ -203,7 +221,6 @@ object BusyBoxBridge {
     return@withContext try {
       val proc = pb.start()
       withTimeout(timeoutMs) {
-        // Drain the streams concurrently to avoid pipe-buffer deadlocks.
         val outBytes = proc.inputStream.use { it.readBytes() }
         val errBytes = proc.errorStream.use { it.readBytes() }
         val code = proc.waitFor()

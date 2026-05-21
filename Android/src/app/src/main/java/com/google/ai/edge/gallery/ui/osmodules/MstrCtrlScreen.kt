@@ -89,12 +89,17 @@ fun MstrCtrlScreen() {
     val installed = BusyBoxBridge.ensureInstalled(context)
     if (installed != null) {
       lines += TermLine.system("[CLU/BOX] BusyBox armed at $installed")
-      val uname = BusyBoxBridge.exec(context, "uname", listOf("-a"))
-      lines += TermLine.system(uname.stdout.trim().ifBlank { "(uname unavailable)" })
-      ready = true
     } else {
-      lines += TermLine.error("[CLU/BOX] busybox asset missing — drop binary into app/src/main/assets/busybox/")
+      lines += TermLine.system("[CLU/BOX] BusyBox asset not bundled — using /system/bin/sh fallback")
+      lines += TermLine.system("         (add busybox-arm64-v8a to assets/busybox/ for full capability)")
     }
+    val uname = BusyBoxBridge.shell(context, "uname -a")
+    if (uname.exitCode == 0) {
+      lines += TermLine.system(uname.stdout.trim())
+    } else {
+      lines += TermLine.stderr(uname.stderr.trim().ifBlank { "(uname unavailable)" })
+    }
+    ready = true
   }
 
   LaunchedEffect(lines.size) {
@@ -134,8 +139,11 @@ fun MstrCtrlScreen() {
       IconButton(onClick = {
         lines.clear()
         scope.launch {
-          BusyBoxBridge.ensureInstalled(context)
-          lines += TermLine.system("[CLU/BOX] terminal cleared")
+          val p = BusyBoxBridge.ensureInstalled(context)
+          lines += TermLine.system(
+            if (p != null) "[CLU/BOX] terminal cleared · BusyBox ready"
+            else "[CLU/BOX] terminal cleared · system shell mode"
+          )
         }
       }) {
         Icon(Icons.Filled.Refresh, contentDescription = "clear", tint = neonGreen)
