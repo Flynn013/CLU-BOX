@@ -18,31 +18,32 @@ package com.google.ai.edge.gallery.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// CLU/BOX Ultra-Dark Material Design Palette
+// CLU/BOX Marathon Palette
 // ─────────────────────────────────────────────────────────────────────────────
-// Design language: pure black canvas, elevation through dark grey steps,
-// clean white as the sole accent.  No colour noise.
+// Design language: Marathon (Bungie) – pure black canvas, acid lime accent,
+// electric blue secondary, heavy borders, crosshair registration marks.
 //
-// Naming kept source-compatible with the original (neonGreen, absoluteBlack…)
-// so no call-sites need to change.
+// Naming kept source-compatible with original call-sites.
 
-// ── Core accent ────────────────────────────────────────────────────────────
-val neonGreen          = Color(0xFF39FF14)   // primary accent — neon green
+// ── Core accent — Marathon acid lime ───────────────────────────────────────
+val neonGreen          = Color(0xFFC8FF00)   // Marathon signature acid lime
+val marathonBlue       = Color(0xFF1A1AE6)   // Marathon electric-blue accent
+val marathonLime       = neonGreen           // alias
 
 // ── Background scale (pure black → near-black → dark grey) ─────────────────
 val absoluteBlack      = Color(0xFF000000)   // page / scaffold background
-val terminalDarkGrey   = Color(0xFF0D0D0D)   // surface lowest / subtle tint
-val terminalMidGrey    = Color(0xFF121212)   // card / sheet surface
-val terminalLightGrey  = Color(0xFF2A2A2A)   // elevated surface (container high)
-val terminalOutline    = Color(0xFF3A3A3A)   // dividers & borders
-val terminalOnSurface  = Color(0xFFECECEC)   // primary body text (off-white for comfort)
+val terminalDarkGrey   = Color(0xFF080808)   // surface lowest / subtle tint
+val terminalMidGrey    = Color(0xFF0E0E0E)   // card / sheet surface
+val terminalLightGrey  = Color(0xFF202020)   // elevated surface (container high)
+val terminalOutline    = Color(0xFF303030)   // dividers & borders
+val terminalOnSurface  = Color(0xFFEEEEEE)   // primary body text (off-white)
 
 // ── Supporting greys ────────────────────────────────────────────────────────
 val brutalistGrey      = Color(0xFF7A7A7A)   // secondary / disabled text
-val brutalistDark      = Color(0xFF2A2A2A)   // alias for terminalLightGrey
+val brutalistDark      = Color(0xFF202020)   // alias for terminalLightGrey
 
-// ── Semantic error palette (unchanged) ─────────────────────────────────────
-val terminalError          = Color(0xFFFF5555)
+// ── Semantic error palette ─────────────────────────────────────────────────
+val terminalError          = Color(0xFFFF4444)
 val terminalErrorContainer = Color(0xFF3D0000)
 
 // ── Light-mode palette — mirrors dark (app is always dark, but Material3

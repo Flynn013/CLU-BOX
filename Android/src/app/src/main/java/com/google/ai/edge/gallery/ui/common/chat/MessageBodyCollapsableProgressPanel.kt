@@ -39,7 +39,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Article
@@ -67,6 +66,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.ai.edge.gallery.R
+import com.google.ai.edge.gallery.ui.common.CrosshairMark
 import com.google.ai.edge.gallery.ui.theme.neonGreen
 import com.google.ai.edge.gallery.ui.theme.terminalLightGrey
 import com.google.ai.edge.gallery.ui.theme.terminalMidGrey
@@ -96,11 +96,20 @@ fun MessageBodyCollapsableProgressPanel(message: ChatMessageCollapsableProgressP
   Column(
     modifier = Modifier
       .fillMaxWidth()
-      .clip(RoundedCornerShape(10.dp))
+      .clip(RoundedCornerShape(2.dp))
       .background(terminalMidGrey)
-      .border(1.dp, terminalOutline, RoundedCornerShape(10.dp))
+      .border(1.dp, if (message.inProgress) neonGreen.copy(alpha = 0.6f) else terminalOutline, RoundedCornerShape(2.dp))
       .clickable { isExpanded = !isExpanded },
   ) {
+    // ── Marathon top accent line (visible when in-progress) ─────────────────
+    if (message.inProgress) {
+      Box(
+        Modifier
+          .fillMaxWidth()
+          .height(2.dp)
+          .background(neonGreen)
+      )
+    }
     // ── Header ──────────────────────────────────────────────────────────────
     Row(
       modifier = Modifier
@@ -114,18 +123,20 @@ fun MessageBodyCollapsableProgressPanel(message: ChatMessageCollapsableProgressP
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
       ) {
+        // Marathon faction symbol: crosshair when idle, spinner overlay when running
         Box(contentAlignment = Alignment.Center, modifier = Modifier.size(20.dp)) {
           if (message.inProgress) {
             CircularProgressIndicator(
-              modifier = Modifier.size(14.dp),
-              strokeWidth = 2.dp,
+              modifier = Modifier.size(16.dp),
+              strokeWidth = 1.5.dp,
               color = neonGreen,
             )
+            CrosshairMark(size = 8.dp, color = neonGreen.copy(alpha = 0.8f))
           } else {
             Icon(
               message.doneIcon,
               contentDescription = null,
-              modifier = Modifier.size(18.dp),
+              modifier = Modifier.size(16.dp),
               tint = neonGreen,
             )
           }
@@ -218,20 +229,19 @@ private fun ToolCallItemRow(item: ProgressPanelItem) {
   Row(
     modifier = Modifier
       .fillMaxWidth()
-      .clip(RoundedCornerShape(8.dp))
-      .background(terminalLightGrey.copy(alpha = 0.2f))
-      .border(1.dp, terminalOutline.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+      .clip(RoundedCornerShape(2.dp))
+      .background(terminalLightGrey.copy(alpha = 0.15f))
+      .border(1.dp, terminalOutline.copy(alpha = 0.6f), RoundedCornerShape(2.dp))
       .padding(horizontal = 10.dp, vertical = 8.dp),
     verticalAlignment = Alignment.Top,
     horizontalArrangement = Arrangement.spacedBy(10.dp),
   ) {
-    // Status dot
-    Box(
-      modifier = Modifier
-        .size(7.dp)
-        .clip(CircleShape)
-        .background(neonGreen)
-        .padding(top = 5.dp),  // optical alignment with first text line
+    // Marathon crosshair instead of dot — always aligned with first line
+    CrosshairMark(
+      modifier = Modifier.padding(top = 3.dp),
+      size = 9.dp,
+      color = neonGreen,
+      strokeWidth = 1.dp,
     )
     Column(modifier = Modifier.weight(1f)) {
       Text(

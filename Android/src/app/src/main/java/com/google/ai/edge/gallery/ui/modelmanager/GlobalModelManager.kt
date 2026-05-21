@@ -72,6 +72,7 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -100,6 +101,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.RuntimeType
@@ -111,9 +113,12 @@ import com.google.ai.edge.gallery.runtime.geminicloud.GeminiConnectButton
 import com.google.ai.edge.gallery.runtime.geminicloud.GeminiTokenManager
 import com.google.ai.edge.gallery.runtime.manualapi.ManualApiKeyStore
 import com.google.ai.edge.gallery.proto.ImportedModel
+import com.google.ai.edge.gallery.ui.common.CrosshairMark
 import com.google.ai.edge.gallery.ui.common.TaskIcon
 import com.google.ai.edge.gallery.ui.common.modelitem.ModelItem
+import com.google.ai.edge.gallery.ui.theme.absoluteBlack
 import com.google.ai.edge.gallery.ui.theme.neonGreen
+import com.google.ai.edge.gallery.ui.theme.terminalOnSurface
 import kotlin.text.endsWith
 import kotlin.text.lowercase
 import kotlinx.coroutines.delay
@@ -243,53 +248,64 @@ fun GlobalModelManager(
   Scaffold(
     modifier = modifier,
     topBar = {
-      CenterAlignedTopAppBar(
-        title = {
-          Column(horizontalAlignment = Alignment.CenterHorizontally) {
+      Column(modifier = modifier) {
+        CenterAlignedTopAppBar(
+          colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+            containerColor = absoluteBlack,
+          ),
+          title = {
             Row(
               verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(12.dp),
+              horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+              CrosshairMark(size = 12.dp, color = neonGreen)
+              Column {
+                Text(
+                  text = "CLU / BOX",
+                  color = neonGreen,
+                  fontFamily = FontFamily.Monospace,
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 14.sp,
+                  letterSpacing = 4.sp,
+                )
+                Text(
+                  text = "VENDING MACHINE · ${localModels.size + importedModels.size + geminiModels.size + anthropicModels.size} UNITS",
+                  color = terminalOnSurface.copy(alpha = 0.45f),
+                  fontFamily = FontFamily.Monospace,
+                  fontSize = 9.sp,
+                  letterSpacing = 1.sp,
+                )
+              }
+            }
+          },
+          navigationIcon = {
+            if (openDrawer != null) {
+              IconButton(onClick = openDrawer) {
+                Icon(
+                  imageVector = Icons.Rounded.Menu,
+                  contentDescription = "Open CLU/BOX menu",
+                  tint = terminalOnSurface,
+                )
+              }
+            }
+          },
+          actions = {
+            IconButton(onClick = { navigateUp() }) {
               Icon(
-                Icons.AutoMirrored.Rounded.ListAlt,
-                modifier = Modifier.size(20.dp),
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurface,
-              )
-              Text(
-                text =
-                  "${stringResource(R.string.drawer_models_label)} (${localModels.size + importedModels.size + geminiModels.size + anthropicModels.size})",
-                color = MaterialTheme.colorScheme.onSurface,
-                style = MaterialTheme.typography.titleMedium,
-                fontFamily = FontFamily.Monospace,
+                imageVector = Icons.Rounded.Close,
+                contentDescription = stringResource(R.string.cd_close_icon),
+                tint = terminalOnSurface,
               )
             }
-          }
-        },
-        // CLU/BOX drawer hamburger — only shown when called from the CLU/BOX shell.
-        navigationIcon = {
-          if (openDrawer != null) {
-            IconButton(onClick = openDrawer) {
-              Icon(
-                imageVector = Icons.Rounded.Menu,
-                contentDescription = "Open CLU/BOX menu",
-                tint = MaterialTheme.colorScheme.onSurface,
-              )
-            }
-          }
-        },
-        // The "action" component at the right.
-        actions = {
-          IconButton(onClick = { navigateUp() }) {
-            Icon(
-              imageVector = Icons.Rounded.Close,
-              contentDescription = stringResource(R.string.cd_close_icon),
-              tint = MaterialTheme.colorScheme.onSurface,
-            )
-          }
-        },
-        modifier = modifier,
-      )
+          },
+        )
+        Box(
+          Modifier
+            .fillMaxWidth()
+            .height(1.dp)
+            .background(neonGreen.copy(alpha = 0.55f))
+        )
+      }
     },
     floatingActionButton = {
       // Context-sensitive FAB: import local model on LOCAL_CLU tab only.

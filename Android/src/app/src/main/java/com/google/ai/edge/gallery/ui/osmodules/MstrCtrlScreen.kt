@@ -58,6 +58,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.ai.edge.gallery.data.busybox.BusyBoxBridge
+import com.google.ai.edge.gallery.ui.common.CrosshairMark
+import com.google.ai.edge.gallery.ui.common.MarathonMetaBar
 import com.google.ai.edge.gallery.ui.theme.absoluteBlack
 import com.google.ai.edge.gallery.ui.theme.neonGreen
 import com.google.ai.edge.gallery.ui.theme.terminalError
@@ -114,32 +116,28 @@ fun MstrCtrlScreen() {
       .background(absoluteBlack)
       .imePadding(),
   ) {
-    // ── Status bar ────────────────────────────────────────────────────
+    // ── Marathon status bar ───────────────────────────────────────────
     Row(
       modifier = Modifier
         .fillMaxWidth()
         .background(absoluteBlack)
         .padding(horizontal = 12.dp, vertical = 6.dp),
       verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-      val statusColor = if (ready) neonGreen else terminalOnSurface.copy(alpha = 0.5f)
-      Box(
-        modifier = Modifier
-          .width(8.dp)
-          .height(8.dp)
-          .clip(RoundedCornerShape(50))
-          .background(statusColor),
-      )
-      Spacer(Modifier.width(8.dp))
+      val statusColor = if (ready) neonGreen else terminalOnSurface.copy(alpha = 0.4f)
+      CrosshairMark(size = 10.dp, color = statusColor)
       Text(
         text = when {
-          !ready -> "MSTR_CTRL · BOOTSTRAPPING…"
+          !ready -> "MSTR_CTRL · BOOTSTRAPPING"
           busyboxInstalled -> "MSTR_CTRL · BUSYBOX READY"
-          else -> "MSTR_CTRL · SYSTEM SH MODE"
+          else -> "MSTR_CTRL · SYSTEM SH"
         },
         color = statusColor,
         fontFamily = FontFamily.Monospace,
-        fontSize = 12.sp,
+        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+        fontSize = 11.sp,
+        letterSpacing = 1.5.sp,
       )
       Spacer(Modifier.weight(1f))
       IconButton(onClick = {
@@ -152,18 +150,21 @@ fun MstrCtrlScreen() {
           )
         }
       }) {
-        Icon(Icons.Filled.Refresh, contentDescription = "clear", tint = neonGreen)
+        Icon(Icons.Filled.Refresh, contentDescription = "clear", tint = neonGreen.copy(alpha = 0.7f))
       }
     }
+    // Marathon hairline under status bar
+    Box(Modifier.fillMaxWidth().height(1.dp).background(neonGreen.copy(alpha = 0.4f)))
 
     // ── Scroll-back buffer ────────────────────────────────────────────
+    // ── Scroll-back buffer with Marathon corner marks ─────────────────
     Box(
       modifier = Modifier
         .fillMaxWidth()
         .weight(1f)
         .padding(horizontal = 8.dp)
         .background(terminalMidGrey)
-        .border(1.dp, terminalOutline),
+        .border(1.dp, neonGreen.copy(alpha = 0.3f)),
     ) {
       LazyColumn(
         state = listState,
@@ -179,6 +180,11 @@ fun MstrCtrlScreen() {
           )
         }
       }
+      // Marathon corner registration marks
+      CrosshairMark(Modifier.align(Alignment.TopStart).padding(4.dp), 10.dp, neonGreen.copy(alpha = 0.4f))
+      CrosshairMark(Modifier.align(Alignment.TopEnd).padding(4.dp), 10.dp, neonGreen.copy(alpha = 0.4f))
+      CrosshairMark(Modifier.align(Alignment.BottomStart).padding(4.dp), 10.dp, neonGreen.copy(alpha = 0.4f))
+      CrosshairMark(Modifier.align(Alignment.BottomEnd).padding(4.dp), 10.dp, neonGreen.copy(alpha = 0.4f))
     }
 
     // ── Input line ────────────────────────────────────────────────────
@@ -232,6 +238,8 @@ fun MstrCtrlScreen() {
         Icon(Icons.Filled.PlayArrow, contentDescription = "run", tint = neonGreen)
       }
     }
+    // Marathon metadata footer
+    MarathonMetaBar(text = "CLU/BOX · MSTR_CTRL · ${lines.size} LINES")
   }
 }
 

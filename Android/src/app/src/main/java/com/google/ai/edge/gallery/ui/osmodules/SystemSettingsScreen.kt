@@ -173,22 +173,25 @@ fun SystemSettingsScreen(
         .fillMaxSize()
         .padding(innerPadding),
     ) {
-      // ── Tab bar ────────────────────────────────────────────────────
+      // ── Marathon-style tab bar ─────────────────────────────────────
       PrimaryTabRow(
         selectedTabIndex = selectedTab,
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        containerColor = absoluteBlack,
         contentColor = neonGreen,
       ) {
         TABS.forEachIndexed { index, title ->
           Tab(
             selected = selectedTab == index,
             onClick = { selectedTab = index },
+            selectedContentColor = neonGreen,
+            unselectedContentColor = terminalOnSurface.copy(alpha = 0.4f),
             text = {
               Text(
                 title,
                 fontFamily = FontFamily.Monospace,
-                fontSize = 11.sp,
+                fontSize = 10.sp,
                 fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal,
+                letterSpacing = 1.sp,
               )
             },
           )
