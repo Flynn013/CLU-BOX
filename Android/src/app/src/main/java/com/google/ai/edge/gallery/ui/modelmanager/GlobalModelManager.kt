@@ -715,14 +715,14 @@ private fun CloudCredentialHub(context: Context) {
       color = neonGreen.copy(alpha = 0.7f),
     )
 
-    // Gemini credential row
-    Row(
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.SpaceBetween,
-      modifier = Modifier.fillMaxWidth(),
-    ) {
-      Column(modifier = Modifier.weight(1f)) {
-        Text("Gemini", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+    // Gemini credential row — label + status above, button below
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+      ) {
+        Text("GEMINI", style = MaterialTheme.typography.labelMedium, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurface)
         val geminiStatus = when {
           GeminiTokenManager.hasValidAccessToken(context) -> "OAUTH"
           !GeminiApiKeyStore.getApiKey(context).isNullOrBlank() -> "API KEY"
@@ -733,19 +733,19 @@ private fun CloudCredentialHub(context: Context) {
           "API KEY" -> Color(0xFFFFBB00)
           else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
         }
-        Text(geminiStatus, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = geminiStatusColor)
+        Text("· $geminiStatus", style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = geminiStatusColor)
       }
-      GeminiConnectButton()
+      GeminiConnectButton(modifier = Modifier.fillMaxWidth())
     }
 
-    // Claude credential row
-    Row(
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.SpaceBetween,
-      modifier = Modifier.fillMaxWidth(),
-    ) {
-      Column(modifier = Modifier.weight(1f)) {
-        Text("Claude", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+    // Claude credential row — label + status above, button below
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+      ) {
+        Text("CLAUDE", style = MaterialTheme.typography.labelMedium, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurface)
         val claudeStatus = when {
           ClaudeCredentialStore.hasValidCredentials(context) -> "OAUTH"
           !ManualApiKeyStore.getApiKey(context, "anthropic").isNullOrBlank() -> "API KEY"
@@ -756,9 +756,9 @@ private fun CloudCredentialHub(context: Context) {
           "API KEY" -> Color(0xFFFFBB00)
           else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
         }
-        Text(claudeStatus, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = claudeStatusColor)
+        Text("· $claudeStatus", style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = claudeStatusColor)
       }
-      ClaudeConnectButton()
+      ClaudeConnectButton(modifier = Modifier.fillMaxWidth())
     }
   }
 }

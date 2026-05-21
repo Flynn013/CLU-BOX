@@ -84,10 +84,12 @@ fun MstrCtrlScreen() {
   var input by remember { mutableStateOf("") }
   var running by remember { mutableStateOf(false) }
   var ready by remember { mutableStateOf(false) }
+  var busyboxInstalled by remember { mutableStateOf(false) }
 
   LaunchedEffect(Unit) {
     val installed = BusyBoxBridge.ensureInstalled(context)
     if (installed != null) {
+      busyboxInstalled = true
       lines += TermLine.system("[CLU/BOX] BusyBox armed at $installed")
     } else {
       lines += TermLine.system("[CLU/BOX] BusyBox asset not bundled — using /system/bin/sh fallback")
@@ -130,7 +132,11 @@ fun MstrCtrlScreen() {
       )
       Spacer(Modifier.width(8.dp))
       Text(
-        text = if (ready) "MSTR_CTRL · BUSYBOX READY" else "MSTR_CTRL · BOOTSTRAPPING…",
+        text = when {
+          !ready -> "MSTR_CTRL · BOOTSTRAPPING…"
+          busyboxInstalled -> "MSTR_CTRL · BUSYBOX READY"
+          else -> "MSTR_CTRL · SYSTEM SH MODE"
+        },
         color = statusColor,
         fontFamily = FontFamily.Monospace,
         fontSize = 12.sp,

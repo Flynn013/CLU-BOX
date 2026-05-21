@@ -36,6 +36,7 @@ import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.reflect.KProperty1
+import kotlin.reflect.full.findAnnotation
 import kotlin.reflect.full.memberFunctions
 import kotlin.reflect.full.memberProperties
 import kotlin.reflect.full.valueParameters
@@ -178,7 +179,8 @@ object AnthropicCloudModelHelper : LlmModelHelper {
           val pendingToolCalls = mutableListOf<ProviderToolCallResult>()
           val accText = StringBuilder()
 
-          provider.streamChat(messages, emptyList()).collect { event ->
+          val toolDefs = buildToolDefinitions(instance.toolSet)
+          provider.streamChat(messages, toolDefs).collect { event ->
             if (instance.cancelled.get()) return@collect
             when (event) {
               is ProviderEvent.Token -> {
@@ -265,6 +267,43 @@ object AnthropicCloudModelHelper : LlmModelHelper {
     }
     result.addAll(instance.conversationHistory)
     return result
+  }
+
+  private fun buildToolDefinitions(toolSet: ToolSet?): List<JSONObject> {
+    toolSet ?: return emptyList()
+    val defs = mutableListOf<JSONObject>()
+    for (fn in toolSet::class.memberFunctions) {
+      val annotation = fn.findAnnotation<com.google.ai.edge.litertlm.Tool>() ?: continue
+      try {
+        val props = JSONObject()
+        val required = org.json.JSONArray()
+        for (param in fn.valueParameters) {
+          val paramName = param.name ?: continue
+          props.put(paramName, JSONObject().apply {
+            put("type", "string")
+            put("description", paramName)
+          })
+          required.put(paramName)
+        }
+        val schema = JSONObject().apply {
+          put("type", "object")
+          put("properties", props)
+          if (required.length() > 0) put("required", required)
+        }
+        defs.add(JSONObject().apply {
+          put("type", "function")
+          put("function", JSONObject().apply {
+            put("name", fn.name)
+            put("description", annotation.description)
+            put("parameters", schema)
+          })
+        })
+      } catch (e: Exception) {
+        Log.w(TAG, "buildToolDefinitions: skipping '${fn.name}': ${e.message}")
+      }
+    }
+    Log.d(TAG, "buildToolDefinitions: built ${defs.size} tool definitions")
+    return defs
   }
 
   @Suppress("UNCHECKED_CAST")

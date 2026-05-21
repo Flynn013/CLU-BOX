@@ -22,6 +22,7 @@ import com.google.ai.edge.gallery.common.SkillProgressAgentAction
 import com.google.ai.edge.gallery.data.TerminalSessionManager
 import com.google.ai.edge.gallery.data.brainbox.BrainBoxDao
 import com.google.ai.edge.gallery.data.brainbox.VectorEngine
+import com.google.ai.edge.gallery.data.python.PythonBridge
 import com.google.ai.edge.litertlm.Tool
 import com.google.ai.edge.litertlm.ToolSet
 import java.io.File
@@ -29,7 +30,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.runBlocking
 
 private const val TAG = "AgentTools"
 
@@ -342,6 +345,56 @@ class AgentTools : ToolSet {
     } catch (e: Exception) {
       Log.e(TAG, "brainBoxDelete failed", e)
       mapOf("result" to "Error: ${e.message}")
+    }
+  }
+
+  @Tool("Execute a Python 3.11 script on-device using the embedded CPython interpreter. Returns captured stdout and stderr.")
+  fun PYTHON_EXEC(python_script: String): Map<String, String> {
+    if (python_script.isBlank()) return mapOf("error" to "python_script is required")
+    sendAgentAction(SkillProgressAgentAction(label = "PYTHON_EXEC", inProgress = true))
+    return try {
+      val output = runBlocking { PythonBridge.executeScript(python_script) }
+      sendAgentAction(SkillProgressAgentAction(label = "PYTHON_EXEC done", inProgress = false))
+      mapOf("output" to output)
+    } catch (e: Exception) {
+      Log.e(TAG, "PYTHON_EXEC failed", e)
+      sendAgentAction(SkillProgressAgentAction(label = "PYTHON_EXEC error", inProgress = false))
+      mapOf("error" to (e.message ?: "PYTHON_EXEC failed"))
+    }
+  }
+
+  @Tool("Fetch the text content of a web URL (GET only). Returns stripped page text, truncated to 4000 chars.")
+  fun webFetch(url: String): Map<String, String> {
+    if (url.isBlank() || (!url.startsWith("http://") && !url.startsWith("https://"))) {
+      return mapOf("error" to "url must start with http:// or https://")
+    }
+    sendAgentAction(SkillProgressAgentAction(label = "webFetch: $url", inProgress = true))
+    return try {
+      val client = okhttp3.OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .build()
+      val request = okhttp3.Request.Builder()
+        .url(url)
+        .addHeader("User-Agent", "CLU-BOX/1.0 (Android)")
+        .get()
+        .build()
+      val response = client.newCall(request).execute()
+      val body = response.body?.string() ?: ""
+      val stripped = body
+        .replace(Regex("<script[^>]*>[\\s\\S]*?</script>", RegexOption.IGNORE_CASE), " ")
+        .replace(Regex("<style[^>]*>[\\s\\S]*?</style>", RegexOption.IGNORE_CASE), " ")
+        .replace(Regex("<[^>]+>"), " ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+        .take(4000)
+      sendAgentAction(SkillProgressAgentAction(label = "webFetch done", inProgress = false))
+      mapOf("content" to stripped, "status" to response.code.toString(), "url" to url)
+    } catch (e: Exception) {
+      Log.e(TAG, "webFetch failed for $url", e)
+      sendAgentAction(SkillProgressAgentAction(label = "webFetch error", inProgress = false))
+      mapOf("error" to (e.message ?: "webFetch failed"))
     }
   }
 }
