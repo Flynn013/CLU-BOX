@@ -291,7 +291,7 @@ constructor(
     )
 
     // Cloud models require no download — mark them as succeeded immediately.
-    if (model.runtimeType == RuntimeType.GEMINI_CLOUD || model.runtimeType == RuntimeType.MANUAL_API) {
+    if (model.runtimeType == RuntimeType.GEMINI_CLOUD || model.runtimeType == RuntimeType.MANUAL_API || model.runtimeType == RuntimeType.ANTHROPIC_CLOUD) {
       setDownloadStatus(
         curModel = model,
         status = ModelDownloadStatus(status = ModelDownloadStatusType.SUCCEEDED),
@@ -352,7 +352,7 @@ constructor(
 
   fun cancelDownloadModel(model: Model) {
     // AICore, Cloud, and Manual API models cannot be deleted from the download repository within the app.
-    if (model.runtimeType == RuntimeType.AICORE || model.runtimeType == RuntimeType.GEMINI_CLOUD || model.runtimeType == RuntimeType.MANUAL_API) {
+    if (model.runtimeType == RuntimeType.AICORE || model.runtimeType == RuntimeType.GEMINI_CLOUD || model.runtimeType == RuntimeType.MANUAL_API || model.runtimeType == RuntimeType.ANTHROPIC_CLOUD) {
       return
     }
     downloadRepository.cancelDownloadModel(model)
