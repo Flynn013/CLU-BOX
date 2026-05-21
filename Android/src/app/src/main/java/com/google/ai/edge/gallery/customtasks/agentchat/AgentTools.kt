@@ -486,4 +486,90 @@ class AgentTools : ToolSet {
       mapOf("error" to (e.message ?: "webFetch failed"))
     }
   }
+
+  // ── Coding Tools ────────────────────────────────────────────────────────────
+
+  @Tool("Compare two files and return a unified diff. Relative paths resolve to the clu_file_box workspace root.")
+  fun fileDiff(file1_path: String, file2_path: String): Map<String, String> {
+    if (file1_path.isBlank()) return mapOf("result" to "[Error: file1_path required]")
+    if (file2_path.isBlank()) return mapOf("result" to "[Error: file2_path required]")
+    sendAgentAction(SkillProgressAgentAction(
+      label = "Diff: ${File(file1_path).name} vs ${File(file2_path).name}",
+      inProgress = true,
+    ))
+    val abs1 = resolveWorkspacePath(file1_path)
+    val abs2 = resolveWorkspacePath(file2_path)
+    val shellResult = shellExecute("""diff -u "$abs1" "$abs2"""")
+    val exitCode = shellResult["exit_code"]?.toIntOrNull() ?: -1
+    val output = when (exitCode) {
+      0 -> "Files are identical."
+      1 -> shellResult["stdout"]?.ifBlank { "[No diff output]" } ?: "[No diff output]"
+      else -> "[diff error (exit $exitCode): ${shellResult["stdout"].orEmpty().take(300)}]"
+    }
+    sendAgentAction(SkillProgressAgentAction(
+      label = "Diff done",
+      inProgress = false,
+      addItemTitle = "fileDiff",
+      addItemDescription = output.lines().firstOrNull { it.isNotBlank() }?.take(80) ?: output.take(80),
+    ))
+    return mapOf("result" to output)
+  }
+
+  @Tool("Search-and-replace the first occurrence of 'search' with 'replace' in a file. Path is relative to clu_file_box root.")
+  fun fileEdit(file_path: String, search: String, replace: String): Map<String, String> {
+    if (file_path.isBlank()) return mapOf("result" to "[Error: file_path required]")
+    if (search.isEmpty()) return mapOf("result" to "[Error: search must not be empty]")
+    val ctx = context ?: return mapOf("result" to "[Error: context not available]")
+    sendAgentAction(SkillProgressAgentAction(label = "Editing: $file_path", inProgress = true))
+    return try {
+      val root = File(ctx.filesDir, "clu_file_box")
+      val target = File(root, file_path.trimStart('/')).canonicalFile
+      if (!target.absolutePath.startsWith(root.canonicalPath)) {
+        return mapOf("result" to "[Error: path traversal not allowed]")
+      }
+      if (!target.exists()) return mapOf("result" to "[Error: file not found: $file_path]")
+      val content = target.readText()
+      if (!content.contains(search)) {
+        return mapOf("result" to "[Error: search string not found in $file_path]")
+      }
+      val count = content.split(search).size - 1
+      target.writeText(content.replaceFirst(search, replace))
+      val msg = "Replaced 1 of $count occurrence(s). Updated: ${target.absolutePath}"
+      sendAgentAction(SkillProgressAgentAction(
+        label = "Edited: $file_path",
+        inProgress = false,
+        addItemTitle = "fileEdit",
+        addItemDescription = msg,
+      ))
+      mapOf("result" to msg)
+    } catch (e: Exception) {
+      Log.e(TAG, "fileEdit failed", e)
+      mapOf("result" to "[Error: ${e.message}]")
+    }
+  }
+
+  @Tool("Recursively grep files for a regex pattern. Returns file:line:match (max 60). file_extension is optional, e.g. kt.")
+  fun codeSearch(pattern: String, directory: String, file_extension: String): Map<String, String> {
+    if (pattern.isBlank()) return mapOf("result" to "[Error: pattern required]")
+    if (directory.isBlank()) return mapOf("result" to "[Error: directory required]")
+    sendAgentAction(SkillProgressAgentAction(label = "Searching: $pattern", inProgress = true))
+    val includeFlag = if (file_extension.isNotBlank()) "--include=\"*.$file_extension\"" else ""
+    val cmd = "grep -rn $includeFlag -- \"$pattern\" \"$directory\" 2>/dev/null | head -60"
+    val shellResult = shellExecute(cmd)
+    val output = shellResult["stdout"].orEmpty().trim().ifBlank { "No matches found." }
+    val capped = capOutputWithSpill(output, "codeSearch")
+    sendAgentAction(SkillProgressAgentAction(
+      label = "Search done: $pattern",
+      inProgress = false,
+      addItemTitle = "codeSearch",
+      addItemDescription = output.lines().firstOrNull { it.isNotBlank() }?.take(80) ?: "No matches.",
+    ))
+    return mapOf("result" to capped)
+  }
+
+  private fun resolveWorkspacePath(path: String): String {
+    if (path.startsWith("/")) return path
+    val ctx = context ?: return path
+    return File(File(ctx.filesDir, "clu_file_box"), path).canonicalPath
+  }
 }

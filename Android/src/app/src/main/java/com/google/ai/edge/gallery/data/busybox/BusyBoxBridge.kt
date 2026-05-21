@@ -62,6 +62,10 @@ object BusyBoxBridge {
   /** Default ProcessBuilder timeout when callers do not specify one. */
   private const val DEFAULT_TIMEOUT_MS = 30_000L
 
+  /** Fallback download URL when the APK asset is absent. */
+  private const val DOWNLOAD_URL =
+    "https://busybox.net/downloads/binaries/1.35.0-aarch64-linux-musl/busybox"
+
   private val installed = AtomicBoolean(false)
   private val installLock = Any()
 
@@ -109,8 +113,11 @@ object BusyBoxBridge {
           target.outputStream().use { output -> input.copyTo(output) }
         }
       } catch (e: IOException) {
-        Log.e(TAG, "ensureInstalled: missing asset '$ASSET_NAME' — drop a real arm64 busybox binary into app/src/main/assets/busybox/", e)
-        return@withContext null
+        Log.w(TAG, "Asset '$ASSET_NAME' not bundled — attempting runtime download from $DOWNLOAD_URL")
+        if (!downloadBinary(target)) {
+          Log.e(TAG, "ensureInstalled: BusyBox unavailable. Add busybox-arm64-v8a to assets/busybox/ for full capability.")
+          return@withContext null
+        }
       }
       if (!target.setExecutable(true, /* ownerOnly = */ true)) {
         // Fallback to invoking the system chmod through the shell — required
@@ -278,6 +285,35 @@ object BusyBoxBridge {
   // ─────────────────────────────────────────────────────────────────────────
   //  Internals
   // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Downloads the BusyBox arm64 binary from [DOWNLOAD_URL] to [target].
+   * Uses a temp file + rename to avoid a partially-written binary.
+   * Returns true if the download succeeded and [target] is ready to chmod+x.
+   */
+  private fun downloadBinary(target: File): Boolean {
+    return try {
+      val url = java.net.URL(DOWNLOAD_URL)
+      val conn = url.openConnection() as java.net.HttpURLConnection
+      conn.connectTimeout = 30_000
+      conn.readTimeout   = 120_000
+      conn.connect()
+      if (conn.responseCode != 200) {
+        Log.e(TAG, "downloadBinary: HTTP ${conn.responseCode} from $DOWNLOAD_URL")
+        return false
+      }
+      val tmp = File(target.parentFile, "${target.name}.tmp")
+      conn.inputStream.use { input ->
+        tmp.outputStream().use { output -> input.copyTo(output) }
+      }
+      val renamed = tmp.renameTo(target)
+      if (renamed) Log.i(TAG, "BusyBox downloaded successfully to ${target.absolutePath}")
+      renamed
+    } catch (e: Exception) {
+      Log.e(TAG, "downloadBinary failed: ${e.message}")
+      false
+    }
+  }
 
   private fun sha256(file: File): String {
     val md = MessageDigest.getInstance("SHA-256")
