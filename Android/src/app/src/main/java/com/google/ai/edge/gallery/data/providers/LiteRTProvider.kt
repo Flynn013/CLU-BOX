@@ -20,7 +20,6 @@ import android.util.Log
 import com.google.ai.edge.gallery.customtasks.agentchat.ContinuousAgentDriver
 import com.google.ai.edge.gallery.customtasks.agentchat.SkillRegistry
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
@@ -168,12 +167,13 @@ class LiteRTProvider(
                 is ContinuousAgentDriver.TurnOutcome.ToolCalls -> {
                     // Gemma 4 multi-call: emit start/input/end for each call in order,
                     // then Done with the full results list.
-                    val results = outcome.calls.map { tc ->
+                    val results = mutableListOf<ProviderToolCallResult>()
+                    for (tc in outcome.calls) {
                         val input = runCatching { JSONObject(tc.argsJson) }.getOrElse { JSONObject() }
                         emit(ProviderEvent.ToolCallStart(tc.callId, tc.tool))
                         emit(ProviderEvent.ToolCallInput(tc.callId, tc.argsJson))
                         emit(ProviderEvent.ToolCallEnd(tc.callId, tc.tool, input))
-                        ProviderToolCallResult(tc.callId, tc.tool, input)
+                        results.add(ProviderToolCallResult(tc.callId, tc.tool, input))
                     }
                     emit(ProviderEvent.Done(accText.toString(), results))
                 }
