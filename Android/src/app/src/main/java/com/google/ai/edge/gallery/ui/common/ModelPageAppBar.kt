@@ -268,7 +268,6 @@ fun ModelPageAppBar(
         }
       }
     },
-    modifier = Modifier,
   )
   // Marathon bottom hairline separator
   Box(
