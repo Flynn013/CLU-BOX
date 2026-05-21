@@ -86,6 +86,7 @@ fun LlmChatScreen(
   showImagePicker: Boolean = false,
   showAudioPicker: Boolean = false,
   onChatHistoryClicked: (() -> Unit)? = null,
+  allowThinkingOverride: Boolean? = null,
 ) {
   ChatViewWrapper(
     viewModel = viewModel,
@@ -109,6 +110,7 @@ fun LlmChatScreen(
     showAudioPicker = showAudioPicker,
     showWipeGridButton = true,
     onChatHistoryClicked = onChatHistoryClicked,
+    allowThinkingOverride = allowThinkingOverride,
   )
 }
 
@@ -210,21 +212,19 @@ fun ChatViewWrapper(
   showAudioPicker: Boolean = false,
   showWipeGridButton: Boolean = false,
   onChatHistoryClicked: (() -> Unit)? = null,
+  allowThinkingOverride: Boolean? = null,
 ) {
   val context = LocalContext.current
-  // Guard: if the task doesn't exist yet (e.g. before model download) bail out
-  // instead of crashing on a null pointer.
   val task = modelManagerViewModel.getTaskById(id = taskId) ?: return
-  val allowThinking = task.allowThinking()
+  // allowThinkingOverride lets the caller toggle thinking at runtime (e.g. CHAT_BOX
+  // THINK chip) without modifying the Task data model.
+  val allowThinking = allowThinkingOverride ?: task.allowThinking()
   val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
   val selectedModel = modelManagerUiState.selectedModel
   var showWipeConfirmDialog by remember { mutableStateOf(false) }
 
-  // LOG_BOX manager — created once per ChatViewWrapper lifecycle.
   val logBoxManager = remember { LogBoxManager(context.applicationContext) }
 
-  // Load persisted chat history whenever the selected model changes,
-  // but only when a real model is selected (not the EMPTY_MODEL sentinel).
   LaunchedEffect(selectedModel.name) {
     viewModel.initAppContext(context)
     if (selectedModel != EMPTY_MODEL) {
@@ -282,8 +282,6 @@ fun ChatViewWrapper(
     viewModel = viewModel,
     modelManagerViewModel = modelManagerViewModel,
     onSendMessage = { model, messages ->
-      // Check if inference is currently running — if so, mark text
-      // messages as "queued" so they render with the muted style.
       val isCurrentlyProcessing = viewModel.uiState.value.inProgress
       for (message in messages) {
         val messageToAdd = if (isCurrentlyProcessing && message is ChatMessageText) {
@@ -340,7 +338,6 @@ fun ChatViewWrapper(
           },
           allowThinking = allowThinking,
         )
-
       }
     },
     onRunAgainClicked = { model, message ->

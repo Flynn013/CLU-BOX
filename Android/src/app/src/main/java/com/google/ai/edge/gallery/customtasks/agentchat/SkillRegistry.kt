@@ -17,6 +17,7 @@
 package com.google.ai.edge.gallery.customtasks.agentchat
 
 import android.util.Log
+import com.google.ai.edge.gallery.data.CluAgentSettings
 import org.json.JSONException
 import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
@@ -52,6 +53,9 @@ class SkillRegistry(private val agentTools: AgentTools) {
       // by ShellExecuteSkill, which delegates to the embedded BusyBoxBridge.
       FileBoxWriteSkill(agentTools),
       FileBoxReadLinesSkill(agentTools),
+      FileEditSkill(agentTools),
+      FileDiffSkill(agentTools),
+      CodeSearchSkill(agentTools),
       MemorySearchSkill(agentTools),
       MemoryWriteSkill(agentTools),
       BrainBoxGrepSkill(agentTools),
@@ -160,26 +164,37 @@ class SkillRegistry(private val agentTools: AgentTools) {
 
     val identityAndBase = "${CluIdentity.GENESIS_IDENTITY_BLOCK}$remainder"
 
-    if (disabledSkillNames.isEmpty()) return identityAndBase
-
-    // Strip JSON schema lines that belong to disabled skills.
-    // Schema lines follow the pattern: {"name":"<skillName>",...}
-    // Use JSONObject to reliably extract the name rather than fragile
-    // string slicing that would break on escapes or multi-line layouts.
-    val filtered = identityAndBase.lines().filter { line ->
-      val trimmed = line.trim()
-      if (trimmed.startsWith("{")) {
-        val extractedName = try {
-          JSONObject(trimmed).optString("name", "")
-        } catch (_: JSONException) {
-          ""
+    val result = if (disabledSkillNames.isEmpty()) {
+      identityAndBase
+    } else {
+      // Strip JSON schema lines that belong to disabled skills.
+      val filtered = identityAndBase.lines().filter { line ->
+        val trimmed = line.trim()
+        if (trimmed.startsWith("{")) {
+          val extractedName = try {
+            JSONObject(trimmed).optString("name", "")
+          } catch (_: JSONException) {
+            ""
+          }
+          extractedName.isEmpty() || extractedName !in disabledSkillNames
+        } else {
+          true
         }
-        extractedName.isEmpty() || extractedName !in disabledSkillNames
-      } else {
-        true
       }
+      filtered.joinToString("\n")
     }
-    return filtered.joinToString("\n")
+
+    // Append STEP MODE addendum when the user has enabled it in SETTINGS → CONFIG.
+    val ctx = agentTools.context
+    return if (ctx != null && CluAgentSettings.load(ctx)) {
+      result + STEP_MODE_ADDENDUM
+    } else {
+      result
+    }
+  }
+
+  companion object {
+    private const val STEP_MODE_ADDENDUM = "\n\nSTEP MODE: After each tool result, briefly summarise what you found or did. Then ask '▶ Continue?' and wait for the user to reply before calling the next tool."
   }
 
   /**

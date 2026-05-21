@@ -57,9 +57,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.google.ai.edge.gallery.data.SharedShellManager
-import com.google.ai.edge.gallery.data.TerminalSessionManager
 import com.google.ai.edge.gallery.data.busybox.BusyBoxBridge
+import com.google.ai.edge.gallery.ui.common.CrosshairMark
+import com.google.ai.edge.gallery.ui.common.MarathonMetaBar
 import com.google.ai.edge.gallery.ui.theme.absoluteBlack
 import com.google.ai.edge.gallery.ui.theme.neonGreen
 import com.google.ai.edge.gallery.ui.theme.terminalError
@@ -72,21 +72,11 @@ import kotlinx.coroutines.launch
 /**
  * MSTR_CTRL — pure-native BusyBox terminal panel.
  *
- * The legacy Termux PTY UI has been replaced with a Compose-native scrolling
- * console powered by [BusyBoxBridge]. Every command is evaluated by running
- * `busybox sh -c <line>` as a sub-process; output is streamed back into the
- * scrolling buffer. No external Termux app, no PTY, no broadcast IPC.
- *
- * The two parameters [sessionManager] and [sharedShellManager] are retained
- * for source-compatibility with [com.google.ai.edge.gallery.GalleryApp]; the
- * new screen does not actually use them, but accepting them keeps the call
- * site unchanged.
+ * Every command is evaluated by running `busybox sh -c <line>` as a sub-process;
+ * output is streamed back into the scrolling buffer. No external app, no PTY, no IPC.
  */
 @Composable
-fun MstrCtrlScreen(
-  sessionManager: TerminalSessionManager,
-  @Suppress("UNUSED_PARAMETER") sharedShellManager: SharedShellManager,
-) {
+fun MstrCtrlScreen() {
   val context = LocalContext.current
   val scope = rememberCoroutineScope()
   val keyboard = LocalSoftwareKeyboardController.current
@@ -96,18 +86,24 @@ fun MstrCtrlScreen(
   var input by remember { mutableStateOf("") }
   var running by remember { mutableStateOf(false) }
   var ready by remember { mutableStateOf(false) }
+  var busyboxInstalled by remember { mutableStateOf(false) }
 
   LaunchedEffect(Unit) {
-    sessionManager.startSession()
     val installed = BusyBoxBridge.ensureInstalled(context)
     if (installed != null) {
+      busyboxInstalled = true
       lines += TermLine.system("[CLU/BOX] BusyBox armed at $installed")
-      val uname = BusyBoxBridge.exec(context, "uname", listOf("-a"))
-      lines += TermLine.system(uname.stdout.trim().ifBlank { "(uname unavailable)" })
-      ready = true
     } else {
-      lines += TermLine.error("[CLU/BOX] busybox-arm64-v8a asset missing — drop the binary into app/src/main/assets/busybox/")
+      lines += TermLine.system("[CLU/BOX] BusyBox asset not bundled — using /system/bin/sh fallback")
+      lines += TermLine.system("         (add busybox-arm64-v8a to assets/busybox/ for full capability)")
     }
+    val uname = BusyBoxBridge.shell(context, "uname -a")
+    if (uname.exitCode == 0) {
+      lines += TermLine.system(uname.stdout.trim())
+    } else {
+      lines += TermLine.stderr(uname.stderr.trim().ifBlank { "(uname unavailable)" })
+    }
+    ready = true
   }
 
   LaunchedEffect(lines.size) {
@@ -120,49 +116,55 @@ fun MstrCtrlScreen(
       .background(absoluteBlack)
       .imePadding(),
   ) {
-    // ── Status bar ────────────────────────────────────────────────────
+    // ── Marathon status bar ───────────────────────────────────────────
     Row(
       modifier = Modifier
         .fillMaxWidth()
         .background(absoluteBlack)
         .padding(horizontal = 12.dp, vertical = 6.dp),
       verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-      val statusColor = if (ready) neonGreen else terminalOnSurface.copy(alpha = 0.5f)
-      Box(
-        modifier = Modifier
-          .width(8.dp)
-          .height(8.dp)
-          .clip(RoundedCornerShape(50))
-          .background(statusColor),
-      )
-      Spacer(Modifier.width(8.dp))
+      val statusColor = if (ready) neonGreen else terminalOnSurface.copy(alpha = 0.4f)
+      CrosshairMark(size = 10.dp, color = statusColor)
       Text(
-        text = if (ready) "MSTR_CTRL · BUSYBOX READY" else "MSTR_CTRL · BOOTSTRAPPING…",
+        text = when {
+          !ready -> "MSTR_CTRL · BOOTSTRAPPING"
+          busyboxInstalled -> "MSTR_CTRL · BUSYBOX READY"
+          else -> "MSTR_CTRL · SYSTEM SH"
+        },
         color = statusColor,
         fontFamily = FontFamily.Monospace,
-        fontSize = 12.sp,
+        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+        fontSize = 11.sp,
+        letterSpacing = 1.5.sp,
       )
       Spacer(Modifier.weight(1f))
       IconButton(onClick = {
         lines.clear()
         scope.launch {
-          BusyBoxBridge.ensureInstalled(context)
-          lines += TermLine.system("[CLU/BOX] terminal cleared")
+          val p = BusyBoxBridge.ensureInstalled(context)
+          lines += TermLine.system(
+            if (p != null) "[CLU/BOX] terminal cleared · BusyBox ready"
+            else "[CLU/BOX] terminal cleared · system shell mode"
+          )
         }
       }) {
-        Icon(Icons.Filled.Refresh, contentDescription = "clear", tint = neonGreen)
+        Icon(Icons.Filled.Refresh, contentDescription = "clear", tint = neonGreen.copy(alpha = 0.7f))
       }
     }
+    // Marathon hairline under status bar
+    Box(Modifier.fillMaxWidth().height(1.dp).background(neonGreen.copy(alpha = 0.4f)))
 
     // ── Scroll-back buffer ────────────────────────────────────────────
+    // ── Scroll-back buffer with Marathon corner marks ─────────────────
     Box(
       modifier = Modifier
         .fillMaxWidth()
         .weight(1f)
         .padding(horizontal = 8.dp)
         .background(terminalMidGrey)
-        .border(1.dp, terminalOutline),
+        .border(1.dp, neonGreen.copy(alpha = 0.3f)),
     ) {
       LazyColumn(
         state = listState,
@@ -178,6 +180,11 @@ fun MstrCtrlScreen(
           )
         }
       }
+      // Marathon corner registration marks
+      CrosshairMark(Modifier.align(Alignment.TopStart).padding(4.dp), 10.dp, neonGreen.copy(alpha = 0.4f))
+      CrosshairMark(Modifier.align(Alignment.TopEnd).padding(4.dp), 10.dp, neonGreen.copy(alpha = 0.4f))
+      CrosshairMark(Modifier.align(Alignment.BottomStart).padding(4.dp), 10.dp, neonGreen.copy(alpha = 0.4f))
+      CrosshairMark(Modifier.align(Alignment.BottomEnd).padding(4.dp), 10.dp, neonGreen.copy(alpha = 0.4f))
     }
 
     // ── Input line ────────────────────────────────────────────────────
@@ -215,7 +222,7 @@ fun MstrCtrlScreen(
             if (cmd.isNotEmpty() && !running) {
               input = ""
               keyboard?.hide()
-              runCommand(cmd, scope, lines, context, onStart = { running = true }, onDone = { running = false })
+              runTerminalCommand(cmd, scope, lines, context, onStart = { running = true }, onDone = { running = false })
             }
           },
         ),
@@ -225,17 +232,18 @@ fun MstrCtrlScreen(
         val cmd = input.trim()
         if (cmd.isNotEmpty() && !running) {
           input = ""
-          runCommand(cmd, scope, lines, context, onStart = { running = true }, onDone = { running = false })
+          runTerminalCommand(cmd, scope, lines, context, onStart = { running = true }, onDone = { running = false })
         }
       }) {
         Icon(Icons.Filled.PlayArrow, contentDescription = "run", tint = neonGreen)
       }
     }
+    // Marathon metadata footer
+    MarathonMetaBar(text = "CLU/BOX · MSTR_CTRL · ${lines.size} LINES")
   }
 }
 
-/** Helper that launches the command on [scope] and appends its result lines. */
-private fun runCommand(
+private fun runTerminalCommand(
   cmd: String,
   scope: kotlinx.coroutines.CoroutineScope,
   lines: androidx.compose.runtime.snapshots.SnapshotStateList<TermLine>,
@@ -254,7 +262,6 @@ private fun runCommand(
   }
 }
 
-/** Single coloured line in the BusyBox console buffer. */
 private data class TermLine(val text: String, val color: Color) {
   companion object {
     fun command(s: String) = TermLine("❯ $s", neonGreen)

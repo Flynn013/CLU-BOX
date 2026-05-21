@@ -44,7 +44,7 @@ import androidx.compose.ui.unit.dp
  * - Model Label (custom display name)
  * - Base URL (e.g. "https://generativelanguage.googleapis.com/")
  * - API Key (stored securely in EncryptedSharedPreferences)
- * - Model ID (the specific string for the endpoint, e.g. "gemini-1.5-pro")
+ * - Model ID (the specific string for the endpoint, e.g. "gemini-3.5-flash")
  * - Context Window Size (default 32768)
  */
 @Composable
@@ -80,7 +80,7 @@ fun AddApiModelDialog(
           value = modelLabel,
           onValueChange = { modelLabel = it; errorText = "" },
           label = { Text("Model Label") },
-          placeholder = { Text("Gemini Pro 1.5") },
+          placeholder = { Text("Gemini 3.5 Flash") },
           singleLine = true,
           modifier = Modifier.fillMaxWidth(),
         )
@@ -115,7 +115,7 @@ fun AddApiModelDialog(
           value = modelId,
           onValueChange = { modelId = it; errorText = "" },
           label = { Text("Model ID") },
-          placeholder = { Text("gemini-2.0-flash") },
+          placeholder = { Text("gemini-3.5-flash") },
           singleLine = true,
           modifier = Modifier.fillMaxWidth(),
         )

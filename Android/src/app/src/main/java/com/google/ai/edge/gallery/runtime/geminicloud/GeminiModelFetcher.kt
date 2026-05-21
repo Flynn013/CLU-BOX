@@ -92,9 +92,10 @@ fun fetchGeminiModels(apiKey: String): Result<List<GeminiModelInfo>> {
       models.add(GeminiModelInfo(modelId = modelId, displayName = displayName, description = description))
     }
 
-    // Sort: put gemini-2.x and gemini-1.5 first, then others alphabetically.
+    // Sort: gemini-3.x first, then gemini-2.x, then gemini-1.5, then others alphabetically.
     val sorted = models.sortedWith(compareByDescending<GeminiModelInfo> {
       when {
+        it.modelId.startsWith("gemini-3") -> 3
         it.modelId.startsWith("gemini-2") -> 2
         it.modelId.startsWith("gemini-1.5") -> 1
         else -> 0

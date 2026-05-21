@@ -87,8 +87,17 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.ai.edge.gallery.BuildConfig
+import com.google.ai.edge.gallery.data.CluAgentSettings
+import com.google.ai.edge.gallery.data.UserProfileStore
 import com.google.ai.edge.gallery.data.LogBoxManager
 import com.google.ai.edge.gallery.proto.Theme
+import com.google.ai.edge.gallery.runtime.cloudproviders.ClaudeConnectButton
+import com.google.ai.edge.gallery.runtime.cloudproviders.ClaudeCredentialStore
+import com.google.ai.edge.gallery.runtime.geminicloud.GeminiApiKeyStore
+import com.google.ai.edge.gallery.runtime.geminicloud.GeminiAuthConfig
+import com.google.ai.edge.gallery.runtime.geminicloud.GeminiConnectButton
+import com.google.ai.edge.gallery.runtime.geminicloud.GeminiTokenManager
+import com.google.ai.edge.gallery.runtime.manualapi.ManualApiKeyStore
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import com.google.ai.edge.gallery.ui.theme.ThemeSettings
 import com.google.ai.edge.gallery.ui.theme.absoluteBlack
@@ -103,7 +112,7 @@ import kotlin.math.min
 
 private val THEME_OPTIONS = listOf(Theme.THEME_AUTO, Theme.THEME_LIGHT, Theme.THEME_DARK)
 
-private val TABS = listOf("CONFIG", "TERMINAL", "INFERENCE", "SYSTEM")
+private val TABS = listOf("CONFIG", "CLOUD", "TERMINAL", "INFERENCE", "SYSTEM")
 
 /** Tag-filter sets for each log tab. */
 private val TERMINAL_FILTERS = listOf(
@@ -118,10 +127,11 @@ private val INFERENCE_FILTERS = listOf(
 /**
  * SYS_SETTINGS — Full-screen, multi-tabbed settings and diagnostics hub.
  *
- * Tab 0 (CONFIG)    : Appearance overrides, custom colors, HF token, open-source notices.
- * Tab 1 (TERMINAL)  : Live logcat stream filtered to shell/PTY tags.
- * Tab 2 (INFERENCE) : Live logcat stream filtered to LLM/inference tags.
- * Tab 3 (SYSTEM)    : Unfiltered logcat — crash stack-traces, OOM events, OS kills.
+ * Tab 0 (CONFIG)    : Appearance overrides, custom colors, HF token, agent mode.
+ * Tab 1 (CLOUD)     : Cloud provider credentials — Gemini and Claude OAuth / API keys.
+ * Tab 2 (TERMINAL)  : Live logcat stream filtered to shell/PTY tags.
+ * Tab 3 (INFERENCE) : Live logcat stream filtered to LLM/inference tags.
+ * Tab 4 (SYSTEM)    : Unfiltered logcat — crash stack-traces, OOM events, OS kills.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -140,11 +150,11 @@ fun SystemSettingsScreen(
   Scaffold(
     containerColor = absoluteBlack,
     floatingActionButton = {
-      // Show a "Copy All Logs" FAB on log tabs.
-      if (selectedTab > 0) {
+      // Show a "Copy All Logs" FAB on log tabs (TERMINAL, INFERENCE, SYSTEM — indices 2..4).
+      if (selectedTab > 1) {
         val activeManager = when (selectedTab) {
-          1 -> terminalLogManager
-          2 -> inferenceLogManager
+          2 -> terminalLogManager
+          3 -> inferenceLogManager
           else -> systemLogManager
         }
         ExtendedFloatingActionButton(
@@ -164,22 +174,25 @@ fun SystemSettingsScreen(
         .fillMaxSize()
         .padding(innerPadding),
     ) {
-      // ── Tab bar ────────────────────────────────────────────────────
+      // ── Marathon-style tab bar ─────────────────────────────────────
       PrimaryTabRow(
         selectedTabIndex = selectedTab,
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        containerColor = absoluteBlack,
         contentColor = neonGreen,
       ) {
         TABS.forEachIndexed { index, title ->
           Tab(
             selected = selectedTab == index,
             onClick = { selectedTab = index },
+            selectedContentColor = neonGreen,
+            unselectedContentColor = terminalOnSurface.copy(alpha = 0.4f),
             text = {
               Text(
                 title,
                 fontFamily = FontFamily.Monospace,
-                fontSize = 11.sp,
+                fontSize = 10.sp,
                 fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal,
+                letterSpacing = 1.sp,
               )
             },
           )
@@ -192,17 +205,18 @@ fun SystemSettingsScreen(
           modelManagerViewModel = modelManagerViewModel,
           skillManagerViewModel = skillManagerViewModel,
         )
-        1 -> LogTab(
+        1 -> CloudTab(context = context)
+        2 -> LogTab(
           logBoxManager = terminalLogManager,
           label = "TERMINAL",
           hint = "stdout/stderr from NativeShellBridge · TermuxSessionBridge · EnvironmentInstaller",
         )
-        2 -> LogTab(
+        3 -> LogTab(
           logBoxManager = inferenceLogManager,
           label = "INFERENCE",
           hint = "LiteRT token generation · model load · context events",
         )
-        3 -> LogTab(
+        4 -> LogTab(
           logBoxManager = systemLogManager,
           label = "SYSTEM",
           hint = "All logcat · crash stack-traces · OOM · OS kill (-9) events",
@@ -249,6 +263,7 @@ private fun ConfigTab(
 
   val context = LocalContext.current
   val focusManager = LocalFocusManager.current
+  var usernameInput by remember { mutableStateOf(UserProfileStore.getUsername(context)) }
 
   Column(
     modifier = Modifier
@@ -268,6 +283,75 @@ private fun ConfigTab(
       style = labelSmallNarrow,
       color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+
+    // ── PROFILE ────────────────────────────────────────────────────
+    Column(
+      modifier = Modifier.fillMaxWidth(),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      Text(
+        "PROFILE",
+        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium),
+        color = neonGreen,
+        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+      )
+      Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Box(
+          modifier = Modifier
+            .weight(1f)
+            .border(
+              width = 1.dp,
+              color = if (usernameInput.isNotEmpty()) neonGreen.copy(alpha = 0.6f)
+                      else MaterialTheme.colorScheme.outline,
+              shape = RoundedCornerShape(4.dp),
+            )
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        ) {
+          BasicTextField(
+            value = usernameInput,
+            onValueChange = { if (it.length <= UserProfileStore.MAX_LEN) usernameInput = it },
+            singleLine = true,
+            textStyle = TextStyle(
+              color = terminalOnSurface,
+              fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+              fontSize = 14.sp,
+            ),
+            cursorBrush = SolidColor(neonGreen),
+            decorationBox = { inner ->
+              if (usernameInput.isEmpty()) {
+                Text(
+                  "e.g. OPERATOR",
+                  style = TextStyle(
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    fontSize = 14.sp,
+                  ),
+                )
+              }
+              inner()
+            },
+          )
+        }
+        Button(
+          onClick = {
+            UserProfileStore.setUsername(context, usernameInput)
+            focusManager.clearFocus()
+          },
+          enabled = usernameInput.isNotEmpty(),
+        ) {
+          Text("SAVE", fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+        }
+      }
+      val savedName = UserProfileStore.getUsername(context)
+      Text(
+        if (savedName.isNotBlank()) "Shown as: $savedName" else "Not set — showing 'You'",
+        style = labelSmallNarrow,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
+    }
 
     // ── Theme switcher ─────────────────────────────────────────────
     Column(
@@ -336,6 +420,39 @@ private fun ConfigTab(
               )
             },
             checked = shellEngineIndex == index,
+            label = { Text(label, fontFamily = FontFamily.Monospace) },
+          )
+        }
+      }
+    }
+
+    // ── Agent Mode ─────────────────────────────────────────────────
+    // AUTO: agent calls tools in sequence without pausing.
+    // STEP: agent pauses after each tool result and asks "▶ Continue?" before proceeding.
+    Column(
+      modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {},
+      verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+      var stepModeEnabled by remember { mutableStateOf(CluAgentSettings.load(context)) }
+      Text(
+        "Agent Mode",
+        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium),
+      )
+      Text(
+        "AUTO — runs all tool steps without pausing  ·  STEP — pauses after each tool",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
+      MultiChoiceSegmentedButtonRow {
+        listOf("AUTO", "STEP").forEachIndexed { index, label ->
+          SegmentedButton(
+            shape = SegmentedButtonDefaults.itemShape(index = index, count = 2),
+            onCheckedChange = {
+              val newStep = index == 1
+              stepModeEnabled = newStep
+              CluAgentSettings.save(context, newStep)
+            },
+            checked = if (index == 0) !stepModeEnabled else stepModeEnabled,
             label = { Text(label, fontFamily = FontFamily.Monospace) },
           )
         }
@@ -477,7 +594,7 @@ private fun ConfigTab(
           },
           enabled = curHfToken != null,
         ) {
-          Text("Clear")
+          Text("CLEAR")
         }
         val handleSaveToken = {
           modelManagerViewModel.saveAccessToken(
@@ -546,6 +663,210 @@ private fun ConfigTab(
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 4.dp),
       )
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CLOUD tab — cloud provider credentials hub
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun CloudTab(context: Context) {
+  val geminiPlaceholder = GeminiAuthConfig.CLIENT_ID == "REPLACE_WITH_GOOGLE_OAUTH_CLIENT_ID"
+
+  var geminiKeyInput by remember { mutableStateOf(GeminiApiKeyStore.getApiKey(context) ?: "") }
+  var claudeKeyInput by remember { mutableStateOf(ManualApiKeyStore.getApiKey(context, "anthropic") ?: "") }
+  val focusManager = LocalFocusManager.current
+
+  Column(
+    modifier = Modifier
+      .fillMaxSize()
+      .verticalScroll(rememberScrollState())
+      .padding(20.dp),
+    verticalArrangement = Arrangement.spacedBy(24.dp),
+  ) {
+
+    // ── GEMINI section ───────────────────────────────────────────────
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+      Text(
+        "GEMINI",
+        style = MaterialTheme.typography.titleSmall.copy(
+          fontWeight = FontWeight.Bold,
+          fontFamily = FontFamily.Monospace,
+          letterSpacing = 2.sp,
+        ),
+        color = neonGreen,
+      )
+
+      // Status chip
+      val geminiStatus = when {
+        GeminiTokenManager.hasValidAccessToken(context) -> "OAUTH"
+        !GeminiApiKeyStore.getApiKey(context).isNullOrBlank() -> "API KEY"
+        else -> "NOT SET"
+      }
+      CloudStatusChip(geminiStatus)
+
+      // OAuth client ID warning
+      if (geminiPlaceholder) {
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .background(
+              MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f),
+              RoundedCornerShape(8.dp),
+            )
+            .border(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+            .padding(12.dp),
+        ) {
+          Text(
+            "Google OAuth requires a Client ID. See GeminiAuthConfig.kt.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+          )
+        }
+      }
+
+      // API key input row
+      CloudKeyInputRow(
+        label = "Gemini API Key",
+        value = geminiKeyInput,
+        onValueChange = { geminiKeyInput = it },
+        onSave = {
+          GeminiApiKeyStore.setApiKey(context, geminiKeyInput.trim())
+          com.google.ai.edge.gallery.data.providers.ProviderRegistry.invalidateAll()
+          focusManager.clearFocus()
+        },
+        onClear = {
+          GeminiApiKeyStore.clearApiKey(context)
+          geminiKeyInput = ""
+          com.google.ai.edge.gallery.data.providers.ProviderRegistry.invalidateAll()
+        },
+      )
+
+      // OAuth connect button — disabled when CLIENT_ID is the placeholder
+      if (geminiPlaceholder) {
+        OutlinedButton(
+          onClick = {},
+          enabled = false,
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          Text("Connect Gemini — Client ID required", fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+        }
+      } else {
+        GeminiConnectButton()
+      }
+    }
+
+    // ── CLAUDE section ───────────────────────────────────────────────
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+      Text(
+        "CLAUDE",
+        style = MaterialTheme.typography.titleSmall.copy(
+          fontWeight = FontWeight.Bold,
+          fontFamily = FontFamily.Monospace,
+          letterSpacing = 2.sp,
+        ),
+        color = neonGreen,
+      )
+
+      // Status chip
+      val claudeStatus = when {
+        ClaudeCredentialStore.hasValidCredentials(context) -> "OAUTH"
+        !ManualApiKeyStore.getApiKey(context, "anthropic").isNullOrBlank() -> "API KEY"
+        else -> "NOT SET"
+      }
+      CloudStatusChip(claudeStatus)
+
+      // API key input row
+      CloudKeyInputRow(
+        label = "Claude API Key",
+        value = claudeKeyInput,
+        onValueChange = { claudeKeyInput = it },
+        onSave = {
+          ManualApiKeyStore.setApiKey(context, "anthropic", claudeKeyInput.trim())
+          com.google.ai.edge.gallery.data.providers.ProviderRegistry.invalidateAll()
+          focusManager.clearFocus()
+        },
+        onClear = {
+          ManualApiKeyStore.clearApiKey(context, "anthropic")
+          claudeKeyInput = ""
+          com.google.ai.edge.gallery.data.providers.ProviderRegistry.invalidateAll()
+        },
+      )
+
+      // OAuth connect button
+      ClaudeConnectButton()
+    }
+  }
+}
+
+@Composable
+private fun CloudStatusChip(status: String) {
+  val (bg, fg) = when (status) {
+    "OAUTH"   -> MaterialTheme.colorScheme.primary to MaterialTheme.colorScheme.onPrimary
+    "API KEY" -> MaterialTheme.colorScheme.tertiaryContainer to MaterialTheme.colorScheme.onTertiaryContainer
+    else      -> MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant
+  }
+  Box(
+    modifier = Modifier
+      .background(bg, RoundedCornerShape(50))
+      .padding(horizontal = 12.dp, vertical = 4.dp),
+  ) {
+    Text(status, style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace), color = fg)
+  }
+}
+
+@Composable
+private fun CloudKeyInputRow(
+  label: String,
+  value: String,
+  onValueChange: (String) -> Unit,
+  onSave: () -> Unit,
+  onClear: () -> Unit,
+) {
+  var isFocused by remember { mutableStateOf(false) }
+  Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+      BasicTextField(
+        value = value,
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = { onSave() }),
+        modifier = Modifier
+          .weight(1f)
+          .onFocusChanged { isFocused = it.isFocused },
+        onValueChange = onValueChange,
+        textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontFamily = FontFamily.Monospace, fontSize = 12.sp),
+        cursorBrush = SolidColor(neonGreen),
+      ) { innerTextField ->
+        Box(
+          modifier = Modifier
+            .border(
+              width = if (isFocused) 2.dp else 1.dp,
+              color = if (isFocused) neonGreen else MaterialTheme.colorScheme.outline,
+              shape = CircleShape,
+            )
+            .height(40.dp),
+          contentAlignment = Alignment.CenterStart,
+        ) {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.padding(start = 16.dp).weight(1f)) {
+              if (value.isEmpty()) {
+                Text("Paste key here", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+              }
+              innerTextField()
+            }
+            if (value.isNotEmpty()) {
+              IconButton(modifier = Modifier.offset(x = 1.dp), onClick = onSave) {
+                Icon(Icons.Rounded.CheckCircle, contentDescription = "Save", tint = neonGreen)
+              }
+            }
+          }
+        }
+      }
+      OutlinedButton(onClick = onClear, enabled = value.isNotEmpty()) { Text("CLEAR") }
     }
   }
 }

@@ -18,6 +18,7 @@ package com.google.ai.edge.gallery.ui.osmodules
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,6 +38,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Bookmarks
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Link
@@ -68,6 +70,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.ai.edge.gallery.data.mcp.McpConnectionManager
@@ -79,6 +82,46 @@ import com.google.ai.edge.gallery.ui.theme.neonGreen
 import com.google.ai.edge.gallery.ui.theme.terminalLightGrey
 import com.google.ai.edge.gallery.ui.theme.terminalMidGrey
 import kotlinx.coroutines.launch
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STACHE presets
+// ─────────────────────────────────────────────────────────────────────────────
+
+private data class McpPreset(
+  val name: String,
+  val command: String,
+  val description: String,
+  val envVars: Map<String, String> = emptyMap(),
+)
+
+private val STACHE_PRESETS = listOf(
+  McpPreset(
+    name = "Filesystem",
+    command = "npx -y @modelcontextprotocol/server-filesystem",
+    description = "Read/write local files and directories",
+  ),
+  McpPreset(
+    name = "GitHub",
+    command = "npx -y @modelcontextprotocol/server-github",
+    description = "GitHub repos, PRs, issues, and code search",
+    envVars = mapOf("GITHUB_TOKEN" to ""),
+  ),
+  McpPreset(
+    name = "Web Fetch",
+    command = "npx -y @modelcontextprotocol/server-fetch",
+    description = "Fetch and extract content from web pages",
+  ),
+  McpPreset(
+    name = "Sequential Thinking",
+    command = "npx -y @modelcontextprotocol/server-sequential-thinking",
+    description = "Dynamic step-by-step reasoning tool",
+  ),
+  McpPreset(
+    name = "Memory",
+    command = "npx -y @modelcontextprotocol/server-memory",
+    description = "Persistent knowledge graph memory store",
+  ),
+)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public entry-point
@@ -100,30 +143,64 @@ import kotlinx.coroutines.launch
 fun LnkBoxScreen(mcpConnectionManager: McpConnectionManager) {
   val statuses by mcpConnectionManager.statuses.collectAsState()
   var showAddSheet by remember { mutableStateOf(false) }
+  var showStacheSheet by remember { mutableStateOf(false) }
   val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+  val stacheSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
   val scope = rememberCoroutineScope()
+
+  // Pre-fill values set when the user selects a STACHE preset
+  var prefillName by remember { mutableStateOf("") }
+  var prefillCommand by remember { mutableStateOf("") }
+  var prefillEnvVars by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
 
   Scaffold(
     containerColor = absoluteBlack,
     floatingActionButton = {
-      FloatingActionButton(
-        onClick = { showAddSheet = true },
-        containerColor = neonGreen,
-        contentColor = absoluteBlack,
-        shape = RoundedCornerShape(12.dp),
+      Column(
+        horizontalAlignment = Alignment.End,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
       ) {
-        Row(
-          verticalAlignment = Alignment.CenterVertically,
-          modifier = Modifier.padding(horizontal = 16.dp),
+        // STACHE preset picker FAB
+        FloatingActionButton(
+          onClick = { showStacheSheet = true },
+          containerColor = Color(0xFF111111),
+          contentColor = neonGreen,
+          shape = RoundedCornerShape(12.dp),
         ) {
-          Icon(Icons.Default.Add, contentDescription = "Add MCP server", modifier = Modifier.size(18.dp))
-          Spacer(Modifier.width(6.dp))
-          Text(
-            "ADD LINK",
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.Bold,
-            fontSize = 13.sp,
-          )
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 16.dp),
+          ) {
+            Icon(Icons.Filled.Bookmarks, contentDescription = "Stache presets", modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(
+              "STACHE",
+              fontFamily = FontFamily.Monospace,
+              fontWeight = FontWeight.Bold,
+              fontSize = 13.sp,
+            )
+          }
+        }
+        // Primary ADD LINK FAB
+        FloatingActionButton(
+          onClick = { showAddSheet = true },
+          containerColor = neonGreen,
+          contentColor = absoluteBlack,
+          shape = RoundedCornerShape(12.dp),
+        ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 16.dp),
+          ) {
+            Icon(Icons.Default.Add, contentDescription = "Add MCP server", modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(
+              "ADD LINK",
+              fontFamily = FontFamily.Monospace,
+              fontWeight = FontWeight.Bold,
+              fontSize = 13.sp,
+            )
+          }
         }
       }
     },
@@ -144,24 +221,61 @@ fun LnkBoxScreen(mcpConnectionManager: McpConnectionManager) {
             onDisconnect = { mcpConnectionManager.disconnect(status.config.name) },
           )
         }
-        item { Spacer(Modifier.height(80.dp)) } // FAB clearance
+        item { Spacer(Modifier.height(100.dp)) } // extra clearance for two FABs
       }
     }
   }
 
+  // ── STACHE preset picker sheet ──────────────────────────────────────────────
+  if (showStacheSheet) {
+    ModalBottomSheet(
+      onDismissRequest = { showStacheSheet = false },
+      sheetState = stacheSheetState,
+      containerColor = terminalMidGrey,
+    ) {
+      StacheSheet(
+        onDismiss = {
+          scope.launch { stacheSheetState.hide() }.invokeOnCompletion { showStacheSheet = false }
+        },
+        onSelectPreset = { preset ->
+          prefillName = preset.name
+          prefillCommand = preset.command
+          prefillEnvVars = preset.envVars
+          scope.launch { stacheSheetState.hide() }.invokeOnCompletion {
+            showStacheSheet = false
+            showAddSheet = true
+          }
+        },
+      )
+    }
+  }
+
+  // ── Add Link form sheet ─────────────────────────────────────────────────────
   if (showAddSheet) {
     ModalBottomSheet(
-      onDismissRequest = { showAddSheet = false },
+      onDismissRequest = {
+        showAddSheet = false
+        prefillName = ""; prefillCommand = ""; prefillEnvVars = emptyMap()
+      },
       sheetState = sheetState,
       containerColor = terminalMidGrey,
     ) {
       AddLinkForm(
+        initialName = prefillName,
+        initialCommand = prefillCommand,
+        initialEnvVars = prefillEnvVars,
         onDismiss = {
-          scope.launch { sheetState.hide() }.invokeOnCompletion { showAddSheet = false }
+          scope.launch { sheetState.hide() }.invokeOnCompletion {
+            showAddSheet = false
+            prefillName = ""; prefillCommand = ""; prefillEnvVars = emptyMap()
+          }
         },
         onSubmit = { config ->
           mcpConnectionManager.addAndConnect(config)
-          scope.launch { sheetState.hide() }.invokeOnCompletion { showAddSheet = false }
+          scope.launch { sheetState.hide() }.invokeOnCompletion {
+            showAddSheet = false
+            prefillName = ""; prefillCommand = ""; prefillEnvVars = emptyMap()
+          }
         },
       )
     }
@@ -236,7 +350,7 @@ private fun ServerStatusCard(
         fontFamily = FontFamily.Monospace,
         fontSize = 11.sp,
         maxLines = 1,
-        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+        overflow = TextOverflow.Ellipsis,
       )
 
       // ── State / error ──────────────────────────────────────────────────
@@ -270,11 +384,16 @@ private fun ServerStatusCard(
 private fun AddLinkForm(
   onDismiss: () -> Unit,
   onSubmit: (McpServerConfig) -> Unit,
+  initialName: String = "",
+  initialCommand: String = "",
+  initialEnvVars: Map<String, String> = emptyMap(),
 ) {
-  var serverName by remember { mutableStateOf("") }
-  var command by remember { mutableStateOf("") }
+  var serverName by remember { mutableStateOf(initialName) }
+  var command by remember { mutableStateOf(initialCommand) }
   // Each env-var entry is a Pair<key, value> backed by a snapshot state list.
-  val envVars = remember { mutableStateListOf<Pair<String, String>>() }
+  val envVars = remember {
+    mutableStateListOf(*initialEnvVars.entries.map { it.key to it.value }.toTypedArray())
+  }
   var nameError by remember { mutableStateOf(false) }
   var commandError by remember { mutableStateOf(false) }
 
@@ -461,6 +580,105 @@ private fun EnvVarRow(
         contentDescription = "Remove variable",
         tint = Color(0xFFFF3B30),
         modifier = Modifier.size(16.dp),
+      )
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STACHE preset sheet
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun StacheSheet(
+  onDismiss: () -> Unit,
+  onSelectPreset: (McpPreset) -> Unit,
+) {
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .verticalScroll(rememberScrollState())
+      .padding(horizontal = 20.dp)
+      .padding(bottom = 32.dp),
+    verticalArrangement = Arrangement.spacedBy(10.dp),
+  ) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      Icon(Icons.Filled.Bookmarks, contentDescription = null, tint = neonGreen, modifier = Modifier.size(20.dp))
+      Spacer(Modifier.width(8.dp))
+      Text(
+        "STACHE PRESETS",
+        color = neonGreen,
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Bold,
+        fontSize = 15.sp,
+      )
+    }
+    Text(
+      "Tap a preset to pre-fill the form",
+      color = Color.White.copy(alpha = 0.45f),
+      fontFamily = FontFamily.Monospace,
+      fontSize = 12.sp,
+    )
+    Spacer(Modifier.height(4.dp))
+    STACHE_PRESETS.forEach { preset ->
+      PresetCard(preset = preset, onClick = { onSelectPreset(preset) })
+    }
+    Spacer(Modifier.height(4.dp))
+    TextButton(
+      onClick = onDismiss,
+      colors = ButtonDefaults.textButtonColors(contentColor = Color.White.copy(alpha = 0.4f)),
+      modifier = Modifier.fillMaxWidth(),
+    ) {
+      Text("CANCEL", fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+    }
+  }
+}
+
+@Composable
+private fun PresetCard(preset: McpPreset, onClick: () -> Unit) {
+  Box(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(10.dp))
+      .background(terminalLightGrey.copy(alpha = 0.15f))
+      .border(1.dp, terminalLightGrey, RoundedCornerShape(10.dp))
+      .clickable(onClick = onClick)
+      .padding(14.dp),
+  ) {
+    Column {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+          preset.name.uppercase(),
+          color = Color.White,
+          fontFamily = FontFamily.Monospace,
+          fontWeight = FontWeight.Bold,
+          fontSize = 13.sp,
+          modifier = Modifier.weight(1f),
+        )
+        if (preset.envVars.isNotEmpty()) {
+          Text(
+            preset.envVars.keys.joinToString(" · "),
+            color = Color(0xFFFFBB00).copy(alpha = 0.8f),
+            fontFamily = FontFamily.Monospace,
+            fontSize = 10.sp,
+          )
+        }
+      }
+      Spacer(Modifier.height(4.dp))
+      Text(
+        preset.description,
+        color = neonGreen.copy(alpha = 0.7f),
+        fontFamily = FontFamily.Monospace,
+        fontSize = 11.sp,
+      )
+      Spacer(Modifier.height(4.dp))
+      Text(
+        preset.command,
+        color = Color.White.copy(alpha = 0.4f),
+        fontFamily = FontFamily.Monospace,
+        fontSize = 10.sp,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
       )
     }
   }

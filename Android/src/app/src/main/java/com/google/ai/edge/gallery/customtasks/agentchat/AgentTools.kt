@@ -22,6 +22,7 @@ import com.google.ai.edge.gallery.common.SkillProgressAgentAction
 import com.google.ai.edge.gallery.data.TerminalSessionManager
 import com.google.ai.edge.gallery.data.brainbox.BrainBoxDao
 import com.google.ai.edge.gallery.data.brainbox.VectorEngine
+import com.google.ai.edge.gallery.data.python.PythonBridge
 import com.google.ai.edge.litertlm.Tool
 import com.google.ai.edge.litertlm.ToolSet
 import java.io.File
@@ -29,7 +30,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.runBlocking
 
 private const val TAG = "AgentTools"
 
@@ -115,7 +118,12 @@ class AgentTools : ToolSet {
     val (exitCode, output) = tsm.executeCommandWithExitCode(command)
     val capped = capOutputWithSpill(output, "shellExecute")
     Log.d(TAG, "shellExecute exit=$exitCode output=${output.take(200)}")
-    sendAgentAction(SkillProgressAgentAction(label = "Executed: $command", inProgress = false))
+    sendAgentAction(SkillProgressAgentAction(
+      label = "Executed: $command",
+      inProgress = false,
+      addItemTitle = "Executed: $command",
+      addItemDescription = "exit $exitCode · ${capped.lines().firstOrNull { it.isNotBlank() }?.take(60) ?: "no output"}",
+    ))
     return mapOf("stdout" to capped, "exit_code" to exitCode.toString())
   }
 
@@ -135,7 +143,12 @@ class AgentTools : ToolSet {
       }
       target.parentFile?.mkdirs()
       target.writeText(content, Charsets.UTF_8)
-      sendAgentAction(SkillProgressAgentAction(label = "Written: $file_path", inProgress = false))
+      sendAgentAction(SkillProgressAgentAction(
+        label = "Written: $file_path",
+        inProgress = false,
+        addItemTitle = "Written: $file_path",
+        addItemDescription = "${content.length} bytes",
+      ))
       mapOf("result" to "ok", "path" to target.absolutePath)
     } catch (e: Exception) {
       Log.e(TAG, "fileBoxWrite failed", e)
@@ -148,6 +161,7 @@ class AgentTools : ToolSet {
     if (file_path.isBlank()) return mapOf("lines" to "Error: file_path argument is required")
     val ctx = context ?: return mapOf("lines" to "Error: context not available")
     Log.d(TAG, "fileBoxReadLines: $file_path [$start_line..$end_line]")
+    sendAgentAction(SkillProgressAgentAction(label = "Reading: $file_path", inProgress = true))
     return try {
       val safeRelative = file_path.trimStart('/')
       val root = File(ctx.filesDir, "clu_file_box")
@@ -163,6 +177,12 @@ class AgentTools : ToolSet {
       val slice = allLines.drop(startIdx).take(lineCount)
       val result = slice.joinToString("\n")
       val capped = capOutputWithSpill(result, "fileBoxReadLines")
+      sendAgentAction(SkillProgressAgentAction(
+        label = "Read: $file_path (${allLines.size} lines)",
+        inProgress = false,
+        addItemTitle = "Read: $file_path",
+        addItemDescription = "${allLines.size} lines · L$start_line–$end_line",
+      ))
       mapOf("lines" to capped, "total_lines" to allLines.size.toString())
     } catch (e: Exception) {
       Log.e(TAG, "fileBoxReadLines failed", e)
@@ -176,6 +196,7 @@ class AgentTools : ToolSet {
     if (keyword.isBlank()) return mapOf("matches" to "Error: keyword argument is required")
     val ctx = context ?: return mapOf("matches" to "Error: context not available")
     Log.d(TAG, "brainBoxGrep: $file_path keyword='$keyword'")
+    sendAgentAction(SkillProgressAgentAction(label = "Searching: $keyword in $file_path", inProgress = true))
     return try {
       val safeRelative = file_path.trimStart('/')
       val root = File(ctx.filesDir, "clu_file_box")
@@ -197,6 +218,12 @@ class AgentTools : ToolSet {
         if (isEmpty()) append("(no matches)")
       }
       val capped = capOutputWithSpill(result, "brainBoxGrep")
+      sendAgentAction(SkillProgressAgentAction(
+        label = "Searched: $keyword in $file_path",
+        inProgress = false,
+        addItemTitle = "Searched: $keyword",
+        addItemDescription = capped.lines().firstOrNull { it.isNotBlank() }?.take(60) ?: "no matches",
+      ))
       mapOf("matches" to capped)
     } catch (e: Exception) {
       Log.e(TAG, "brainBoxGrep failed", e)
@@ -219,7 +246,12 @@ class AgentTools : ToolSet {
         dao.searchNeurons(query)
       }
       if (matches.isEmpty()) {
-        sendAgentAction(SkillProgressAgentAction(label = "Recall: No matches", inProgress = false))
+        sendAgentAction(SkillProgressAgentAction(
+          label = "Recall: No matches",
+          inProgress = false,
+          addItemTitle = "Recall: No matches",
+          addItemDescription = query.take(60),
+        ))
         return mapOf("result" to "No matches found for '$query'")
       }
 
@@ -234,7 +266,12 @@ class AgentTools : ToolSet {
         }
       }
 
-      sendAgentAction(SkillProgressAgentAction(label = "Recall: ${matches.size} found", inProgress = false))
+      sendAgentAction(SkillProgressAgentAction(
+        label = "Recall: ${matches.size} found",
+        inProgress = false,
+        addItemTitle = "Recall: ${matches.size} result${if (matches.size == 1) "" else "s"}",
+        addItemDescription = matches.firstOrNull()?.label ?: "",
+      ))
       mapOf("result" to capOutputWithSpill(resultStr, "brainBoxSearch"))
     } catch (e: Exception) {
       Log.e(TAG, "brainBoxSearch failed", e)
@@ -267,7 +304,12 @@ class AgentTools : ToolSet {
         dao.insertNeuron(neuron)
       }
       
-      sendAgentAction(SkillProgressAgentAction(label = "Node Forged: $label", inProgress = false))
+      sendAgentAction(SkillProgressAgentAction(
+        label = "Node Forged: $label",
+        inProgress = false,
+        addItemTitle = "Forged: $label",
+        addItemDescription = type.ifBlank { "Concept" },
+      ))
       mapOf("result" to "ok", "message" to "Successfully forged node '$label' in BrainBox")
     } catch (e: Exception) {
       Log.e(TAG, "brainBoxWrite failed", e)
@@ -290,19 +332,34 @@ class AgentTools : ToolSet {
         val target = matches.find { it.label.equals(target_label, ignoreCase = true) }
 
         if (target == null) {
-          sendAgentAction(SkillProgressAgentAction(label = "Rewire Failed: Node not found", inProgress = false))
+          sendAgentAction(SkillProgressAgentAction(
+            label = "Rewire Failed: Node not found",
+            inProgress = false,
+            addItemTitle = "Rewire Failed",
+            addItemDescription = "Not found: $target_label",
+          ))
           return@runBlocking mapOf("result" to "Error: No node found with exact label '$target_label'")
         }
 
         if (target.isCore) {
-          sendAgentAction(SkillProgressAgentAction(label = "Rewire Failed: Core protection active", inProgress = false))
+          sendAgentAction(SkillProgressAgentAction(
+            label = "Rewire Failed: Core protection active",
+            inProgress = false,
+            addItemTitle = "Rewire Blocked",
+            addItemDescription = "Core node: $target_label",
+          ))
           return@runBlocking mapOf("result" to "Error: Cannot edit core node '$target_label'. Core nodes are read-only.")
         }
 
         val updatedNode = target.copy(content = new_content)
         dao.updateNeuron(updatedNode)
 
-        sendAgentAction(SkillProgressAgentAction(label = "Node Rewired: $target_label", inProgress = false))
+        sendAgentAction(SkillProgressAgentAction(
+          label = "Node Rewired: $target_label",
+          inProgress = false,
+          addItemTitle = "Rewired: $target_label",
+          addItemDescription = "",
+        ))
         mapOf("result" to "ok", "message" to "Successfully updated node '$target_label'")
       }
     } catch (e: Exception) {
@@ -325,23 +382,194 @@ class AgentTools : ToolSet {
         val target = matches.find { it.label.equals(target_label, ignoreCase = true) }
 
         if (target == null) {
-          sendAgentAction(SkillProgressAgentAction(label = "Prune Failed: Node not found", inProgress = false))
+          sendAgentAction(SkillProgressAgentAction(
+            label = "Prune Failed: Node not found",
+            inProgress = false,
+            addItemTitle = "Prune Failed",
+            addItemDescription = "Not found: $target_label",
+          ))
           return@runBlocking mapOf("result" to "Error: No node found with exact label '$target_label'")
         }
 
         if (target.isCore) {
-          sendAgentAction(SkillProgressAgentAction(label = "Prune Failed: Core protection active", inProgress = false))
+          sendAgentAction(SkillProgressAgentAction(
+            label = "Prune Failed: Core protection active",
+            inProgress = false,
+            addItemTitle = "Prune Blocked",
+            addItemDescription = "Core node: $target_label",
+          ))
           return@runBlocking mapOf("result" to "Error: Cannot delete core node '$target_label'. Core nodes are protected.")
         }
 
         dao.deleteNeuron(target)
 
-        sendAgentAction(SkillProgressAgentAction(label = "Node Pruned: $target_label", inProgress = false))
+        sendAgentAction(SkillProgressAgentAction(
+          label = "Node Pruned: $target_label",
+          inProgress = false,
+          addItemTitle = "Pruned: $target_label",
+          addItemDescription = "",
+        ))
         mapOf("result" to "ok", "message" to "Successfully deleted node '$target_label'")
       }
     } catch (e: Exception) {
       Log.e(TAG, "brainBoxDelete failed", e)
       mapOf("result" to "Error: ${e.message}")
     }
+  }
+
+  @Tool("Execute a Python 3.11 script on-device using the embedded CPython interpreter. Returns captured stdout and stderr.")
+  fun PYTHON_EXEC(python_script: String): Map<String, String> {
+    if (python_script.isBlank()) return mapOf("error" to "python_script is required")
+    sendAgentAction(SkillProgressAgentAction(label = "PYTHON_EXEC", inProgress = true))
+    return try {
+      val output = runBlocking { PythonBridge.executeScript(python_script) }
+      sendAgentAction(SkillProgressAgentAction(
+        label = "PYTHON_EXEC done",
+        inProgress = false,
+        addItemTitle = "Python executed",
+        addItemDescription = output.lines().firstOrNull { it.isNotBlank() }?.take(60) ?: "done",
+      ))
+      mapOf("output" to output)
+    } catch (e: Exception) {
+      Log.e(TAG, "PYTHON_EXEC failed", e)
+      sendAgentAction(SkillProgressAgentAction(
+        label = "PYTHON_EXEC error",
+        inProgress = false,
+        addItemTitle = "Python error",
+        addItemDescription = (e.message ?: "execution failed").take(60),
+      ))
+      mapOf("error" to (e.message ?: "PYTHON_EXEC failed"))
+    }
+  }
+
+  @Tool("Fetch the text content of a web URL (GET only). Returns stripped page text, truncated to 4000 chars.")
+  fun webFetch(url: String): Map<String, String> {
+    if (url.isBlank() || (!url.startsWith("http://") && !url.startsWith("https://"))) {
+      return mapOf("error" to "url must start with http:// or https://")
+    }
+    sendAgentAction(SkillProgressAgentAction(label = "webFetch: $url", inProgress = true))
+    return try {
+      val client = okhttp3.OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .build()
+      val request = okhttp3.Request.Builder()
+        .url(url)
+        .addHeader("User-Agent", "CLU-BOX/1.0 (Android)")
+        .get()
+        .build()
+      val response = client.newCall(request).execute()
+      val body = response.body?.string() ?: ""
+      val stripped = body
+        .replace(Regex("<script[^>]*>[\\s\\S]*?</script>", RegexOption.IGNORE_CASE), " ")
+        .replace(Regex("<style[^>]*>[\\s\\S]*?</style>", RegexOption.IGNORE_CASE), " ")
+        .replace(Regex("<[^>]+>"), " ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+        .take(4000)
+      sendAgentAction(SkillProgressAgentAction(
+        label = "webFetch done",
+        inProgress = false,
+        addItemTitle = url.take(50),
+        addItemDescription = "HTTP ${response.code} · ${stripped.length} chars",
+      ))
+      mapOf("content" to stripped, "status" to response.code.toString(), "url" to url)
+    } catch (e: Exception) {
+      Log.e(TAG, "webFetch failed for $url", e)
+      sendAgentAction(SkillProgressAgentAction(
+        label = "webFetch error",
+        inProgress = false,
+        addItemTitle = "webFetch error",
+        addItemDescription = (e.message ?: "request failed").take(60),
+      ))
+      mapOf("error" to (e.message ?: "webFetch failed"))
+    }
+  }
+
+  // ── Coding Tools ────────────────────────────────────────────────────────────
+
+  @Tool("Compare two files and return a unified diff. Relative paths resolve to the clu_file_box workspace root.")
+  fun fileDiff(file1_path: String, file2_path: String): Map<String, String> {
+    if (file1_path.isBlank()) return mapOf("result" to "[Error: file1_path required]")
+    if (file2_path.isBlank()) return mapOf("result" to "[Error: file2_path required]")
+    sendAgentAction(SkillProgressAgentAction(
+      label = "Diff: ${File(file1_path).name} vs ${File(file2_path).name}",
+      inProgress = true,
+    ))
+    val abs1 = resolveWorkspacePath(file1_path)
+    val abs2 = resolveWorkspacePath(file2_path)
+    val shellResult = shellExecute("""diff -u "$abs1" "$abs2"""")
+    val exitCode = shellResult["exit_code"]?.toIntOrNull() ?: -1
+    val output = when (exitCode) {
+      0 -> "Files are identical."
+      1 -> shellResult["stdout"]?.ifBlank { "[No diff output]" } ?: "[No diff output]"
+      else -> "[diff error (exit $exitCode): ${shellResult["stdout"].orEmpty().take(300)}]"
+    }
+    sendAgentAction(SkillProgressAgentAction(
+      label = "Diff done",
+      inProgress = false,
+      addItemTitle = "fileDiff",
+      addItemDescription = output.lines().firstOrNull { it.isNotBlank() }?.take(80) ?: output.take(80),
+    ))
+    return mapOf("result" to output)
+  }
+
+  @Tool("Search-and-replace the first occurrence of 'search' with 'replace' in a file. Path is relative to clu_file_box root.")
+  fun fileEdit(file_path: String, search: String, replace: String): Map<String, String> {
+    if (file_path.isBlank()) return mapOf("result" to "[Error: file_path required]")
+    if (search.isEmpty()) return mapOf("result" to "[Error: search must not be empty]")
+    val ctx = context ?: return mapOf("result" to "[Error: context not available]")
+    sendAgentAction(SkillProgressAgentAction(label = "Editing: $file_path", inProgress = true))
+    return try {
+      val root = File(ctx.filesDir, "clu_file_box")
+      val target = File(root, file_path.trimStart('/')).canonicalFile
+      if (!target.absolutePath.startsWith(root.canonicalPath)) {
+        return mapOf("result" to "[Error: path traversal not allowed]")
+      }
+      if (!target.exists()) return mapOf("result" to "[Error: file not found: $file_path]")
+      val content = target.readText()
+      if (!content.contains(search)) {
+        return mapOf("result" to "[Error: search string not found in $file_path]")
+      }
+      val count = content.split(search).size - 1
+      target.writeText(content.replaceFirst(search, replace))
+      val msg = "Replaced 1 of $count occurrence(s). Updated: ${target.absolutePath}"
+      sendAgentAction(SkillProgressAgentAction(
+        label = "Edited: $file_path",
+        inProgress = false,
+        addItemTitle = "fileEdit",
+        addItemDescription = msg,
+      ))
+      mapOf("result" to msg)
+    } catch (e: Exception) {
+      Log.e(TAG, "fileEdit failed", e)
+      mapOf("result" to "[Error: ${e.message}]")
+    }
+  }
+
+  @Tool("Recursively grep files for a regex pattern. Returns file:line:match (max 60). file_extension is optional, e.g. kt.")
+  fun codeSearch(pattern: String, directory: String, file_extension: String): Map<String, String> {
+    if (pattern.isBlank()) return mapOf("result" to "[Error: pattern required]")
+    if (directory.isBlank()) return mapOf("result" to "[Error: directory required]")
+    sendAgentAction(SkillProgressAgentAction(label = "Searching: $pattern", inProgress = true))
+    val includeFlag = if (file_extension.isNotBlank()) "--include=\"*.$file_extension\"" else ""
+    val cmd = "grep -rn $includeFlag -- \"$pattern\" \"$directory\" 2>/dev/null | head -60"
+    val shellResult = shellExecute(cmd)
+    val output = shellResult["stdout"].orEmpty().trim().ifBlank { "No matches found." }
+    val capped = capOutputWithSpill(output, "codeSearch")
+    sendAgentAction(SkillProgressAgentAction(
+      label = "Search done: $pattern",
+      inProgress = false,
+      addItemTitle = "codeSearch",
+      addItemDescription = output.lines().firstOrNull { it.isNotBlank() }?.take(80) ?: "No matches.",
+    ))
+    return mapOf("result" to capped)
+  }
+
+  private fun resolveWorkspacePath(path: String): String {
+    if (path.startsWith("/")) return path
+    val ctx = context ?: return path
+    return File(File(ctx.filesDir, "clu_file_box"), path).canonicalPath
   }
 }

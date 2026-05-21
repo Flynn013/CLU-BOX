@@ -24,7 +24,9 @@ import com.google.ai.edge.gallery.customtasks.common.CustomTaskDataForBuiltinTas
 import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.Category
 import com.google.ai.edge.gallery.data.Model
+import com.google.ai.edge.gallery.data.RuntimeType
 import com.google.ai.edge.gallery.data.Task
+import com.google.ai.edge.gallery.runtime.runtimeHelper
 import com.google.ai.edge.gallery.ui.llmchat.LlmChatModelHelper
 import com.google.ai.edge.litertlm.tool
 import dagger.Module
@@ -42,6 +44,7 @@ class AgentChatTask @Inject constructor() : CustomTask {
     Task(
       id = BuiltInTaskId.LLM_AGENT_CHAT,
       label = "CLU/BOX Chat",
+      agentNameRes = R.string.chat_llm_agent_name,
       category = Category.LLM,
       iconVectorResourceId = R.drawable.agent,
       newFeature = true,
@@ -73,43 +76,62 @@ class AgentChatTask @Inject constructor() : CustomTask {
       ?: run { onDone("SkillManagerViewModel not attached"); return }
     smvm.loadSkills {
       try {
-        agentTools.engine = AgentEngine.LOCAL
+        val isCloud = model.runtimeType == RuntimeType.GEMINI_CLOUD
+          || model.runtimeType == RuntimeType.ANTHROPIC_CLOUD
+          || model.runtimeType == RuntimeType.MANUAL_API
+
+        agentTools.engine = if (isCloud) AgentEngine.CLOUD else AgentEngine.LOCAL
 
         // ── RAG: inject core memories into system prompt ─────────────────
         val db = com.google.ai.edge.gallery.data.brainbox.GraphDatabase.getInstance(context)
         val coreMemContext = try {
-            kotlinx.coroutines.runBlocking {
-                com.google.ai.edge.gallery.data.brainbox.RagInjector.buildCoreContext(db.brainBoxDao())
-            }
+          kotlinx.coroutines.runBlocking {
+            com.google.ai.edge.gallery.data.brainbox.RagInjector.buildCoreContext(db.brainBoxDao())
+          }
         } catch (e: Exception) {
-            android.util.Log.w("AgentChatTask", "RAG core context failed: ${e.message}")
-            ""
+          android.util.Log.w("AgentChatTask", "RAG core context failed: ${e.message}")
+          ""
         }
 
+        val username = com.google.ai.edge.gallery.data.UserProfileStore.getUsername(context)
         val finalPrompt = SystemPromptManager.build(
           engine = agentTools.engine,
           basePrompt = task.defaultSystemPrompt,
           skillRegistry = agentTools.skillRegistry,
           coreMemContext = coreMemContext,
+          username = username,
         )
-        
-        LlmChatModelHelper.initialize(
-          context = context,
-          model = model,
-          supportImage = true,
-          supportAudio = true,
-          onDone = onDone,
-          systemInstruction = smvm.getSystemPrompt(finalPrompt),
-          tools = listOf(tool(agentTools)),
-          // Constrained decoding is intentionally DISABLED for Agent Chat.
-          // General-purpose Gemma models (E2B/E4B) were not fine-tuned with the
-          // full 21-tool catalog grammar. Enabling constrained decoding restricts
-          // the model from emitting <|tool_call> tokens, producing garbled output
-          // like <|"|> which breaks the tool execution loop entirely.
-          // The litertlm ToolSet framework handles tool-call routing natively
-          // without needing vocabulary constraints.
-          enableConversationConstrainedDecoding = false,
-        )
+
+        if (isCloud) {
+          model.runtimeHelper.initialize(
+            context = context,
+            model = model,
+            supportImage = true,
+            supportAudio = true,
+            onDone = onDone,
+            systemInstruction = smvm.getSystemPrompt(finalPrompt),
+            tools = listOf(tool(agentTools)),
+            enableConversationConstrainedDecoding = false,
+          )
+        } else {
+          LlmChatModelHelper.initialize(
+            context = context,
+            model = model,
+            supportImage = true,
+            supportAudio = true,
+            onDone = onDone,
+            systemInstruction = smvm.getSystemPrompt(finalPrompt),
+            tools = listOf(tool(agentTools)),
+            // Constrained decoding is intentionally DISABLED for Agent Chat.
+            // General-purpose Gemma models (E2B/E4B) were not fine-tuned with the
+            // full 21-tool catalog grammar. Enabling constrained decoding restricts
+            // the model from emitting <|tool_call> tokens, producing garbled output
+            // like <|"|> which breaks the tool execution loop entirely.
+            // The litertlm ToolSet framework handles tool-call routing natively
+            // without needing vocabulary constraints.
+            enableConversationConstrainedDecoding = false,
+          )
+        }
       } catch (e: Throwable) {
         android.util.Log.e("CLU_CRASH_REPORT", "Model initialization failed: ${e.stackTraceToString()}")
         onDone("Model initialization failed: ${e.message ?: "unknown error"}")
@@ -123,7 +145,7 @@ class AgentChatTask @Inject constructor() : CustomTask {
     model: Model,
     onDone: () -> Unit,
   ) {
-    LlmChatModelHelper.cleanUp(model = model, onDone = onDone)
+    model.runtimeHelper.cleanUp(model = model, onDone = onDone)
   }
 
   @Composable

@@ -21,5 +21,28 @@ enum class AgentEngine {
   /** On-device LiteRT-LM model (Gemma 4 E2B/E4B). */
   LOCAL,
   /** Gemini Cloud API model. */
-  CLOUD,
+  CLOUD;
+
+  /** Per-engine capability metadata consumed by the agent loop driver. */
+  data class Capabilities(
+    val contextTokens: Int,
+    val maxToolCallsPerTurn: Int,
+    val supportsParallelTools: Boolean,
+    val supportsExtendedThinking: Boolean,
+  )
+
+  val capabilities: Capabilities get() = when (this) {
+    LOCAL -> Capabilities(
+      contextTokens             = 8_000,
+      maxToolCallsPerTurn       = 1,
+      supportsParallelTools     = false,
+      supportsExtendedThinking  = false,
+    )
+    CLOUD -> Capabilities(
+      contextTokens             = 128_000,
+      maxToolCallsPerTurn       = Int.MAX_VALUE,
+      supportsParallelTools     = true,
+      supportsExtendedThinking  = true,
+    )
+  }
 }

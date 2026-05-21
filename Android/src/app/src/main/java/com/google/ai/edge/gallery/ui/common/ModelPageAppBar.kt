@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -54,6 +56,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.ConfigKeys
@@ -66,6 +69,8 @@ import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import com.google.ai.edge.gallery.ui.theme.absoluteBlack
 import com.google.ai.edge.gallery.ui.theme.neonGreen
 import com.google.ai.edge.gallery.ui.theme.terminalOnSurface
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -104,6 +109,7 @@ fun ModelPageAppBar(
   val isModelInitialized =
     modelInitializationStatus?.status == ModelInitializationStatusType.INITIALIZED
 
+  Column(modifier = modifier) {
   CenterAlignedTopAppBar(
     colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
       containerColor = absoluteBlack,
@@ -124,10 +130,19 @@ fun ModelPageAppBar(
           Icon(
             task.icon ?: ImageVector.vectorResource(task.iconVectorResourceId!!),
             tint = tintColor,
-            modifier = Modifier.size(24.dp),
+            modifier = Modifier.size(22.dp),
             contentDescription = null,
           )
-          Text(task.label, style = MaterialTheme.typography.titleMedium, color = tintColor)
+          Text(
+            task.label.uppercase(),
+            style = MaterialTheme.typography.titleMedium.copy(
+              fontFamily = FontFamily.Monospace,
+              fontWeight = FontWeight.Bold,
+              letterSpacing = 2.sp,
+              fontSize = 13.sp,
+            ),
+            color = tintColor,
+          )
         }
 
         // Model chips pager.
@@ -254,6 +269,14 @@ fun ModelPageAppBar(
       }
     },
   )
+  // Marathon bottom hairline separator
+  Box(
+    Modifier
+      .fillMaxWidth()
+      .height(1.dp)
+      .background(neonGreen.copy(alpha = 0.55f))
+  )
+  } // end Column wrapper
 
   // Config dialog.
   if (showConfigDialog) {

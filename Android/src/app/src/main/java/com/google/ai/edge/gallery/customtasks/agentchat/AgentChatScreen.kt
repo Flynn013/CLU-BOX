@@ -36,16 +36,23 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -67,6 +74,7 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -94,6 +102,7 @@ import com.google.ai.edge.gallery.ui.common.chat.ChatSide
 import com.google.ai.edge.gallery.ui.common.chat.LogMessage
 import com.google.ai.edge.gallery.ui.common.chat.LogMessageLevel
 import com.google.ai.edge.gallery.ui.common.chat.SendMessageTrigger
+import com.google.ai.edge.gallery.ui.llmchat.ContextWindowPager
 import com.google.ai.edge.gallery.ui.llmchat.LlmChatScreen
 import com.google.ai.edge.gallery.ui.llmchat.LlmChatViewModel
 import com.google.ai.edge.gallery.ui.modelmanager.ModelInitializationStatusType
@@ -115,16 +124,12 @@ private const val TAG = "AGAgentChatScreen"
 
 /**
  * Maximum number of consecutive autonomous loop iterations allowed before the
- * loop is forcibly halted.  This prevents a runaway agentic loop from
- * crashing the app through memory exhaustion, context overflow, or native
- * layer errors.  The counter resets whenever the **user** sends a new message.
+ * loop is forcibly halted.
  */
-private const val MAX_AUTONOMOUS_ITERATIONS = 25
+private const val MAX_AUTONOMOUS_ITERATIONS = 100
 
 /**
  * Cooldown delay (ms) inserted between consecutive autonomous loop iterations.
- * Gives the system breathing room (GC, UI, OS memory management) and prevents
- * CPU starvation / ANR on the main thread.
  */
 private const val AUTONOMOUS_LOOP_COOLDOWN_MS = 1500L
 
@@ -149,7 +154,6 @@ fun AgentChatScreen(
     com.google.ai.edge.gallery.data.TerminalSessionManager(context)
   }
 
-  // Initialise the app context once for the TokenMonitor file-writing path.
   LaunchedEffect(Unit) { viewModel.initAppContext(context) }
   val density = LocalDensity.current
   val windowInfo = LocalWindowInfo.current
@@ -163,9 +167,7 @@ fun AgentChatScreen(
   var curSystemPrompt by remember { mutableStateOf(task.defaultSystemPrompt) }
   val systemPromptUpdatedMessage = stringResource(R.string.system_prompt_updated)
   var sendMessageTrigger by remember { mutableStateOf<SendMessageTrigger?>(null) }
-  /** Manages error-retry logic and status emission for the agentic loop. */
   val loopManager = remember { AgentLoopManager() }
-  /** Tracks how many consecutive autonomous re-triggers have fired without user input. */
   var autonomousIterationCount by remember { mutableStateOf(0) }
   var showAlertForDisabledSkill by remember { mutableStateOf(false) }
   var disabledSkillName by remember { mutableStateOf("") }
@@ -175,13 +177,15 @@ fun AgentChatScreen(
   val chatHistoryScope = rememberCoroutineScope()
   val autonomousLoopScope = rememberCoroutineScope()
   var showGeminiApiKeyDialog by remember { mutableStateOf(false) }
+  // Thinking mode: initialised from the task default so Gemma 4 starts with
+  // thinking enabled; user can toggle the THINK chip to override at runtime.
+  var thinkingModeEnabled by remember { mutableStateOf(task.allowThinking()) }
 
-  // Monitor selected model — prompt for API key when CLOUD_CLU model is selected without one.
   val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
   val selectedModel = modelManagerUiState.selectedModel
   LaunchedEffect(selectedModel) {
-    // ── Agentic Context Router: sync engine with model backend ────────────
-    agentTools.engine = if (selectedModel.runtimeType == RuntimeType.GEMINI_CLOUD) {
+    agentTools.engine = if (selectedModel.runtimeType == RuntimeType.GEMINI_CLOUD
+        || selectedModel.runtimeType == RuntimeType.ANTHROPIC_CLOUD) {
       AgentEngine.CLOUD
     } else {
       AgentEngine.LOCAL
@@ -197,26 +201,21 @@ fun AgentChatScreen(
     modelManagerViewModel = modelManagerViewModel,
     taskId = BuiltInTaskId.LLM_AGENT_CHAT,
     navigateUp = navigateUp,
+    allowThinkingOverride = thinkingModeEnabled,
     onFirstToken = { model ->
       updateProgressPanel(viewModel = viewModel, model = model, agentTools = agentTools)
     },
     onInferenceError = { errorMessage ->
-      // ── Error recovery via AgentLoopManager ────────────────────────
-      // Ask the loop manager whether we should retry or halt.
-      // FIX: Cast errorMessage (Any?) to String.
       val errorStr = errorMessage?.toString() ?: "Unknown inference error"
       val shouldRetry = loopManager.onError(errorStr)
       if (shouldRetry) {
         Log.w(TAG, "Inference error — retrying (${AgentLoopManager.MAX_RETRIES - loopManager.errorCount} attempt(s) left)")
-        // Inject a SYSTEM re-evaluation message so the model understands what
-        // went wrong and can try a different approach on the next turn.
         val model = modelManagerViewModel.uiState.value.selectedModel
         val retryMsg = loopManager.formatRetrySystemMessage("Inference engine", errorStr)
         viewModel.addMessage(
           model = model,
           message = ChatMessageText(content = retryMsg, side = ChatSide.AGENT),
         )
-        // Re-trigger inference with the system message as the new user turn.
         autonomousLoopScope.launch {
           delay(AUTONOMOUS_LOOP_COOLDOWN_MS)
           sendMessageTrigger = SendMessageTrigger(
@@ -225,7 +224,6 @@ fun AgentChatScreen(
           )
         }
       } else {
-        // Retry budget exhausted — break the loop and ask the user for help.
         Log.w(TAG, "Inference error budget exhausted — halting agentic loop")
         agentTools.pendingTaskDescription = null
         autonomousIterationCount = 0
@@ -241,11 +239,8 @@ fun AgentChatScreen(
       }
     },
     onGenerateResponseDone = { model ->
-      // ── Success: reset the error retry counter ──────────────────────
       loopManager.onSuccess()
 
-      // Show any image produced by tools.
-      // FIX: Use explicit casting for the missing properties.
       val resultImage = agentTools.resultImageToShow as? ResultImage
       resultImage?.let { image ->
         image.base64?.let { base64 ->
@@ -264,12 +259,9 @@ fun AgentChatScreen(
             )
           }
         }
-        // Clean up.
         agentTools.resultImageToShow = null
       }
 
-      // Show any webview produced by tools.
-      // FIX: Use explicit casting for the missing properties.
       val resultWebview = agentTools.resultWebviewToShow as? ResultWebView
       resultWebview?.let { webview ->
         val url = webview.url ?: ""
@@ -285,17 +277,13 @@ fun AgentChatScreen(
               hideSenderLabel = true,
             ),
         )
-        // Clean up.
         agentTools.resultWebviewToShow = null
       }
 
       updateProgressPanel(viewModel = viewModel, model = model, agentTools = agentTools)
 
-      // Phase 5: Autonomous Supervisor — if a pending task was queued via taskQueueUpdate,
-      // silently re-trigger inference with the next task description.
       val pendingTask = agentTools.pendingTaskDescription
       if (pendingTask != null) {
-        // ── Circuit Breaker: hard cap on consecutive autonomous iterations ──
         val maxLoops = agentTools.governor.maxLoops
         if (autonomousIterationCount >= maxLoops) {
           Log.w(
@@ -316,22 +304,52 @@ fun AgentChatScreen(
           autonomousIterationCount++
           agentTools.pendingTaskDescription = null
           Log.d(TAG, "Autonomous loop: iteration $autonomousIterationCount — re-triggering inference with task='$pendingTask'")
-          // Cooldown: brief delay between iterations to give the system breathing room.
-          autonomousLoopScope.launch {
-            delay(AUTONOMOUS_LOOP_COOLDOWN_MS)
-            sendMessageTrigger = SendMessageTrigger(
-              model = model,
-              messages = listOf(
-                ChatMessageText(
-                  content = "[CONTINUE] $pendingTask",
-                  side = ChatSide.USER,
+
+          // Auto-compress context if near capacity before continuing the loop.
+          val allMsgs = viewModel.uiState.value.messagesByModel[model.name] ?: mutableListOf()
+          val textMsgs = allMsgs.filterIsInstance<ChatMessageText>().toMutableList()
+          val engine = agentTools.engine
+
+          if (ContextWindowPager.shouldPrune(textMsgs, engine)) {
+            Log.d(TAG, "Context near full — auto-compressing before iteration $autonomousIterationCount")
+            autonomousLoopScope.launch {
+              val retained = ContextWindowPager.pruneAndArchive(
+                messages = textMsgs,
+                engine = engine,
+                brainBoxDao = agentTools.brainBoxDao,
+                sessionLabel = "ctx_${System.currentTimeMillis()}",
+              )
+              resetSessionWithCurrentSkills(
+                viewModel, modelManagerViewModel, skillManagerViewModel,
+                task, curSystemPrompt, agentTools,
+                onDone = { resetModel ->
+                  retained.forEach { msg -> viewModel.addMessage(model = resetModel, message = msg) }
+                  autonomousLoopScope.launch {
+                    delay(AUTONOMOUS_LOOP_COOLDOWN_MS)
+                    sendMessageTrigger = SendMessageTrigger(
+                      model = resetModel,
+                      messages = listOf(ChatMessageText(content = "[CONTINUE] $pendingTask", side = ChatSide.USER)),
+                    )
+                  }
+                },
+              )
+            }
+          } else {
+            autonomousLoopScope.launch {
+              delay(AUTONOMOUS_LOOP_COOLDOWN_MS)
+              sendMessageTrigger = SendMessageTrigger(
+                model = model,
+                messages = listOf(
+                  ChatMessageText(
+                    content = "[CONTINUE] $pendingTask",
+                    side = ChatSide.USER,
+                  ),
                 ),
-              ),
-            )
+              )
+            }
           }
         }
       } else {
-        // No pending task — the loop concluded naturally. Reset the counter.
         autonomousIterationCount = 0
       }
     },
@@ -353,8 +371,6 @@ fun AgentChatScreen(
     composableBelowMessageList = { model ->
       val actionChannel = agentTools.actionChannel
       val doneIcon = ImageVector.vectorResource(R.drawable.skill)
-      // Use rememberUpdatedState to ensure that LaunchedEffect captures the
-      // latest active model when the model is switched during an ongoing skill execution.
       val currentModel by androidx.compose.runtime.rememberUpdatedState(model)
       LaunchedEffect(actionChannel) {
         for (action in actionChannel) {
@@ -373,9 +389,8 @@ fun AgentChatScreen(
             }
             is CallJsAgentAction -> {
               try {
-                // Set up a safety net timeout so we NEVER hang the chat or tool execution
                 launch {
-                  delay(60000L) // 60 seconds max
+                  delay(60000L)
                   if (!action.result.isCompleted) {
                     Log.e(TAG, "JS Execution timed out, completing with error.")
                     action.result.complete(
@@ -384,7 +399,6 @@ fun AgentChatScreen(
                   }
                 }
 
-                // Load url.
                 suspendCancellableCoroutine<Unit> { continuation ->
                   chatWebViewClient.setPageLoadListener {
                     chatWebViewClient.setPageLoadListener(null)
@@ -394,7 +408,6 @@ fun AgentChatScreen(
                   webViewRef?.loadUrl(action.url)
                 }
 
-                // Execute JS.
                 Log.d(TAG, "Start to run js")
                 chatViewJavascriptInterface.onResultListener = { result ->
                   Log.d(TAG, "Got result:\n$result")
@@ -430,7 +443,7 @@ fun AgentChatScreen(
             }
             is AskInfoAgentAction -> {
               currentAskInfoAction = action
-              askInfoInputValue = "" // Reset input
+              askInfoInputValue = ""
               showAskInfoDialog = true
             }
           }
@@ -446,14 +459,13 @@ fun AgentChatScreen(
         customWebViewClient = chatWebViewClient,
         onConsoleMessage = { consoleMessage ->
           consoleMessage?.let { curConsoleMessage ->
-            // Create a LogMessage from the ConsoleMessage and add it to the progress panel.
             val logMessage =
               LogMessage(
                 level =
                   when (curConsoleMessage.messageLevel()) {
                     ConsoleMessage.MessageLevel.LOG -> LogMessageLevel.Info
                     ConsoleMessage.MessageLevel.ERROR -> LogMessageLevel.Error
-                     ConsoleMessage.MessageLevel.WARNING -> LogMessageLevel.Warning
+                    ConsoleMessage.MessageLevel.WARNING -> LogMessageLevel.Warning
                     else -> LogMessageLevel.Info
                   },
                 source = curConsoleMessage.sourceId(),
@@ -493,30 +505,110 @@ fun AgentChatScreen(
       )
     },
     emptyStateComposable = { _ ->
-      // Blank initial state — minimalist aesthetic.
       Box(modifier = Modifier.fillMaxSize())
     },
     sendMessageTrigger = sendMessageTrigger,
     onChatHistoryClicked = { showChatHistorySheet = true },
     composableAboveInput = {
-      // Show the active tool execution card above the input while a tool runs,
-      // then show the last N completed cards so the user can see recent work.
-      val activeTool by agentTools.governor.activeTool.collectAsState()
-      val toolHistory by agentTools.governor.toolHistory.collectAsState()
-      // Render at most 3 recent completed cards + the active card (if any).
-      val recentHistory = toolHistory.takeLast(3)
-      if (recentHistory.isNotEmpty() || activeTool != null) {
-        Column(
+      val skillsState by skillManagerViewModel.uiState.collectAsState()
+      val selectedSkills = skillsState.skills.filter { it.skill.selected }
+
+      Column(modifier = Modifier.fillMaxWidth()) {
+        // ── Context fill progress bar ──────────────────────────────────────
+        // Thin 2dp bar under the chat banner. Green → orange → red as context fills.
+        val chatUiStateCtx by viewModel.uiState.collectAsState()
+        val modelMgrCtx by modelManagerViewModel.uiState.collectAsState()
+        val ctxMsgs = chatUiStateCtx.messagesByModel[modelMgrCtx.selectedModel.name]
+          ?.filterIsInstance<ChatMessageText>() ?: emptyList()
+        val ctxFill = (ctxMsgs.sumOf { it.content.length }.toFloat()
+          / (ContextWindowPager.budgetFor(agentTools.engine) * 4)).coerceIn(0f, 1f)
+        val ctxBarColor = when {
+          ctxFill >= 0.85f -> MaterialTheme.colorScheme.error
+          ctxFill >= 0.60f -> Color(0xFFFF9800)
+          else -> neonGreen
+        }
+        LinearProgressIndicator(
+          progress = ctxFill,
+          modifier = Modifier.fillMaxWidth().height(2.dp),
+          color = ctxBarColor,
+          trackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        )
+
+        // ── Thinking mode toggle + live skill chip rail ─────────────────
+        Row(
           modifier = Modifier
             .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
             .padding(horizontal = 8.dp, vertical = 4.dp),
-          verticalArrangement = Arrangement.spacedBy(4.dp),
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+          verticalAlignment = Alignment.CenterVertically,
         ) {
-          recentHistory.forEach { exec ->
-            ToolExecutionBox(execution = exec)
+          FilterChip(
+            selected = thinkingModeEnabled,
+            onClick = { thinkingModeEnabled = !thinkingModeEnabled },
+            label = {
+              Text(
+                "THINK",
+                fontFamily = FontFamily.Monospace,
+                fontSize = 11.sp,
+              )
+            },
+            leadingIcon = {
+              Icon(
+                imageVector = Icons.Outlined.Psychology,
+                contentDescription = "Thinking mode",
+                modifier = Modifier.size(14.dp),
+              )
+            },
+            colors = FilterChipDefaults.filterChipColors(
+              selectedContainerColor = neonGreen.copy(alpha = 0.18f),
+              selectedLabelColor = neonGreen,
+              selectedLeadingIconColor = neonGreen,
+            ),
+          )
+          selectedSkills.take(5).forEach { skillState ->
+            SuggestionChip(
+              onClick = { showSkillManagerBottomSheet = true },
+              label = {
+                Text(
+                  skillState.skill.name.take(12),
+                  fontFamily = FontFamily.Monospace,
+                  fontSize = 10.sp,
+                )
+              },
+            )
           }
-          activeTool?.let { exec ->
-            ToolExecutionBox(execution = exec)
+          if (selectedSkills.size > 5) {
+            SuggestionChip(
+              onClick = { showSkillManagerBottomSheet = true },
+              label = {
+                Text(
+                  "+${selectedSkills.size - 5}",
+                  fontFamily = FontFamily.Monospace,
+                  fontSize = 10.sp,
+                )
+              },
+            )
+          }
+        }
+
+        // ── Tool execution cards ────────────────────────────────────────
+        val activeTool by agentTools.governor.activeTool.collectAsState()
+        val toolHistory by agentTools.governor.toolHistory.collectAsState()
+        val recentHistory = toolHistory.takeLast(3)
+        if (recentHistory.isNotEmpty() || activeTool != null) {
+          Column(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+          ) {
+            recentHistory.forEach { exec ->
+              ToolExecutionBox(execution = exec)
+            }
+            activeTool?.let { exec ->
+              ToolExecutionBox(execution = exec)
+            }
           }
         }
       }
@@ -548,10 +640,7 @@ fun AgentChatScreen(
       agentTools = agentTools,
       skillManagerViewModel = skillManagerViewModel,
       onDismiss = { selectedSkillsChanged ->
-        // Hide sheet.
         showSkillManagerBottomSheet = false
-
-        // Reset session when selected skills changed.
         if (selectedSkillsChanged) {
           Log.d(TAG, "Selected skill changed. Resetting conversation.")
           resetSessionWithCurrentSkills(
@@ -581,14 +670,11 @@ fun AgentChatScreen(
   }
 
   if (showChatHistorySheet) {
-    // Use key() to force recomposition when sessions are deleted
     key(chatHistoryRefreshKey) {
       ChatHistorySheet(
         chatHistoryDao = chatHistoryDao,
         onDismiss = { showChatHistorySheet = false },
         onSessionSelected = { _, modelName ->
-          // Select the model and close sheet — the existing LaunchedEffect in ChatViewWrapper
-          // will automatically load the history for the newly selected model.
           val matchingModel = task.models.find { it.name == modelName }
           if (matchingModel != null) {
             modelManagerViewModel.selectModel(model = matchingModel)
@@ -596,25 +682,20 @@ fun AgentChatScreen(
           showChatHistorySheet = false
         },
         onSessionDeleted = { sessionTaskId, modelName ->
-          // Delete from database directly. If the model matches the current session,
-          // also clear in-memory state.
           val matchingModel = task.models.find { it.name == modelName }
           if (matchingModel != null) {
             viewModel.wipeGrid(sessionTaskId, matchingModel)
           } else {
-            // Model may have been removed from the task — delete DB rows directly.
             chatHistoryScope.launch {
               chatHistoryDao.deleteMessages(taskId = sessionTaskId, modelName = modelName)
             }
           }
-          // Bump refresh key to force LaunchedEffect in ChatHistorySheet to re-query
           chatHistoryRefreshKey++
         },
       )
     }
   }
 
-  // ── Gemini Cloud Node: API key dialog ─────────────────────────────────
   if (showGeminiApiKeyDialog) {
     GeminiApiKeyDialog(
       onDismiss = { showGeminiApiKeyDialog = false },
@@ -627,7 +708,6 @@ fun AgentChatScreen(
 }
 
 private fun updateProgressPanel(viewModel: LlmChatViewModel, model: Model, agentTools: AgentTools) {
-  // Update status.
   val lastProgressPanelMessage =
     viewModel.getLastMessageWithType(
       model = model,
@@ -683,7 +763,6 @@ private fun resetSessionWithCurrentSkills(
     supportImage = true,
     supportAudio = true,
     onDone = { onDone(model) },
-    // Constrained decoding disabled — see AgentChatTaskModule for rationale.
     enableConversationConstrainedDecoding = false,
   )
 }
@@ -710,6 +789,7 @@ class ChatWebViewClient(val context: Context) : BaseGalleryWebViewClient(context
     onPageLoaded?.invoke()
   }
 }
+
 fun decodeBase64ToBitmap(base64String: String): android.graphics.Bitmap? {
   return try {
     val decodedBytes = android.util.Base64.decode(base64String, android.util.Base64.DEFAULT)

@@ -44,12 +44,15 @@ import java.util.UUID
  * Generative Language REST API.  Tool schemas arrive in OpenAI function-calling format and
  * are converted to Google's `functionDeclarations` format on the fly.
  *
- * @param apiKey  Gemini API key (obtained from aistudio.google.com or GeminiApiKeyStore)
- * @param modelId Model identifier, e.g. "gemini-2.0-flash" or "gemini-1.5-pro"
+ * @param apiKey      Gemini API key (used when [bearerToken] is null)
+ * @param modelId     Model identifier, e.g. "gemini-2.0-flash" or "gemini-1.5-pro"
+ * @param bearerToken OAuth 2.0 bearer token; when set, uses `Authorization: Bearer` header
+ *                    instead of `x-goog-api-key`.
  */
 class GeminiProvider(
     private val apiKey: String,
     override val modelId: String,
+    private val bearerToken: String? = null,
 ) : LlmProvider {
 
     override val providerId: String = "gemini"
@@ -84,7 +87,11 @@ class GeminiProvider(
             var responseBody = ""
             httpClient.preparePost(url) {
                 headers {
-                    append("x-goog-api-key", apiKey)
+                    if (bearerToken != null) {
+                        append("Authorization", "Bearer $bearerToken")
+                    } else {
+                        append("x-goog-api-key", apiKey)
+                    }
                     append("Content-Type", "application/json")
                 }
                 setBody(bodyJson)
@@ -120,7 +127,11 @@ class GeminiProvider(
 
                 httpClient.preparePost(url) {
                     headers {
-                        append("x-goog-api-key", apiKey)
+                        if (bearerToken != null) {
+                            append("Authorization", "Bearer $bearerToken")
+                        } else {
+                            append("x-goog-api-key", apiKey)
+                        }
                         append("Content-Type", "application/json")
                     }
                     setBody(bodyJson)

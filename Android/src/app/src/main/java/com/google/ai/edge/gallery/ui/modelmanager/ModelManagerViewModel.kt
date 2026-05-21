@@ -52,6 +52,7 @@ import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.data.ValueType
 import com.google.ai.edge.gallery.data.createLlmChatConfigs
 import com.google.ai.edge.gallery.proto.AccessTokenData
+import com.google.ai.edge.gallery.proto.AnthropicCloudModel
 import com.google.ai.edge.gallery.proto.BespokeModel
 import com.google.ai.edge.gallery.proto.GeminiCloudModel
 import com.google.ai.edge.gallery.proto.ImportedModel
@@ -290,7 +291,7 @@ constructor(
     )
 
     // Cloud models require no download — mark them as succeeded immediately.
-    if (model.runtimeType == RuntimeType.GEMINI_CLOUD || model.runtimeType == RuntimeType.MANUAL_API) {
+    if (model.runtimeType == RuntimeType.GEMINI_CLOUD || model.runtimeType == RuntimeType.MANUAL_API || model.runtimeType == RuntimeType.ANTHROPIC_CLOUD) {
       setDownloadStatus(
         curModel = model,
         status = ModelDownloadStatus(status = ModelDownloadStatusType.SUCCEEDED),
@@ -351,7 +352,7 @@ constructor(
 
   fun cancelDownloadModel(model: Model) {
     // AICore, Cloud, and Manual API models cannot be deleted from the download repository within the app.
-    if (model.runtimeType == RuntimeType.AICORE || model.runtimeType == RuntimeType.GEMINI_CLOUD || model.runtimeType == RuntimeType.MANUAL_API) {
+    if (model.runtimeType == RuntimeType.AICORE || model.runtimeType == RuntimeType.GEMINI_CLOUD || model.runtimeType == RuntimeType.MANUAL_API || model.runtimeType == RuntimeType.ANTHROPIC_CLOUD) {
       return
     }
     downloadRepository.cancelDownloadModel(model)
@@ -897,6 +898,113 @@ constructor(
         modelImportingUpdateTrigger = System.currentTimeMillis(),
       )
     }
+  }
+
+  private fun createAnthropicCloudModelObject(modelId: String, displayName: String): Model {
+    val model = Model(
+      name = modelId,
+      displayName = displayName.ifBlank { modelId },
+      info = "Anthropic Claude API model — $modelId\n\nRuns in the cloud via the Anthropic Messages API. Requires a valid API key or OAuth credentials.",
+      url = "",
+      sizeInBytes = 0L,
+      downloadFileName = "_",
+      version = "_",
+      isLlm = true,
+      runtimeType = RuntimeType.ANTHROPIC_CLOUD,
+      showBenchmarkButton = false,
+      showRunAgainButton = false,
+      configs = createLlmChatConfigs(
+        defaultMaxToken = 8192,
+        defaultMaxContextLength = 200_000,
+      ),
+    )
+    model.preProcess()
+    return model
+  }
+
+  /**
+   * Adds an Anthropic Claude cloud model to the LLM tasks and persists it in DataStore.
+   */
+  fun addAnthropicCloudModel(modelId: String, displayName: String) {
+    Log.d(TAG, "Adding Anthropic Cloud model: $modelId ($displayName)")
+
+    val existing = dataStoreRepository.readAnthropicCloudModels().toMutableList()
+    existing.removeAll { it.modelId == modelId }
+    existing.add(
+      AnthropicCloudModel.newBuilder()
+        .setModelLabel(displayName.ifBlank { modelId })
+        .setModelId(modelId)
+        .setDisplayName(displayName)
+        .build()
+    )
+    dataStoreRepository.saveAnthropicCloudModels(existing)
+
+    val model = createAnthropicCloudModelObject(modelId = modelId, displayName = displayName)
+
+    val setOfTasks = mutableSetOf(
+      BuiltInTaskId.LLM_CHAT,
+      BuiltInTaskId.LLM_AGENT_CHAT,
+      BuiltInTaskId.LLM_PROMPT_LAB,
+    )
+    for (task in getTasksByIds(ids = setOfTasks)) {
+      val existingIndex = task.models.indexOfFirst { it.name == modelId }
+      if (existingIndex >= 0) task.models.removeAt(existingIndex)
+      task.models.add(model)
+      task.updateTrigger.value = System.currentTimeMillis()
+    }
+
+    val modelDownloadStatus = uiState.value.modelDownloadStatus.toMutableMap()
+    val modelInstances = uiState.value.modelInitializationStatus.toMutableMap()
+    modelDownloadStatus[model.name] = ModelDownloadStatus(status = ModelDownloadStatusType.SUCCEEDED)
+    modelInstances[model.name] = ModelInitializationStatus(status = ModelInitializationStatusType.NOT_INITIALIZED)
+
+    _uiState.update {
+      uiState.value.copy(
+        tasks = uiState.value.tasks.toList(),
+        modelDownloadStatus = modelDownloadStatus,
+        modelInitializationStatus = modelInstances,
+        modelImportingUpdateTrigger = System.currentTimeMillis(),
+      )
+    }
+  }
+
+  /**
+   * Restores previously-persisted Anthropic Cloud models from DataStore.
+   */
+  fun restoreAnthropicCloudModels() {
+    val persisted = dataStoreRepository.readAnthropicCloudModels()
+    if (persisted.isEmpty()) return
+    Log.d(TAG, "Restoring ${persisted.size} Anthropic Cloud model(s) from DataStore")
+    for (entry in persisted) {
+      val model = createAnthropicCloudModelObject(modelId = entry.modelId, displayName = entry.displayName)
+      val setOfTasks = mutableSetOf(BuiltInTaskId.LLM_CHAT, BuiltInTaskId.LLM_AGENT_CHAT, BuiltInTaskId.LLM_PROMPT_LAB)
+      for (task in getTasksByIds(ids = setOfTasks)) {
+        val existingIndex = task.models.indexOfFirst { it.name == entry.modelId }
+        if (existingIndex >= 0) task.models.removeAt(existingIndex)
+        task.models.add(model)
+      }
+      val modelDownloadStatus = uiState.value.modelDownloadStatus.toMutableMap()
+      val modelInstances = uiState.value.modelInitializationStatus.toMutableMap()
+      modelDownloadStatus[model.name] = ModelDownloadStatus(status = ModelDownloadStatusType.SUCCEEDED)
+      modelInstances[model.name] = ModelInitializationStatus(status = ModelInitializationStatusType.NOT_INITIALIZED)
+      _uiState.update { uiState.value.copy(modelDownloadStatus = modelDownloadStatus, modelInitializationStatus = modelInstances) }
+    }
+    _uiState.update { uiState.value.copy(tasks = uiState.value.tasks.toList(), modelImportingUpdateTrigger = System.currentTimeMillis()) }
+  }
+
+  /**
+   * Removes a persisted Anthropic Cloud model from DataStore and tasks.
+   */
+  fun removeAnthropicCloudModel(modelId: String) {
+    val existing = dataStoreRepository.readAnthropicCloudModels().toMutableList()
+    existing.removeAll { it.modelId == modelId }
+    dataStoreRepository.saveAnthropicCloudModels(existing)
+    val setOfTasks = mutableSetOf(BuiltInTaskId.LLM_CHAT, BuiltInTaskId.LLM_AGENT_CHAT, BuiltInTaskId.LLM_PROMPT_LAB)
+    for (task in getTasksByIds(ids = setOfTasks)) {
+      task.models.removeAll { it.name == modelId }
+      task.updateTrigger.value = System.currentTimeMillis()
+    }
+    _uiState.update { uiState.value.copy(tasks = uiState.value.tasks.toList(), modelImportingUpdateTrigger = System.currentTimeMillis()) }
   }
 
   /**
@@ -1493,6 +1601,22 @@ constructor(
       val model = createGeminiCloudModelObject(
         modelId = geminiModel.modelId,
         displayName = geminiModel.displayName.ifBlank { geminiModel.modelId },
+      )
+      tasks.get(key = BuiltInTaskId.LLM_CHAT)?.models?.add(model)
+      tasks.get(key = BuiltInTaskId.LLM_AGENT_CHAT)?.models?.add(model)
+      tasks.get(key = BuiltInTaskId.LLM_PROMPT_LAB)?.models?.add(model)
+      modelDownloadStatus[model.name] =
+        ModelDownloadStatus(status = ModelDownloadStatusType.SUCCEEDED)
+      modelInstances[model.name] =
+        ModelInitializationStatus(status = ModelInitializationStatusType.NOT_INITIALIZED)
+    }
+
+    // Load persisted ANTHROPIC CLOUD models.
+    for (anthropicModel in dataStoreRepository.readAnthropicCloudModels()) {
+      Log.d(TAG, "Restoring Anthropic cloud model: ${anthropicModel.modelId}")
+      val model = createAnthropicCloudModelObject(
+        modelId = anthropicModel.modelId,
+        displayName = anthropicModel.displayName.ifBlank { anthropicModel.modelId },
       )
       tasks.get(key = BuiltInTaskId.LLM_CHAT)?.models?.add(model)
       tasks.get(key = BuiltInTaskId.LLM_AGENT_CHAT)?.models?.add(model)

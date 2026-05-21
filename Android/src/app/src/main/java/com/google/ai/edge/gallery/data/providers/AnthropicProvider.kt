@@ -42,12 +42,15 @@ import org.json.JSONObject
  * Sends messages via the `/v1/messages` endpoint using SSE streaming.
  * Supports extended thinking (chain-of-thought) via [ProviderEvent.Thinking] events.
  *
- * @param apiKey  Anthropic API key
- * @param modelId Model identifier, e.g. "claude-3-5-sonnet-20241022"
+ * @param apiKey      Anthropic API key (used when [bearerToken] is null)
+ * @param modelId     Model identifier, e.g. "claude-3-5-sonnet-20241022"
+ * @param bearerToken OAuth 2.0 bearer token; when set, uses `Authorization: Bearer` header
+ *                    instead of `x-api-key` and adds the `oauth-2025-04-20` beta header.
  */
 class AnthropicProvider(
     private val apiKey: String,
     override val modelId: String,
+    private val bearerToken: String? = null,
 ) : LlmProvider {
 
     override val providerId: String = "anthropic"
@@ -78,7 +81,12 @@ class AnthropicProvider(
             var responseBody = ""
             httpClient.preparePost(BASE_URL) {
                 headers {
-                    append("x-api-key", apiKey)
+                    if (bearerToken != null) {
+                        append("Authorization", "Bearer $bearerToken")
+                        append("anthropic-beta", "oauth-2025-04-20")
+                    } else {
+                        append("x-api-key", apiKey)
+                    }
                     append("anthropic-version", API_VERSION)
                     append("Content-Type", "application/json")
                 }
@@ -118,7 +126,12 @@ class AnthropicProvider(
 
                 httpClient.preparePost(BASE_URL) {
                     headers {
-                        append("x-api-key", apiKey)
+                        if (bearerToken != null) {
+                            append("Authorization", "Bearer $bearerToken")
+                            append("anthropic-beta", "oauth-2025-04-20")
+                        } else {
+                            append("x-api-key", apiKey)
+                        }
                         append("anthropic-version", API_VERSION)
                         append("Content-Type", "application/json")
                     }

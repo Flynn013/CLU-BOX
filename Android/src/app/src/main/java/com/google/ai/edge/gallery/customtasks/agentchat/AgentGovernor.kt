@@ -233,8 +233,16 @@ class AgentGovernor(
 6. BusyBox sh only — no Bash arrays, no process substitution.
 """.trimIndent()
 
-        /** Kept for source compatibility — not used in production (cloud removed). */
-        val CLOUD_CONSTRAINT: String = LOCAL_CONSTRAINT
+        /** System constraint injected for the CLOUD engine (Gemini / Claude). */
+        val CLOUD_CONSTRAINT: String = """
+[Cloud Agent — 128K context. Extended reasoning enabled.]
+1. Plan multi-step tasks explicitly, then execute each tool in sequence.
+2. After each tool result, continue immediately if the task is not complete.
+3. CODE WORKFLOW: codeSearch → fileBoxReadLines → fileEdit (preferred over full rewrites) → fileDiff to verify.
+4. Store important findings to BrainBox before ending long sessions.
+5. Use fileBoxWrite to create new files; use fileEdit for surgical updates to existing files.
+6. memorySearch before answering questions about the user's projects or past decisions.
+""".trimIndent()
     }
 }
 

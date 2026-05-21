@@ -185,9 +185,18 @@ You are CLU — a powerful AI developer assistant running on Android as part of 
         // ── Build tool schema list ───────────────────────────────────────
         val toolSchemas: List<JSONObject> = skillRegistry.buildToolDefinitions()
 
+        // For local/LiteRT models: append text-based tool call instructions since they
+        // don't support native function calling. The instructions teach Gemma to output
+        // tool calls as <tool_call>{...}</tool_call> blocks (parsed by LocalToolParser).
+        val finalSystemPrompt = if (provider.providerId == "litert") {
+            systemPrompt + LocalToolParser.buildToolInstructions(toolSchemas)
+        } else {
+            systemPrompt
+        }
+
         // ── Seed message list ────────────────────────────────────────────
         val messages = mutableListOf<ProviderMessage>()
-        messages.add(ProviderMessage(role = "system", content = systemPrompt))
+        messages.add(ProviderMessage(role = "system", content = finalSystemPrompt))
         messages.addAll(conversationHistory)
         messages.add(ProviderMessage(role = "user", content = userMessage))
 
@@ -252,6 +261,20 @@ You are CLU — a powerful AI developer assistant running on Android as part of 
                             if (turnText.isEmpty() && event.fullText.isNotBlank()) {
                                 turnText.append(event.fullText)
                                 emit(AgentEvent.Token(turnText.toString()))
+                            }
+                            // Text-based tool call fallback: for local models that output
+                            // tool calls as <tool_call>{...}</tool_call> blocks in their text.
+                            if (turnToolCalls.isEmpty() && turnText.isNotBlank()) {
+                                val parsed = LocalToolParser.parse(turnText.toString())
+                                if (parsed.toolCalls.isNotEmpty()) {
+                                    Log.d(TAG, "LocalToolParser found ${parsed.toolCalls.size} tool call(s) in text output")
+                                    turnToolCalls.addAll(parsed.toolCalls)
+                                    // Show clean text (without tool-call markup) to the user
+                                    val displayText = parsed.cleanText
+                                    if (displayText.isNotBlank()) {
+                                        emit(AgentEvent.Token(displayText))
+                                    }
+                                }
                             }
                         }
 

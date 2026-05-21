@@ -54,6 +54,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -83,7 +85,8 @@ import java.util.UUID
 import kotlinx.coroutines.launch
 
 /**
- * BRAIN_BOX module — view, create, edit, and delete Neurons with Upload/Download Brain I/O.
+ * BRAIN_BOX module — RAG Knowledge Graph manager with search, filter tabs,
+ * and full CRUD for neurons.
  */
 @Composable
 fun BrainBoxModuleScreen(dao: BrainBoxDao, vectorEngine: VectorEngine? = null) {
@@ -95,6 +98,24 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao, vectorEngine: VectorEngine? = null) {
   var editTarget by remember { mutableStateOf<NeuronEntity?>(null) }
   var showDeleteDialog by remember { mutableStateOf<NeuronEntity?>(null) }
 
+  // Search + tab filter state
+  var searchQuery by remember { mutableStateOf("") }
+  var activeTab by remember { mutableStateOf(0) } // 0=ALL, 1=CORE, 2=EPISODIC
+
+  // Filtered list — recomputed on every recomposition when state changes.
+  val filteredNeurons = neurons.filter { n ->
+    val matchesSearch = searchQuery.isBlank() ||
+      n.label.contains(searchQuery, ignoreCase = true) ||
+      n.content.contains(searchQuery, ignoreCase = true) ||
+      n.type.contains(searchQuery, ignoreCase = true)
+    val matchesTab = when (activeTab) {
+      1 -> n.isCore
+      2 -> !n.isCore
+      else -> true
+    }
+    matchesSearch && matchesTab
+  }
+
   // Upload (import) state — legacy JSON
   var showImportDialog by remember { mutableStateOf(false) }
   var importJson by remember { mutableStateOf("") }
@@ -103,7 +124,7 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao, vectorEngine: VectorEngine? = null) {
   // Loading state for import/export with embedding regeneration.
   var isCompiling by remember { mutableStateOf(false) }
 
-  // Markdown file picker launcher (Phase 3).
+  // Markdown file picker launcher.
   val mdImportLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.OpenDocument(),
   ) { uri ->
@@ -187,10 +208,8 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao, vectorEngine: VectorEngine? = null) {
         TextButton(onClick = {
           scope.launch {
             try {
-              // Generate embedding for the neuron content.
               val textToEmbed = "${label.trim()} ${content.trim()} ${synapses.trim()}"
               val embedding = vectorEngine?.embed(textToEmbed) ?: floatArrayOf()
-
               val neuron = NeuronEntity(
                 id = existing?.id ?: UUID.randomUUID().toString(),
                 label = label.trim(),
@@ -297,142 +316,222 @@ fun BrainBoxModuleScreen(dao: BrainBoxDao, vectorEngine: VectorEngine? = null) {
     },
   ) { innerPadding ->
     Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
-    Column(
-      modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-    ) {
-      Spacer(Modifier.height(12.dp))
-      Text(
-        "BRAIN_BOX",
-        style = MaterialTheme.typography.headlineSmall,
-        color = neonGreen,
-        fontFamily = FontFamily.Monospace,
-      )
-      Text(
-        "[ KNOWLEDGE GRAPH MANAGER ]",
-        style = MaterialTheme.typography.labelSmall,
-        color = neonGreen,
-        fontFamily = FontFamily.Monospace,
-      )
-      Spacer(Modifier.height(12.dp))
+      Column(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+      ) {
+        Spacer(Modifier.height(12.dp))
+        Text(
+          "BRAIN_BOX",
+          style = MaterialTheme.typography.headlineSmall,
+          color = neonGreen,
+          fontFamily = FontFamily.Monospace,
+        )
+        Text(
+          "[ KNOWLEDGE GRAPH MANAGER ]",
+          style = MaterialTheme.typography.labelSmall,
+          color = neonGreen,
+          fontFamily = FontFamily.Monospace,
+        )
+        Spacer(Modifier.height(8.dp))
 
-      // Row 1: Legacy JSON I/O
-      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(
-          onClick = {
-            scope.launch {
-              val json = exportBrain(dao)
-              val timestamp = System.currentTimeMillis()
-              val fileName = "brainbox_$timestamp.json"
-              val resolver = context.contentResolver
-              val values = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, fileName)
-                put(MediaStore.Downloads.MIME_TYPE, "application/json")
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                  put(MediaStore.Downloads.IS_PENDING, 1)
-                }
-              }
-              val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-              if (uri != null) {
-                val stream = resolver.openOutputStream(uri)
-                if (stream != null) {
-                  stream.use { it.write(json.toByteArray(Charsets.UTF_8)) }
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    values.clear()
-                    values.put(MediaStore.Downloads.IS_PENDING, 0)
-                    resolver.update(uri, values, null, null)
-                  }
-                  Toast.makeText(context, "Saved to Downloads/$fileName", Toast.LENGTH_LONG).show()
-                } else {
-                  Toast.makeText(context, "Export failed — could not open file for writing", Toast.LENGTH_LONG).show()
-                }
-              } else {
-                Toast.makeText(context, "Export failed — storage unavailable", Toast.LENGTH_LONG).show()
-              }
-            }
-          },
-          colors = ButtonDefaults.outlinedButtonColors(contentColor = neonGreen),
-        ) { Text("↓ JSON", fontFamily = FontFamily.Monospace) }
-        OutlinedButton(
-          onClick = { showImportDialog = true },
-          colors = ButtonDefaults.outlinedButtonColors(contentColor = neonGreen),
-        ) { Text("↑ JSON", fontFamily = FontFamily.Monospace) }
-      }
-
-      Spacer(Modifier.height(4.dp))
-
-      // Row 2: Markdown Review I/O (Phase 2 & 3)
-      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(
-          onClick = {
-            scope.launch {
-              val md = exportBrainToMarkdown(dao, includeCore = true)
-              val ok = saveBrainMarkdownToDownloads(context, md)
-              if (ok) {
-                Toast.makeText(context, "Saved CLU_BRAIN_REVIEW.md to Downloads", Toast.LENGTH_LONG).show()
-              } else {
-                Toast.makeText(context, "Markdown export failed", Toast.LENGTH_LONG).show()
-              }
-            }
-          },
-          colors = ButtonDefaults.outlinedButtonColors(contentColor = neonGreen),
-        ) { Text("↓ REVIEW MD", fontFamily = FontFamily.Monospace) }
-        OutlinedButton(
-          onClick = { mdImportLauncher.launch(arrayOf("text/*")) },
-          colors = ButtonDefaults.outlinedButtonColors(contentColor = neonGreen),
-        ) { Text("↑ FLASH BRAIN", fontFamily = FontFamily.Monospace) }
-      }
-
-      Spacer(Modifier.height(12.dp))
-      if (neurons.isEmpty()) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-          Text("No neurons. Tap + to forge one.", fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // Stats row
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+          Text(
+            "TOTAL ${neurons.size}",
+            style = MaterialTheme.typography.labelMedium,
+            color = neonGreen.copy(alpha = 0.7f),
+            fontFamily = FontFamily.Monospace,
+          )
+          Text(
+            "CORE ${neurons.count { it.isCore }}",
+            style = MaterialTheme.typography.labelMedium,
+            color = neonGreen,
+            fontFamily = FontFamily.Monospace,
+          )
+          Text(
+            "EPISODIC ${neurons.count { !it.isCore }}",
+            style = MaterialTheme.typography.labelMedium,
+            color = neonGreen.copy(alpha = 0.7f),
+            fontFamily = FontFamily.Monospace,
+          )
         }
-      } else {
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-          items(neurons, key = { it.id }) { neuron ->
-            NeuronCard(
-              neuron = neuron,
-              onEdit = { editTarget = neuron },
-              onDelete = { showDeleteDialog = neuron },
-              onToggleCore = {
-                scope.launch {
-                  try {
-                    val updated = neuron.copy(isCore = !neuron.isCore)
-                    dao.updateNeuron(updated)
-                    val idx = neurons.indexOfFirst { it.id == neuron.id }
-                    if (idx >= 0) neurons[idx] = updated
-                  } catch (e: Exception) {
-                    android.util.Log.e("BrainBoxModule", "Failed to toggle core", e)
+
+        Spacer(Modifier.height(8.dp))
+
+        // I/O buttons — Row 1: JSON
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+          OutlinedButton(
+            onClick = {
+              scope.launch {
+                val json = exportBrain(dao)
+                val timestamp = System.currentTimeMillis()
+                val fileName = "brainbox_$timestamp.json"
+                val resolver = context.contentResolver
+                val values = ContentValues().apply {
+                  put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                  put(MediaStore.Downloads.MIME_TYPE, "application/json")
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(MediaStore.Downloads.IS_PENDING, 1)
                   }
                 }
+                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                if (uri != null) {
+                  val stream = resolver.openOutputStream(uri)
+                  if (stream != null) {
+                    stream.use { it.write(json.toByteArray(Charsets.UTF_8)) }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                      values.clear()
+                      values.put(MediaStore.Downloads.IS_PENDING, 0)
+                      resolver.update(uri, values, null, null)
+                    }
+                    Toast.makeText(context, "Saved to Downloads/$fileName", Toast.LENGTH_LONG).show()
+                  } else {
+                    Toast.makeText(context, "Export failed — could not open file for writing", Toast.LENGTH_LONG).show()
+                  }
+                } else {
+                  Toast.makeText(context, "Export failed — storage unavailable", Toast.LENGTH_LONG).show()
+                }
+              }
+            },
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = neonGreen),
+          ) { Text("↓ JSON", fontFamily = FontFamily.Monospace) }
+          OutlinedButton(
+            onClick = { showImportDialog = true },
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = neonGreen),
+          ) { Text("↑ JSON", fontFamily = FontFamily.Monospace) }
+        }
+
+        Spacer(Modifier.height(4.dp))
+
+        // I/O buttons — Row 2: Markdown
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+          OutlinedButton(
+            onClick = {
+              scope.launch {
+                val md = exportBrainToMarkdown(dao, includeCore = true)
+                val ok = saveBrainMarkdownToDownloads(context, md)
+                if (ok) {
+                  Toast.makeText(context, "Saved CLU_BRAIN_REVIEW.md to Downloads", Toast.LENGTH_LONG).show()
+                } else {
+                  Toast.makeText(context, "Markdown export failed", Toast.LENGTH_LONG).show()
+                }
+              }
+            },
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = neonGreen),
+          ) { Text("↓ REVIEW MD", fontFamily = FontFamily.Monospace) }
+          OutlinedButton(
+            onClick = { mdImportLauncher.launch(arrayOf("text/*")) },
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = neonGreen),
+          ) { Text("↑ FLASH BRAIN", fontFamily = FontFamily.Monospace) }
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        // Search field
+        NeonTextField(
+          value = searchQuery,
+          onValueChange = { searchQuery = it },
+          label = "Search neurons...",
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        // Tab filter row
+        TabRow(
+          selectedTabIndex = activeTab,
+          containerColor = absoluteBlack,
+          contentColor = neonGreen,
+        ) {
+          val tabLabels = listOf(
+            "ALL ${neurons.size}",
+            "CORE ${neurons.count { it.isCore }}",
+            "EPISODIC ${neurons.count { !it.isCore }}",
+          )
+          tabLabels.forEachIndexed { index, label ->
+            Tab(
+              selected = activeTab == index,
+              onClick = { activeTab = index },
+              selectedContentColor = neonGreen,
+              unselectedContentColor = neonGreen.copy(alpha = 0.4f),
+              text = {
+                Text(
+                  label,
+                  fontFamily = FontFamily.Monospace,
+                  style = MaterialTheme.typography.labelSmall,
+                )
               },
+            )
+          }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        when {
+          neurons.isEmpty() -> {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+              Text(
+                "No neurons. Tap + to forge one.",
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+            }
+          }
+          filteredNeurons.isEmpty() -> {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+              Text(
+                "No matches for \"$searchQuery\".",
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+            }
+          }
+          else -> {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+              items(filteredNeurons, key = { it.id }) { neuron ->
+                NeuronCard(
+                  neuron = neuron,
+                  onEdit = { editTarget = neuron },
+                  onDelete = { showDeleteDialog = neuron },
+                  onToggleCore = {
+                    scope.launch {
+                      try {
+                        val updated = neuron.copy(isCore = !neuron.isCore)
+                        dao.updateNeuron(updated)
+                        val idx = neurons.indexOfFirst { it.id == neuron.id }
+                        if (idx >= 0) neurons[idx] = updated
+                      } catch (e: Exception) {
+                        android.util.Log.e("BrainBoxModule", "Failed to toggle core", e)
+                      }
+                    }
+                  },
+                )
+              }
+            }
+          }
+        }
+      }
+
+      // "Compiling Neural Graph..." loading overlay
+      if (isCompiling) {
+        Box(
+          modifier = Modifier
+            .fillMaxSize()
+            .background(absoluteBlack.copy(alpha = 0.85f)),
+          contentAlignment = Alignment.Center,
+        ) {
+          Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            androidx.compose.material3.CircularProgressIndicator(color = neonGreen)
+            Spacer(Modifier.height(16.dp))
+            Text(
+              "Compiling Neural Graph...",
+              color = neonGreen,
+              fontFamily = FontFamily.Monospace,
+              style = MaterialTheme.typography.titleMedium,
             )
           }
         }
       }
     }
-
-    // ── "Compiling Neural Graph..." loading overlay ──
-    if (isCompiling) {
-      Box(
-        modifier = Modifier
-          .fillMaxSize()
-          .background(absoluteBlack.copy(alpha = 0.85f)),
-        contentAlignment = Alignment.Center,
-      ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-          androidx.compose.material3.CircularProgressIndicator(color = neonGreen)
-          Spacer(Modifier.height(16.dp))
-          Text(
-            "Compiling Neural Graph...",
-            color = neonGreen,
-            fontFamily = FontFamily.Monospace,
-            style = MaterialTheme.typography.titleMedium,
-          )
-        }
-      }
-    }
-    } // End Box
   }
 }
 
@@ -473,7 +572,7 @@ private fun NeuronCard(
         IconButton(onClick = onToggleCore) {
           Icon(
             if (neuron.isCore) Icons.Outlined.Lock else Icons.Outlined.LockOpen,
-            contentDescription = if (neuron.isCore) "Unlock (make malleable)" else "Lock (make core)",
+            contentDescription = if (neuron.isCore) "Unlock" else "Lock",
             tint = if (neuron.isCore) neonGreen else MaterialTheme.colorScheme.onSurfaceVariant,
           )
         }

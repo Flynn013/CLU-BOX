@@ -80,8 +80,15 @@ class ContinuousAgentDriver(
     /** Model emitted the explicit completion marker — task done. */
     data class Done(val finalText: String) : TurnOutcome
 
-    /** Model requested a tool — driver should pause and execute it. */
+    /** Model requested a single tool call (common case). */
     data class ToolCall(val tool: String, val argsJson: String, val callId: String) : TurnOutcome
+
+    /**
+     * Model requested multiple tool calls in one turn (Gemma 4 / parallel function calling).
+     * Each element is a [ToolCall] that will be executed sequentially and whose results are
+     * all injected into context before the next inference turn.
+     */
+    data class ToolCalls(val calls: List<ToolCall>) : TurnOutcome
 
     /** Model needs more input or hit an inference error. */
     data class Failure(val message: String) : TurnOutcome
@@ -181,37 +188,14 @@ class ContinuousAgentDriver(
         }
 
         is TurnOutcome.ToolCall -> {
-          val parsedArgs = runCatching { org.json.JSONObject(turn.argsJson) }.getOrElse { org.json.JSONObject() }
-          val exec = governor.onToolCallDetected(turn.tool, parsedArgs)
-          loopManager.emitStatus(AgentLoopManager.statusExecuting(turn.tool), agentTools, true)
+          if (!executeToolCallInLoop(turn)) return
+        }
 
-          val (ok, observation) = runCatching {
-            executeTool(turn.tool, turn.argsJson)
-          }.fold(
-            onSuccess = { it },
-            onFailure = { false to (it.message ?: "tool crashed") },
-          )
-
-          loopManager.emitStatus(AgentLoopManager.statusObserving(turn.tool), agentTools, false)
-
-          if (ok) {
-            governor.onToolResult(exec.id, observation)
-            context.add(ContextEntry(ContextEntry.Role.TOOL, "${turn.tool} -> $observation"))
-            loopManager.onSuccess()
-          } else {
-            governor.onToolError(exec.id, observation)
-            val keepGoing = loopManager.onError(observation)
-            val sysMsg = loopManager.formatRetrySystemMessage(turn.tool, observation)
-            context.add(ContextEntry(ContextEntry.Role.SYSTEM, sysMsg))
-            if (!keepGoing) {
-              context.add(
-                ContextEntry(
-                  ContextEntry.Role.SYSTEM,
-                  loopManager.buildExhaustedMessage(governor.engine.value),
-                ),
-              )
-              return
-            }
+        is TurnOutcome.ToolCalls -> {
+          // Execute each call in the batch sequentially; inject all results
+          // before the next inference turn (mirrors Gemini parallel-call semantics).
+          for (call in turn.calls) {
+            if (!executeToolCallInLoop(call)) return
           }
         }
 
@@ -244,6 +228,46 @@ class ContinuousAgentDriver(
           "[CLU/BOX] Loop halted at safety bound of $maxHops hops to prevent runaway execution.",
         ),
       )
+    }
+  }
+
+  /**
+   * Execute a single [TurnOutcome.ToolCall] inside the loop, updating context and the
+   * loop/governor state.  Returns `true` to continue looping, `false` to halt.
+   */
+  private suspend fun executeToolCallInLoop(turn: TurnOutcome.ToolCall): Boolean {
+    val parsedArgs = runCatching { org.json.JSONObject(turn.argsJson) }.getOrElse { org.json.JSONObject() }
+    val exec = governor.onToolCallDetected(turn.tool, parsedArgs)
+    loopManager.emitStatus(AgentLoopManager.statusExecuting(turn.tool), agentTools, true)
+
+    val (ok, observation) = runCatching {
+      executeTool(turn.tool, turn.argsJson)
+    }.fold(
+      onSuccess = { it },
+      onFailure = { false to (it.message ?: "tool crashed") },
+    )
+
+    loopManager.emitStatus(AgentLoopManager.statusObserving(turn.tool), agentTools, false)
+
+    return if (ok) {
+      governor.onToolResult(exec.id, observation)
+      context.add(ContextEntry(ContextEntry.Role.TOOL, "${turn.tool} -> $observation"))
+      loopManager.onSuccess()
+      true
+    } else {
+      governor.onToolError(exec.id, observation)
+      val keepGoing = loopManager.onError(observation)
+      val sysMsg = loopManager.formatRetrySystemMessage(turn.tool, observation)
+      context.add(ContextEntry(ContextEntry.Role.SYSTEM, sysMsg))
+      if (!keepGoing) {
+        context.add(
+          ContextEntry(
+            ContextEntry.Role.SYSTEM,
+            loopManager.buildExhaustedMessage(governor.engine.value),
+          ),
+        )
+      }
+      keepGoing
     }
   }
 
