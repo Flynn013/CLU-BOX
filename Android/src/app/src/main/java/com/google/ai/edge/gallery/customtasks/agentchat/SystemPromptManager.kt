@@ -20,26 +20,32 @@ object SystemPromptManager {
 
     /**
      * Build the complete system prompt combining:
-     * 1. The engine constraint preamble (always LOCAL for Gemma on-device).
+     * 1. Optional username line so CLU can address the user by name.
      * 2. The CluIdentity genesis block + skill catalogue.
      * 3. Optional RAG core-memory context block.
+     * 4. The engine constraint preamble.
      *
-     * @param engine         Active [AgentEngine] (LOCAL only now — cloud removed).
+     * @param engine         Active [AgentEngine].
      * @param basePrompt     The task's default system prompt with skill placeholder.
      * @param skillRegistry  Registry for building the tool catalogue.
      * @param coreMemContext Optional formatted memory block from RagInjector.buildCoreContext().
-     * @return               Assembled prompt string ready for the LiteRT runtime.
+     * @param username       Optional display name set by the user in SETTINGS → PROFILE.
+     * @return               Assembled prompt string ready for the runtime.
      */
     fun build(
         engine: AgentEngine,
         basePrompt: String,
         skillRegistry: SkillRegistry,
         coreMemContext: String = "",
+        username: String = "",
     ): String {
         val constraint = AgentGovernor.LOCAL_CONSTRAINT
         val identityAndSkills = skillRegistry.buildFinalSystemPrompt(basePrompt)
 
         return buildString {
+            if (username.isNotBlank()) {
+                append("USER: You are talking with $username. Address them by name when natural.\n\n")
+            }
             append(identityAndSkills)
             if (coreMemContext.isNotBlank()) {
                 append("\n\n")

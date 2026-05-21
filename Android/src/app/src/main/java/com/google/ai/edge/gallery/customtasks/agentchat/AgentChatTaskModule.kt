@@ -44,6 +44,7 @@ class AgentChatTask @Inject constructor() : CustomTask {
     Task(
       id = BuiltInTaskId.LLM_AGENT_CHAT,
       label = "CLU/BOX Chat",
+      agentNameRes = R.string.chat_llm_agent_name,
       category = Category.LLM,
       iconVectorResourceId = R.drawable.agent,
       newFeature = true,
@@ -92,11 +93,13 @@ class AgentChatTask @Inject constructor() : CustomTask {
           ""
         }
 
+        val username = com.google.ai.edge.gallery.data.UserProfileStore.getUsername(context)
         val finalPrompt = SystemPromptManager.build(
           engine = agentTools.engine,
           basePrompt = task.defaultSystemPrompt,
           skillRegistry = agentTools.skillRegistry,
           coreMemContext = coreMemContext,
+          username = username,
         )
 
         if (isCloud) {

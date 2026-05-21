@@ -88,6 +88,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.ai.edge.gallery.BuildConfig
 import com.google.ai.edge.gallery.data.CluAgentSettings
+import com.google.ai.edge.gallery.data.UserProfileStore
 import com.google.ai.edge.gallery.data.LogBoxManager
 import com.google.ai.edge.gallery.proto.Theme
 import com.google.ai.edge.gallery.runtime.cloudproviders.ClaudeConnectButton
@@ -262,6 +263,7 @@ private fun ConfigTab(
 
   val context = LocalContext.current
   val focusManager = LocalFocusManager.current
+  var usernameInput by remember { mutableStateOf(UserProfileStore.getUsername(context)) }
 
   Column(
     modifier = Modifier
@@ -281,6 +283,75 @@ private fun ConfigTab(
       style = labelSmallNarrow,
       color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+
+    // ── PROFILE ────────────────────────────────────────────────────
+    Column(
+      modifier = Modifier.fillMaxWidth(),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      Text(
+        "PROFILE",
+        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium),
+        color = neonGreen,
+        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+      )
+      Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Box(
+          modifier = Modifier
+            .weight(1f)
+            .border(
+              width = 1.dp,
+              color = if (usernameInput.isNotEmpty()) neonGreen.copy(alpha = 0.6f)
+                      else MaterialTheme.colorScheme.outline,
+              shape = RoundedCornerShape(4.dp),
+            )
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        ) {
+          BasicTextField(
+            value = usernameInput,
+            onValueChange = { if (it.length <= UserProfileStore.MAX_LEN) usernameInput = it },
+            singleLine = true,
+            textStyle = TextStyle(
+              color = terminalOnSurface,
+              fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+              fontSize = 14.sp,
+            ),
+            cursorBrush = SolidColor(neonGreen),
+            decorationBox = { inner ->
+              if (usernameInput.isEmpty()) {
+                Text(
+                  "e.g. OPERATOR",
+                  style = TextStyle(
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    fontSize = 14.sp,
+                  ),
+                )
+              }
+              inner()
+            },
+          )
+        }
+        Button(
+          onClick = {
+            UserProfileStore.setUsername(context, usernameInput)
+            focusManager.clearFocus()
+          },
+          enabled = usernameInput.isNotEmpty(),
+        ) {
+          Text("SAVE", fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+        }
+      }
+      val savedName = UserProfileStore.getUsername(context)
+      Text(
+        if (savedName.isNotBlank()) "Shown as: $savedName" else "Not set — showing 'You'",
+        style = labelSmallNarrow,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
+    }
 
     // ── Theme switcher ─────────────────────────────────────────────
     Column(
@@ -523,7 +594,7 @@ private fun ConfigTab(
           },
           enabled = curHfToken != null,
         ) {
-          Text("Clear")
+          Text("CLEAR")
         }
         val handleSaveToken = {
           modelManagerViewModel.saveAccessToken(
@@ -795,7 +866,7 @@ private fun CloudKeyInputRow(
           }
         }
       }
-      OutlinedButton(onClick = onClear, enabled = value.isNotEmpty()) { Text("Clear") }
+      OutlinedButton(onClick = onClear, enabled = value.isNotEmpty()) { Text("CLEAR") }
     }
   }
 }

@@ -29,9 +29,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.google.ai.edge.gallery.R
+import com.google.ai.edge.gallery.data.UserProfileStore
 import com.google.ai.edge.gallery.ui.theme.bodySmallNarrow
 import com.google.ai.edge.gallery.ui.theme.neonGreen
 
@@ -146,7 +148,9 @@ private fun getMessageLayoutConfig(
   agentName: String,
   imageHistoryCurIndex: Int,
 ): MessageLayoutConfig {
-  var userLabel = stringResource(R.string.chat_you)
+  val context = LocalContext.current
+  val savedUsername = remember { UserProfileStore.getUsername(context) }
+  var userLabel = savedUsername.ifBlank { stringResource(R.string.chat_you) }
   var rightSideLabel = ""
   var horizontalArrangement = Arrangement.End
   var modifier = Modifier.padding(bottom = 2.dp)

@@ -109,7 +109,7 @@ private enum class OsModule(val label: String, val icon: ImageVector) {
   FILE_BOX("FILE_BOX", Icons.Outlined.FolderOpen),
   SKILL_BOX("SKILL_BOX", Icons.Outlined.Psychology),
   MODELS("MODELS", Icons.Outlined.DashboardCustomize),
-  LNK_BOX("MCP EXTENSIONS", Icons.Outlined.Link),
+  LNK_BOX("LNK_BOX", Icons.Outlined.Link),
   MSTR_CTRL("MSTR_CTRL", Icons.Outlined.Terminal),
   SYS_SETTINGS("SETTINGS", Icons.Outlined.Settings),
 }
@@ -183,11 +183,20 @@ fun GalleryApp(
                 fontFamily = FontFamily.Monospace,
               )
               Text(
-                "OS v1.0 — offline AI",
+                "OS v1.0 · on-device AI",
                 style = MaterialTheme.typography.bodySmall,
                 color = neonGreen.copy(alpha = 0.55f),
                 fontFamily = FontFamily.Monospace,
               )
+              val drawerUsername = remember { com.google.ai.edge.gallery.data.UserProfileStore.getUsername(context) }
+              if (drawerUsername.isNotBlank()) {
+                Text(
+                  "OPERATOR: $drawerUsername",
+                  style = MaterialTheme.typography.bodySmall,
+                  color = neonGreen.copy(alpha = 0.70f),
+                  fontFamily = FontFamily.Monospace,
+                )
+              }
             }
           }
 

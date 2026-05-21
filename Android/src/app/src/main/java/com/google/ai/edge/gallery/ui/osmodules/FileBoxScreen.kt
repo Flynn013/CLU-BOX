@@ -504,7 +504,7 @@ private fun FileBrowserScaffold(
                                 Icon(Icons.Outlined.NoteAdd, contentDescription = null,
                                     tint = neonGreen, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(8.dp))
-                                Text("New File", fontFamily = FontFamily.Monospace,
+                                Text("NEW FILE", fontFamily = FontFamily.Monospace,
                                     color = terminalOnSurface, fontSize = 13.sp)
                             }
                         },
@@ -516,7 +516,7 @@ private fun FileBrowserScaffold(
                                 Icon(Icons.Outlined.CreateNewFolder, contentDescription = null,
                                     tint = neonGreen, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(8.dp))
-                                Text("New Folder", fontFamily = FontFamily.Monospace,
+                                Text("NEW FOLDER", fontFamily = FontFamily.Monospace,
                                     color = terminalOnSurface, fontSize = 13.sp)
                             }
                         },
@@ -719,7 +719,7 @@ private fun FileRow(
                         Icon(Icons.Outlined.DriveFileRenameOutline, contentDescription = null,
                             tint = neonGreen, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Rename", fontFamily = FontFamily.Monospace,
+                        Text("RENAME", fontFamily = FontFamily.Monospace,
                             color = terminalOnSurface, fontSize = 13.sp)
                     }
                 },
@@ -731,7 +731,7 @@ private fun FileRow(
                         Icon(Icons.Outlined.Delete, contentDescription = null,
                             tint = Color(0xFFFF4444), modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Delete", fontFamily = FontFamily.Monospace,
+                        Text("DELETE", fontFamily = FontFamily.Monospace,
                             color = Color(0xFFFF4444), fontSize = 13.sp)
                     }
                 },
