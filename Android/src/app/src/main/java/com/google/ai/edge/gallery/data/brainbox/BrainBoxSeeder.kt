@@ -221,32 +221,32 @@ Pre-imported in every script:
 `Splinter` is pre-injected — call Splinter.fileBoxRead/Write/brainBoxStore/etc.
 
 Example — compute and save:
-  PYTHON_EXEC(python_script="""
+  PYTHON_EXEC(python_script='''
 import math
 result = math.sqrt(144)
 print(f"sqrt(144) = {result}")
 Splinter.fileBoxWrite("results/calc.txt", f"sqrt(144)={result}")
-""")
+''')
 
 Example — parse JSON from a FILE_BOX file:
-  PYTHON_EXEC(python_script="""
+  PYTHON_EXEC(python_script='''
 raw = Splinter.fileBoxRead("data.json")
 data = json.loads(raw)
 print(data.get("key", "missing"))
-""")
+''')
 
 Example — recall and summarize brain memories:
-  PYTHON_EXEC(python_script="""
+  PYTHON_EXEC(python_script='''
 results = json.loads(Splinter.brainBoxRecall("yesterday"))
 for r in results:
     print(r['label'], ':', r['content'][:80])
-""")
+''')
 
 BusyBox shell (via Splinter.shell for Linux ops, PYTHON_EXEC for pure Python):
-  PYTHON_EXEC(python_script="""
+  PYTHON_EXEC(python_script='''
 r = json.loads(Splinter.shell("uname -a"))
 print(r['stdout'])
-""")
+''')
             """.trimIndent(),
             synapses = "[[SplinterAPI_Reference]],[[Tool_Catalog]]",
         ),
