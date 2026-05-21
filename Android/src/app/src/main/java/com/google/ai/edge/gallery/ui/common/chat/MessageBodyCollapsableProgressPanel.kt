@@ -26,19 +26,20 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Article
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -47,171 +48,161 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.google.ai.edge.gallery.R
+import com.google.ai.edge.gallery.ui.theme.neonGreen
+import com.google.ai.edge.gallery.ui.theme.terminalLightGrey
 import com.google.ai.edge.gallery.ui.theme.terminalMidGrey
+import com.google.ai.edge.gallery.ui.theme.terminalOnSurface
+import com.google.ai.edge.gallery.ui.theme.terminalOutline
 
-private const val MAX_DESCRIPTION_LINES = 5
+private const val MAX_DESCRIPTION_LINES = 4
 
-/**
- * A Composable function that displays a rounded rectangle panel with a title and a collapsable
- * section.
- */
+/** CLU/BOX-styled collapsable tool-call progress card. */
 @Composable
 fun MessageBodyCollapsableProgressPanel(message: ChatMessageCollapsableProgressPanel) {
-  // Auto-expand while the task is running; collapse once it completes.
+  // Expansion state: auto-expand while running; if the user manually toggles
+  // it while running, that choice is preserved until inProgress flips again.
+  // Using `rememberSaveable` keyed on `inProgress` resets only when the task
+  // starts/stops — not on every item-added recomposition.
   var isExpanded by remember(message.inProgress) { mutableStateOf(message.inProgress) }
   var showLogsViewer by remember { mutableStateOf(false) }
 
-  // Derive a contextual title: while running show the live title; once done
-  // and the panel is collapsed, summarise as "Ran X Actions".
-  val displayTitle = if (!message.inProgress && !isExpanded && message.items.isNotEmpty()) {
-    val count = message.items.size
-    "Ran $count action${if (count == 1) "" else "s"}"
-  } else {
-    message.title
+  val displayTitle = when {
+    !message.inProgress && !isExpanded && message.items.isNotEmpty() -> {
+      val n = message.items.size
+      "Ran $n action${if (n == 1) "" else "s"}"
+    }
+    else -> message.title
   }
 
   Column(
-    modifier =
-      Modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh)
-        .clickable { isExpanded = !isExpanded }
-        .fillMaxWidth()
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(10.dp))
+      .background(terminalMidGrey)
+      .border(1.dp, terminalOutline, RoundedCornerShape(10.dp))
+      .clickable { isExpanded = !isExpanded },
   ) {
-    // Header Row: Contains the title and the expand/collapse button
+    // ── Header ──────────────────────────────────────────────────────────────
     Row(
-      modifier = Modifier.fillMaxWidth().padding(16.dp),
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 14.dp, vertical = 10.dp),
       verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.SpaceBetween,
     ) {
       Row(
         modifier = Modifier.weight(1f),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
       ) {
-        // Spinner on the most left when loading
-        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(24.dp)) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(20.dp)) {
           if (message.inProgress) {
             CircularProgressIndicator(
-              modifier = Modifier.size(16.dp),
+              modifier = Modifier.size(14.dp),
               strokeWidth = 2.dp,
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              color = neonGreen,
             )
           } else {
-            Icon(message.doneIcon, contentDescription = null, modifier = Modifier.size(24.dp))
+            Icon(
+              message.doneIcon,
+              contentDescription = null,
+              modifier = Modifier.size(18.dp),
+              tint = neonGreen,
+            )
           }
         }
 
-        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-          // Title.
-          AnimatedContent(
-            targetState = displayTitle,
-            transitionSpec = {
-              slideInVertically { it } + fadeIn() togetherWith
-                slideOutVertically { -it } + fadeOut()
-            },
-          ) { curTitle ->
-            Text(text = curTitle, style = MaterialTheme.typography.labelLarge)
-          }
+        AnimatedContent(
+          targetState = displayTitle,
+          modifier = Modifier.weight(1f),
+          transitionSpec = {
+            slideInVertically { it } + fadeIn() togetherWith slideOutVertically { -it } + fadeOut()
+          },
+        ) { curTitle ->
+          Text(
+            text = curTitle,
+            color = if (message.inProgress) neonGreen else terminalOnSurface,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+          )
         }
       }
 
-      // Expand/Collapse Button on the right side
+      Spacer(Modifier.width(8.dp))
       Icon(
-        imageVector =
-          if (isExpanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
-        contentDescription = if (isExpanded) "Collapse panel" else "Expand panel",
+        imageVector = if (isExpanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+        contentDescription = if (isExpanded) "Collapse" else "Expand",
+        tint = neonGreen.copy(alpha = 0.7f),
+        modifier = Modifier.size(18.dp),
       )
     }
 
-    // Collapsable Content: Shown only when isExpanded is true
+    // ── Expandable content ───────────────────────────────────────────────────
     AnimatedVisibility(
       visible = isExpanded,
       enter = expandVertically(),
       exit = shrinkVertically(),
     ) {
       Column(
-        modifier =
-          Modifier.padding(horizontal = 16.dp)
-            .padding(
-              bottom =
-                if (message.logMessages.isEmpty()) {
-                  12.dp
-                } else {
-                  8.dp
-                }
-            ),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(horizontal = 12.dp)
+          .padding(bottom = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
       ) {
-        for (item in message.items) {
-          Row(
-            modifier =
-              Modifier.clip(shape = RoundedCornerShape(12.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                .padding(12.dp)
-                .fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-          ) {
-            // A colored dot.
-            Box(
-              modifier =
-                Modifier.size(12.dp)
-                  .clip(shape = CircleShape)
-                  .background(terminalMidGrey)
-            )
-            Column() {
-              // Title.
-              Text(
-                item.title,
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.padding(bottom = 2.dp),
-              )
-
-              // Description.
-              if (item.description.isNotEmpty()) {
-                val density = LocalDensity.current
-                val maxHeight =
-                  with(density) {
-                    (MaterialTheme.typography.labelMedium.lineHeight * MAX_DESCRIPTION_LINES).toDp()
-                  }
-                Text(
-                  item.description,
-                  style = MaterialTheme.typography.bodySmall,
-                  color = MaterialTheme.colorScheme.onSurfaceVariant,
-                  modifier =
-                    Modifier.heightIn(max = maxHeight).verticalScroll(rememberScrollState()),
-                )
-              }
-            }
-          }
+        message.items.forEach { item ->
+          ToolCallItemRow(item)
         }
 
         if (message.logMessages.isNotEmpty()) {
-          Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomEnd) {
+          Spacer(Modifier.height(2.dp))
+          Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
             AssistChip(
               onClick = { showLogsViewer = true },
-              label = { Text(stringResource(R.string.view_console_logs)) },
+              label = {
+                Text(
+                  text = stringResource(R.string.view_console_logs),
+                  fontFamily = FontFamily.Monospace,
+                  fontSize = 11.sp,
+                )
+              },
               leadingIcon = {
                 Icon(
                   Icons.AutoMirrored.Outlined.Article,
                   contentDescription = null,
-                  Modifier.size(AssistChipDefaults.IconSize),
-                  tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                  modifier = Modifier.size(AssistChipDefaults.IconSize),
+                  tint = neonGreen,
                 )
               },
+              colors = AssistChipDefaults.assistChipColors(
+                containerColor = Color.Transparent,
+                labelColor = terminalOnSurface.copy(alpha = 0.7f),
+              ),
+              border = AssistChipDefaults.assistChipBorder(
+                enabled = true,
+                borderColor = terminalLightGrey,
+              ),
             )
           }
         }
@@ -221,5 +212,50 @@ fun MessageBodyCollapsableProgressPanel(message: ChatMessageCollapsableProgressP
 
   if (showLogsViewer) {
     LogsViewer(logs = message.logMessages, onDismissRequest = { showLogsViewer = false })
+  }
+}
+
+@Composable
+private fun ToolCallItemRow(item: ProgressPanelItem) {
+  Row(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(8.dp))
+      .background(terminalLightGrey.copy(alpha = 0.2f))
+      .border(1.dp, terminalOutline.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+      .padding(horizontal = 10.dp, vertical = 8.dp),
+    verticalAlignment = Alignment.Top,
+    horizontalArrangement = Arrangement.spacedBy(10.dp),
+  ) {
+    // Status dot
+    Box(
+      modifier = Modifier
+        .size(7.dp)
+        .clip(CircleShape)
+        .background(neonGreen)
+        .padding(top = 5.dp),  // optical alignment with first text line
+    )
+    Column(modifier = Modifier.weight(1f)) {
+      Text(
+        text = item.title,
+        color = terminalOnSurface,
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Bold,
+        fontSize = 12.sp,
+      )
+      if (item.description.isNotEmpty()) {
+        Spacer(Modifier.height(3.dp))
+        // Use maxLines + ellipsis instead of nested verticalScroll (which breaks
+        // height measurement inside LazyColumn and causes the card to not expand).
+        Text(
+          text = item.description,
+          color = terminalOnSurface.copy(alpha = 0.6f),
+          fontFamily = FontFamily.Monospace,
+          fontSize = 11.sp,
+          maxLines = MAX_DESCRIPTION_LINES,
+          overflow = TextOverflow.Ellipsis,
+        )
+      }
+    }
   }
 }

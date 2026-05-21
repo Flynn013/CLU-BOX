@@ -100,6 +100,18 @@ class LiteRTProvider(
                     )
                 }
 
+                is ContinuousAgentDriver.TurnOutcome.ToolCalls -> {
+                    val calls = outcome.calls.map { tc ->
+                        val input = runCatching { JSONObject(tc.argsJson) }.getOrElse { JSONObject() }
+                        ProviderToolCallResult(tc.callId, tc.tool, input)
+                    }
+                    ProviderResponse(
+                        text = accText.toString(),
+                        toolCalls = calls,
+                        finishReason = "tool_calls",
+                    )
+                }
+
                 is ContinuousAgentDriver.TurnOutcome.Failure ->
                     ProviderResponse(text = "", finishReason = "error")
             }
@@ -150,9 +162,20 @@ class LiteRTProvider(
                     val input = runCatching { JSONObject(outcome.argsJson) }.getOrElse { JSONObject() }
                     emit(ProviderEvent.ToolCallStart(outcome.callId, outcome.tool))
                     emit(ProviderEvent.ToolCallInput(outcome.callId, outcome.argsJson))
-                    val result = ProviderToolCallResult(outcome.callId, outcome.tool, input)
                     emit(ProviderEvent.ToolCallEnd(outcome.callId, outcome.tool, input))
-                    emit(ProviderEvent.Done(accText.toString(), listOf(result)))
+                    emit(ProviderEvent.Done(accText.toString(), listOf(ProviderToolCallResult(outcome.callId, outcome.tool, input))))
+                }
+                is ContinuousAgentDriver.TurnOutcome.ToolCalls -> {
+                    // Gemma 4 multi-call: emit start/input/end for each call in order,
+                    // then Done with the full results list.
+                    val results = outcome.calls.map { tc ->
+                        val input = runCatching { JSONObject(tc.argsJson) }.getOrElse { JSONObject() }
+                        emit(ProviderEvent.ToolCallStart(tc.callId, tc.tool))
+                        emit(ProviderEvent.ToolCallInput(tc.callId, tc.argsJson))
+                        emit(ProviderEvent.ToolCallEnd(tc.callId, tc.tool, input))
+                        ProviderToolCallResult(tc.callId, tc.tool, input)
+                    }
+                    emit(ProviderEvent.Done(accText.toString(), results))
                 }
                 is ContinuousAgentDriver.TurnOutcome.Failure -> {
                     emit(ProviderEvent.Error(outcome.message))
