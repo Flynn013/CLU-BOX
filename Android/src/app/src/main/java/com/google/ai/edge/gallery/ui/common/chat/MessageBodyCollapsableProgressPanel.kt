@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.ui.common.CrosshairMark
+import com.google.ai.edge.gallery.ui.theme.marathonBlue
 import com.google.ai.edge.gallery.ui.theme.neonGreen
 import com.google.ai.edge.gallery.ui.theme.terminalLightGrey
 import com.google.ai.edge.gallery.ui.theme.terminalMidGrey
@@ -98,7 +99,7 @@ fun MessageBodyCollapsableProgressPanel(message: ChatMessageCollapsableProgressP
       .fillMaxWidth()
       .clip(RoundedCornerShape(2.dp))
       .background(terminalMidGrey)
-      .border(1.dp, if (message.inProgress) neonGreen.copy(alpha = 0.6f) else terminalOutline, RoundedCornerShape(2.dp))
+      .border(1.dp, if (message.inProgress) neonGreen.copy(alpha = 0.6f) else marathonBlue.copy(alpha = 0.35f), RoundedCornerShape(2.dp))
       .clickable { isExpanded = !isExpanded },
   ) {
     // ── Marathon top accent line (visible when in-progress) ─────────────────
@@ -230,34 +231,31 @@ private fun ToolCallItemRow(item: ProgressPanelItem) {
     modifier = Modifier
       .fillMaxWidth()
       .clip(RoundedCornerShape(2.dp))
-      .background(terminalLightGrey.copy(alpha = 0.15f))
-      .border(1.dp, terminalOutline.copy(alpha = 0.6f), RoundedCornerShape(2.dp))
+      .background(marathonBlue.copy(alpha = 0.08f))
+      .border(1.dp, marathonBlue.copy(alpha = 0.3f), RoundedCornerShape(2.dp))
       .padding(horizontal = 10.dp, vertical = 8.dp),
     verticalAlignment = Alignment.Top,
     horizontalArrangement = Arrangement.spacedBy(10.dp),
   ) {
-    // Marathon crosshair instead of dot — always aligned with first line
     CrosshairMark(
       modifier = Modifier.padding(top = 3.dp),
       size = 9.dp,
-      color = neonGreen,
+      color = marathonBlue,
       strokeWidth = 1.dp,
     )
     Column(modifier = Modifier.weight(1f)) {
       Text(
         text = item.title,
-        color = terminalOnSurface,
+        color = marathonBlue.copy(alpha = 0.9f),
         fontFamily = FontFamily.Monospace,
         fontWeight = FontWeight.Bold,
         fontSize = 12.sp,
       )
       if (item.description.isNotEmpty()) {
         Spacer(Modifier.height(3.dp))
-        // Use maxLines + ellipsis instead of nested verticalScroll (which breaks
-        // height measurement inside LazyColumn and causes the card to not expand).
         Text(
           text = item.description,
-          color = terminalOnSurface.copy(alpha = 0.6f),
+          color = terminalOnSurface.copy(alpha = 0.55f),
           fontFamily = FontFamily.Monospace,
           fontSize = 11.sp,
           maxLines = MAX_DESCRIPTION_LINES,

@@ -240,8 +240,9 @@ object AnthropicCloudModelHelper : LlmModelHelper {
             (instance.toolSet as? AgentTools)?.sendAgentAction(
               SkillProgressAgentAction(
                 label = "${tc.name} done",
-                addItemDescription = result.take(120),
                 inProgress = false,
+                addItemTitle = tc.name,
+                addItemDescription = result.take(120),
               )
             )
             instance.conversationHistory.add(

@@ -118,7 +118,12 @@ class AgentTools : ToolSet {
     val (exitCode, output) = tsm.executeCommandWithExitCode(command)
     val capped = capOutputWithSpill(output, "shellExecute")
     Log.d(TAG, "shellExecute exit=$exitCode output=${output.take(200)}")
-    sendAgentAction(SkillProgressAgentAction(label = "Executed: $command", inProgress = false))
+    sendAgentAction(SkillProgressAgentAction(
+      label = "Executed: $command",
+      inProgress = false,
+      addItemTitle = "Executed: $command",
+      addItemDescription = "exit $exitCode · ${capped.lines().firstOrNull { it.isNotBlank() }?.take(60) ?: "no output"}",
+    ))
     return mapOf("stdout" to capped, "exit_code" to exitCode.toString())
   }
 
@@ -138,7 +143,12 @@ class AgentTools : ToolSet {
       }
       target.parentFile?.mkdirs()
       target.writeText(content, Charsets.UTF_8)
-      sendAgentAction(SkillProgressAgentAction(label = "Written: $file_path", inProgress = false))
+      sendAgentAction(SkillProgressAgentAction(
+        label = "Written: $file_path",
+        inProgress = false,
+        addItemTitle = "Written: $file_path",
+        addItemDescription = "${content.length} bytes",
+      ))
       mapOf("result" to "ok", "path" to target.absolutePath)
     } catch (e: Exception) {
       Log.e(TAG, "fileBoxWrite failed", e)
@@ -167,7 +177,12 @@ class AgentTools : ToolSet {
       val slice = allLines.drop(startIdx).take(lineCount)
       val result = slice.joinToString("\n")
       val capped = capOutputWithSpill(result, "fileBoxReadLines")
-      sendAgentAction(SkillProgressAgentAction(label = "Read: $file_path (${allLines.size} lines)", inProgress = false))
+      sendAgentAction(SkillProgressAgentAction(
+        label = "Read: $file_path (${allLines.size} lines)",
+        inProgress = false,
+        addItemTitle = "Read: $file_path",
+        addItemDescription = "${allLines.size} lines · L$start_line–$end_line",
+      ))
       mapOf("lines" to capped, "total_lines" to allLines.size.toString())
     } catch (e: Exception) {
       Log.e(TAG, "fileBoxReadLines failed", e)
@@ -203,7 +218,12 @@ class AgentTools : ToolSet {
         if (isEmpty()) append("(no matches)")
       }
       val capped = capOutputWithSpill(result, "brainBoxGrep")
-      sendAgentAction(SkillProgressAgentAction(label = "Searched: $keyword in $file_path", inProgress = false))
+      sendAgentAction(SkillProgressAgentAction(
+        label = "Searched: $keyword in $file_path",
+        inProgress = false,
+        addItemTitle = "Searched: $keyword",
+        addItemDescription = capped.lines().firstOrNull { it.isNotBlank() }?.take(60) ?: "no matches",
+      ))
       mapOf("matches" to capped)
     } catch (e: Exception) {
       Log.e(TAG, "brainBoxGrep failed", e)
@@ -226,7 +246,12 @@ class AgentTools : ToolSet {
         dao.searchNeurons(query)
       }
       if (matches.isEmpty()) {
-        sendAgentAction(SkillProgressAgentAction(label = "Recall: No matches", inProgress = false))
+        sendAgentAction(SkillProgressAgentAction(
+          label = "Recall: No matches",
+          inProgress = false,
+          addItemTitle = "Recall: No matches",
+          addItemDescription = query.take(60),
+        ))
         return mapOf("result" to "No matches found for '$query'")
       }
 
@@ -241,7 +266,12 @@ class AgentTools : ToolSet {
         }
       }
 
-      sendAgentAction(SkillProgressAgentAction(label = "Recall: ${matches.size} found", inProgress = false))
+      sendAgentAction(SkillProgressAgentAction(
+        label = "Recall: ${matches.size} found",
+        inProgress = false,
+        addItemTitle = "Recall: ${matches.size} result${if (matches.size == 1) "" else "s"}",
+        addItemDescription = matches.firstOrNull()?.label ?: "",
+      ))
       mapOf("result" to capOutputWithSpill(resultStr, "brainBoxSearch"))
     } catch (e: Exception) {
       Log.e(TAG, "brainBoxSearch failed", e)
@@ -274,7 +304,12 @@ class AgentTools : ToolSet {
         dao.insertNeuron(neuron)
       }
       
-      sendAgentAction(SkillProgressAgentAction(label = "Node Forged: $label", inProgress = false))
+      sendAgentAction(SkillProgressAgentAction(
+        label = "Node Forged: $label",
+        inProgress = false,
+        addItemTitle = "Forged: $label",
+        addItemDescription = type.ifBlank { "Concept" },
+      ))
       mapOf("result" to "ok", "message" to "Successfully forged node '$label' in BrainBox")
     } catch (e: Exception) {
       Log.e(TAG, "brainBoxWrite failed", e)
@@ -297,19 +332,34 @@ class AgentTools : ToolSet {
         val target = matches.find { it.label.equals(target_label, ignoreCase = true) }
 
         if (target == null) {
-          sendAgentAction(SkillProgressAgentAction(label = "Rewire Failed: Node not found", inProgress = false))
+          sendAgentAction(SkillProgressAgentAction(
+            label = "Rewire Failed: Node not found",
+            inProgress = false,
+            addItemTitle = "Rewire Failed",
+            addItemDescription = "Not found: $target_label",
+          ))
           return@runBlocking mapOf("result" to "Error: No node found with exact label '$target_label'")
         }
 
         if (target.isCore) {
-          sendAgentAction(SkillProgressAgentAction(label = "Rewire Failed: Core protection active", inProgress = false))
+          sendAgentAction(SkillProgressAgentAction(
+            label = "Rewire Failed: Core protection active",
+            inProgress = false,
+            addItemTitle = "Rewire Blocked",
+            addItemDescription = "Core node: $target_label",
+          ))
           return@runBlocking mapOf("result" to "Error: Cannot edit core node '$target_label'. Core nodes are read-only.")
         }
 
         val updatedNode = target.copy(content = new_content)
         dao.updateNeuron(updatedNode)
 
-        sendAgentAction(SkillProgressAgentAction(label = "Node Rewired: $target_label", inProgress = false))
+        sendAgentAction(SkillProgressAgentAction(
+          label = "Node Rewired: $target_label",
+          inProgress = false,
+          addItemTitle = "Rewired: $target_label",
+          addItemDescription = "",
+        ))
         mapOf("result" to "ok", "message" to "Successfully updated node '$target_label'")
       }
     } catch (e: Exception) {
@@ -332,18 +382,33 @@ class AgentTools : ToolSet {
         val target = matches.find { it.label.equals(target_label, ignoreCase = true) }
 
         if (target == null) {
-          sendAgentAction(SkillProgressAgentAction(label = "Prune Failed: Node not found", inProgress = false))
+          sendAgentAction(SkillProgressAgentAction(
+            label = "Prune Failed: Node not found",
+            inProgress = false,
+            addItemTitle = "Prune Failed",
+            addItemDescription = "Not found: $target_label",
+          ))
           return@runBlocking mapOf("result" to "Error: No node found with exact label '$target_label'")
         }
 
         if (target.isCore) {
-          sendAgentAction(SkillProgressAgentAction(label = "Prune Failed: Core protection active", inProgress = false))
+          sendAgentAction(SkillProgressAgentAction(
+            label = "Prune Failed: Core protection active",
+            inProgress = false,
+            addItemTitle = "Prune Blocked",
+            addItemDescription = "Core node: $target_label",
+          ))
           return@runBlocking mapOf("result" to "Error: Cannot delete core node '$target_label'. Core nodes are protected.")
         }
 
         dao.deleteNeuron(target)
 
-        sendAgentAction(SkillProgressAgentAction(label = "Node Pruned: $target_label", inProgress = false))
+        sendAgentAction(SkillProgressAgentAction(
+          label = "Node Pruned: $target_label",
+          inProgress = false,
+          addItemTitle = "Pruned: $target_label",
+          addItemDescription = "",
+        ))
         mapOf("result" to "ok", "message" to "Successfully deleted node '$target_label'")
       }
     } catch (e: Exception) {
@@ -358,11 +423,21 @@ class AgentTools : ToolSet {
     sendAgentAction(SkillProgressAgentAction(label = "PYTHON_EXEC", inProgress = true))
     return try {
       val output = runBlocking { PythonBridge.executeScript(python_script) }
-      sendAgentAction(SkillProgressAgentAction(label = "PYTHON_EXEC done", inProgress = false))
+      sendAgentAction(SkillProgressAgentAction(
+        label = "PYTHON_EXEC done",
+        inProgress = false,
+        addItemTitle = "Python executed",
+        addItemDescription = output.lines().firstOrNull { it.isNotBlank() }?.take(60) ?: "done",
+      ))
       mapOf("output" to output)
     } catch (e: Exception) {
       Log.e(TAG, "PYTHON_EXEC failed", e)
-      sendAgentAction(SkillProgressAgentAction(label = "PYTHON_EXEC error", inProgress = false))
+      sendAgentAction(SkillProgressAgentAction(
+        label = "PYTHON_EXEC error",
+        inProgress = false,
+        addItemTitle = "Python error",
+        addItemDescription = (e.message ?: "execution failed").take(60),
+      ))
       mapOf("error" to (e.message ?: "PYTHON_EXEC failed"))
     }
   }
@@ -393,11 +468,21 @@ class AgentTools : ToolSet {
         .replace(Regex("\\s+"), " ")
         .trim()
         .take(4000)
-      sendAgentAction(SkillProgressAgentAction(label = "webFetch done", inProgress = false))
+      sendAgentAction(SkillProgressAgentAction(
+        label = "webFetch done",
+        inProgress = false,
+        addItemTitle = url.take(50),
+        addItemDescription = "HTTP ${response.code} · ${stripped.length} chars",
+      ))
       mapOf("content" to stripped, "status" to response.code.toString(), "url" to url)
     } catch (e: Exception) {
       Log.e(TAG, "webFetch failed for $url", e)
-      sendAgentAction(SkillProgressAgentAction(label = "webFetch error", inProgress = false))
+      sendAgentAction(SkillProgressAgentAction(
+        label = "webFetch error",
+        inProgress = false,
+        addItemTitle = "webFetch error",
+        addItemDescription = (e.message ?: "request failed").take(60),
+      ))
       mapOf("error" to (e.message ?: "webFetch failed"))
     }
   }
