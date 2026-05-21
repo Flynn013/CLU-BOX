@@ -52,6 +52,14 @@ jobs:
           curl -fL --retry 3 --retry-delay 2 -o app/src/main/assets/proot "https://github.com/proot-me/proot/releases/download/${PROOT_VERSION}/${PROOT_ASSET}"
           echo "${PROOT_SHA256}  app/src/main/assets/proot" | sha256sum -c -
 
+      - name: Fetch BusyBox arm64 binary
+        run: |
+          mkdir -p app/src/main/assets/busybox/
+          curl -fL --retry 3 --retry-delay 2 \
+            -o app/src/main/assets/busybox/busybox-arm64-v8a \
+            "https://busybox.net/downloads/binaries/1.35.0-aarch64-linux-musl/busybox"
+          echo "Fetched BusyBox: $(wc -c < app/src/main/assets/busybox/busybox-arm64-v8a) bytes"
+
       - name: Build Debug APK
         run: ./gradlew assembleDebug --stacktrace
 

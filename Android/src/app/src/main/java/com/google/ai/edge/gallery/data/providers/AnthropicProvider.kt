@@ -32,7 +32,7 @@ import io.ktor.utils.io.readUTF8Line
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.flowOn
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -112,9 +112,8 @@ class AnthropicProvider(
         messages: List<ProviderMessage>,
         tools: List<JSONObject>,
     ): Flow<ProviderEvent> = flow {
-        withContext(Dispatchers.IO) {
-            try {
-                val bodyJson = buildRequestBody(messages, tools, stream = true)
+        try {
+            val bodyJson = buildRequestBody(messages, tools, stream = true)
 
                 val fullText = StringBuilder()
                 val thinkingText = StringBuilder()
@@ -236,8 +235,7 @@ class AnthropicProvider(
                 Log.e(TAG, "streamChat() error: ${e.message}", e)
                 emit(ProviderEvent.Error(e.message ?: "Unknown streaming error"))
             }
-        }
-    }
+    }.flowOn(Dispatchers.IO)
 
     // ── Request building ────────────────────────────────────────────────────
 

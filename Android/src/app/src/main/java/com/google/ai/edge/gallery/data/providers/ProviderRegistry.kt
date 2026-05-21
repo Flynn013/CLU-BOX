@@ -90,7 +90,24 @@ object ProviderRegistry {
         baseUrl: String? = null,
     ): LlmProvider? {
         val key = cacheKey(providerId, modelId)
-        cache[key]?.let { return it }
+
+        // For Anthropic OAuth providers, validate cached credentials before returning.
+        // If OAuth credentials expired since the provider was created, bust the cache
+        // so the next call creates a fresh provider with a valid token.
+        if (providerId == "anthropic") {
+            val cached = cache[key]
+            if (cached != null) {
+                val oauthCreds = ClaudeCredentialStore.load(context)
+                if (oauthCreds != null && !oauthCreds.isExpired) {
+                    return cached // Valid OAuth token — reuse cached provider
+                }
+                // Token expired or revoked — bust the cache and fall through to recreate
+                cache.remove(key)
+                Log.d(TAG, "Busted stale Anthropic OAuth provider from cache")
+            }
+        } else {
+            cache[key]?.let { return it }
+        }
 
         val provider: LlmProvider? = when (providerId) {
             "gemini" -> {
