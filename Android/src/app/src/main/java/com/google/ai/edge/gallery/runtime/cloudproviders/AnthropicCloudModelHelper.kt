@@ -38,6 +38,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.reflect.KProperty1
 import kotlin.reflect.full.memberFunctions
 import kotlin.reflect.full.memberProperties
+import kotlin.reflect.full.valueParameters
 
 private const val TAG = "AnthropicCloudHelper"
 private const val MAX_TOOL_ROUNDS = 10
