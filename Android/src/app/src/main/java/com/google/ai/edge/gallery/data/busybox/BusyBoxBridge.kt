@@ -64,7 +64,7 @@ object BusyBoxBridge {
 
   /** Fallback download URL when the APK asset is absent. */
   private const val DOWNLOAD_URL =
-    "https://busybox.net/downloads/binaries/1.35.0-aarch64-linux-musl/busybox"
+    "https://busybox.net/downloads/binaries/1.34.0-defconfig-multiarch-musl/busybox-aarch64"
 
   private val installed = AtomicBoolean(false)
   private val installLock = Any()

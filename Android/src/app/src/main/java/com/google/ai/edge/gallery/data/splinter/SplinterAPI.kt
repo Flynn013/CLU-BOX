@@ -236,6 +236,17 @@ class SplinterAPI private constructor() {
     return runCatching { target.readText() }.getOrElse { "[fileBoxRead error: ${it.message}]" }
   }
 
+  /** Delete a file from the file_box workspace. Returns an ok/error envelope. */
+  fun fileBoxDelete(relativePath: String): String {
+    val safe = relativePath.trimStart('/')
+    val target = File(BusyBoxBridge.defaultWorkDir(context), safe).canonicalFile
+    val root = BusyBoxBridge.defaultWorkDir(context).canonicalFile
+    if (!target.absolutePath.startsWith(root.absolutePath)) return "[fileBoxDelete error: path traversal blocked]"
+    if (!target.exists()) return "[fileBoxDelete error: file not found: $relativePath]"
+    return if (target.delete()) "[fileBoxDelete ok: $relativePath]"
+    else "[fileBoxDelete error: could not delete $relativePath]"
+  }
+
   /** List a directory inside the file_box workspace. */
   fun fileBoxList(relativeDir: String = ""): String = runBlocking {
     val safe = relativeDir.trimStart('/')
@@ -346,6 +357,19 @@ class SplinterAPI private constructor() {
         else -> "unknown"
       })
     }.toString()
+  }
+
+  /**
+   * AI-safe delete of an EPISODIC neuron looked up by **label**. Finds the first
+   * neuron whose label matches (case-insensitive), then delegates to [brainBoxForget].
+   */
+  fun brainBoxDeleteByLabel(label: String): String = runBlocking {
+    val dao = GraphDatabase.getInstance(context).brainBoxDao()
+    val matches = runCatching { dao.searchNeurons(label) }.getOrDefault(emptyList())
+    val target = matches.find { it.label.equals(label, ignoreCase = true) }
+      ?: return@runBlocking "[brainBoxDeleteByLabel error: no neuron found with label '$label']"
+    if (target.isCore) return@runBlocking "[brainBoxDeleteByLabel error: '$label' is a CORE memory and is protected]"
+    brainBoxForget(target.id)
   }
 
   // ─────────────────────────────────────────────────────────────────────────

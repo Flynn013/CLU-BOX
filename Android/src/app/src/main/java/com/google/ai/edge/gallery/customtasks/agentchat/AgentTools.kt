@@ -567,6 +567,31 @@ class AgentTools : ToolSet {
     return mapOf("result" to capped)
   }
 
+  @Tool("God-mode CRUD for all CLU/BOX subsystems via SplinterAPI. operations: fileRead/Write/Delete/List, skillRead/Write/Delete/List, lnkConnect/Send/List, brainStore/Recall/Delete. target=resource path/name/id; value=content.")
+  fun appControl(operation: String, target: String, value: String): Map<String, String> {
+    if (operation.isBlank()) return mapOf("result" to "Error: operation is required")
+    sendAgentAction(SkillProgressAgentAction(label = "AppControl: $operation", inProgress = true))
+    val args = org.json.JSONObject().apply {
+      put("operation", operation)
+      put("target", target)
+      put("value", value)
+    }
+    return try {
+      val skill = AppControlSkill(this)
+      val result = kotlinx.coroutines.runBlocking { skill.execute(args) }
+      sendAgentAction(SkillProgressAgentAction(
+        label = "AppControl: $operation done",
+        inProgress = false,
+        addItemTitle = "appControl:$operation",
+        addItemDescription = result.take(80),
+      ))
+      mapOf("result" to result)
+    } catch (e: Exception) {
+      android.util.Log.e("AgentTools", "appControl failed", e)
+      mapOf("result" to "Error: ${e.message}")
+    }
+  }
+
   private fun resolveWorkspacePath(path: String): String {
     if (path.startsWith("/")) return path
     val ctx = context ?: return path

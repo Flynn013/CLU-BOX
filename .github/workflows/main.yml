@@ -52,6 +52,25 @@ jobs:
           curl -fL --retry 3 --retry-delay 2 -o app/src/main/assets/proot "https://github.com/proot-me/proot/releases/download/${PROOT_VERSION}/${PROOT_ASSET}"
           echo "${PROOT_SHA256}  app/src/main/assets/proot" | sha256sum -c -
 
+      - name: Fetch BusyBox arm64 binary
+        # The asset is optional — BusyBoxBridge gracefully falls back to
+        # the device's /system/bin/sh when the APK asset is absent.
+        # Use continue-on-error so a stale/moved upstream URL never blocks
+        # the build; the binary will just not be bundled in that APK.
+        continue-on-error: true
+        run: |
+          mkdir -p app/src/main/assets/busybox/
+          curl -fL --retry 3 --retry-delay 2 \
+            -o app/src/main/assets/busybox/busybox-arm64-v8a \
+            "https://busybox.net/downloads/binaries/1.34.0-defconfig-multiarch-musl/busybox-aarch64" \
+          || curl -fL --retry 2 \
+            -o app/src/main/assets/busybox/busybox-arm64-v8a \
+            "https://busybox.net/downloads/binaries/1.33.0-defconfig-multiarch-musl/busybox-aarch64" \
+          || echo "BusyBox download skipped — app will use system shell fallback"
+          if [ -f app/src/main/assets/busybox/busybox-arm64-v8a ]; then
+            echo "Fetched BusyBox: $(wc -c < app/src/main/assets/busybox/busybox-arm64-v8a) bytes"
+          fi
+
       - name: Build Debug APK
         run: ./gradlew assembleDebug --stacktrace
 

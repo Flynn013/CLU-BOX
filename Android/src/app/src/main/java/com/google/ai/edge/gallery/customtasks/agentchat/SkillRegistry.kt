@@ -63,6 +63,7 @@ class SkillRegistry(private val agentTools: AgentTools) {
       DelegateSkill(agentTools),
       ScdlBoxSkill(agentTools),
       WebFetchSkill(),
+      AppControlSkill(agentTools),
     )
 
     // Merge with metadata-only entries for all other @Tool methods.

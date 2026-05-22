@@ -34,6 +34,8 @@ dependencyResolutionManagement {
   repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
   repositories {
     //        mavenLocal()
+    // Chaquopy Python runtime artifacts (com.chaquo.python:stdlib:3.11.x, etc.)
+    maven { url = uri("https://chaquo.com/maven/") }
     google()
     mavenCentral()
     maven { url = uri("https://jitpack.io") }

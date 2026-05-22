@@ -30,6 +30,13 @@ val neonGreen          = Color(0xFFC8FF00)   // Marathon signature acid lime
 val marathonBlue       = Color(0xFF1A1AE6)   // Marathon electric-blue accent
 val marathonLime       = neonGreen           // alias
 
+// ── CyberAcme extended palette ──────────────────────────────────────────────
+val cyberAcmeCyan      = Color(0xFF00E5FF)   // CyberAcme terminal cyan (S'pht text)
+val marathonOrange     = Color(0xFFFF6600)   // Marathon warning / danger readout
+val marathonBlood      = Color(0xFF8B0000)   // Marathon rampancy blood-red
+val marathonRampancyGold = Color(0xFFFFCC00) // Rampancy phase gold / alert
+val cyberAcmeViolet    = Color(0xFF6A00FF)   // CyberAcme deep violet (M-class terminals)
+
 // ── Background scale (pure black → near-black → dark grey) ─────────────────
 val absoluteBlack      = Color(0xFF000000)   // page / scaffold background
 val terminalDarkGrey   = Color(0xFF080808)   // surface lowest / subtle tint

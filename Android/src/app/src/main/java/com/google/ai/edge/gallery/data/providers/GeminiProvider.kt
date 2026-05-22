@@ -32,6 +32,7 @@ import io.ktor.utils.io.readUTF8Line
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -116,9 +117,8 @@ class GeminiProvider(
         messages: List<ProviderMessage>,
         tools: List<JSONObject>,
     ): Flow<ProviderEvent> = flow {
-        withContext(Dispatchers.IO) {
-            try {
-                val bodyJson = buildRequestBody(messages, tools)
+        try {
+            val bodyJson = buildRequestBody(messages, tools)
                 val url = "$BASE_URL/$modelId:streamGenerateContent?alt=sse"
 
                 val fullText = StringBuilder()
@@ -203,8 +203,7 @@ class GeminiProvider(
                 Log.e(TAG, "streamChat() error: ${e.message}", e)
                 emit(ProviderEvent.Error(e.message ?: "Unknown streaming error"))
             }
-        }
-    }
+    }.flowOn(Dispatchers.IO)
 
     // ── Request building ────────────────────────────────────────────────────
 
