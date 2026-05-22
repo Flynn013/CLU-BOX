@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -33,35 +33,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import org.json.JSONObject
 
-/** Events emitted by [AgentEngineV2.run]. Consumed by the Compose chat screen. */
-sealed class AgentEvent {
-    /** Accumulated text so far for the current assistant turn. */
-    data class Token(val accumulatedText: String) : AgentEvent()
-
-    /** A reasoning/thinking token (extended thinking). */
-    data class Thinking(val token: String) : AgentEvent()
-
-    /** A tool call is starting (name and id known; input still streaming). */
-    data class ToolStart(val id: String, val name: String, val inputSnapshot: String) : AgentEvent()
-
-    /** A tool call finished (result or error). */
-    data class ToolEnd(
-        val id: String,
-        val name: String,
-        val output: String,
-        val isError: Boolean,
-    ) : AgentEvent()
-
-    /** A new assistant turn is beginning (multi-turn loops, post-tool). */
-    object AssistantTurn : AgentEvent()
-
-    /** Loop finished cleanly. [finalText] is the last assistant message. */
-    data class Complete(val finalText: String) : AgentEvent()
-
-    /** A fatal error occurred. */
-    data class Error(val message: String) : AgentEvent()
-}
-
 /**
  * **AgentEngineV2** — Provider-event-driven autonomous execution loop for CLU/BOX.
  *
@@ -83,17 +54,17 @@ sealed class AgentEvent {
  * @param provider        The [LlmProvider] (cloud or device-local) that streams tokens
  * @param skillRegistry   The [SkillRegistry] for tool dispatch and schema building
  * @param loopManager     Optional [AgentLoopManager] for error-budget enforcement; if null
- *                        a fresh instance is created per [run] call
+ * a fresh instance is created per [run] call
  * @param contextManager  Optional [ContextManager] for token-budget enforcement; if null
- *                        a default instance tuned to [provider.modelId] is created
- * @param maxIterations   Hard cap on think→act cycles per user message (default: 25)
+ * a default instance tuned to [provider.modelId] is created
+ * @param maxIterations   Hard cap on think→act cycles per user message (default: 100 for Devbox runs)
  */
 class AgentEngineV2(
     private val provider: LlmProvider,
     private val skillRegistry: SkillRegistry,
     private val loopManager: AgentLoopManager = AgentLoopManager(),
     private val contextManager: ContextManager = ContextManager.forModelId(provider.modelId),
-    private val maxIterations: Int = 25,
+    private val maxIterations: Int = 100,
 ) {
 
     companion object {
@@ -344,12 +315,15 @@ You are CLU — a powerful AI developer assistant running on Android as part of 
                 return@flow
             }
 
+            val isLocalProtocol = provider.providerId == "litert"
+
             // ── Record assistant turn ─────────────────────────────────────
             messages.add(
                 ProviderMessage(
                     role = "assistant",
                     content = turnText.toString(),
-                    toolCalls = turnToolCalls.map { tc ->
+                    // Protocol Switch: local models collapse if we supply structured function-call shapes
+                    toolCalls = if (isLocalProtocol) emptyList() else turnToolCalls.map { tc ->
                         ProviderToolCall(tc.id, tc.name, tc.input.toString())
                     },
                 )
@@ -379,14 +353,25 @@ You are CLU — a powerful AI developer assistant running on Android as part of 
 
                 if (isError) loopManager.onError(output) else loopManager.onSuccess()
 
-                messages.add(
-                    ProviderMessage(
-                        role = "tool",
-                        content = output,
-                        toolCallId = tc.id,
-                        toolName = tc.name,
+                // Protocol Switch: Route local tool observations inside standard USER blocks
+                // wrapped in tool_response XML tags to enforce strict role-turn alternation.
+                if (isLocalProtocol) {
+                    messages.add(
+                        ProviderMessage(
+                            role = "user",
+                            content = "<tool_response>\n$output\n</tool_response>"
+                        )
                     )
-                )
+                } else {
+                    messages.add(
+                        ProviderMessage(
+                            role = "tool",
+                            content = output,
+                            toolCallId = tc.id,
+                            toolName = tc.name,
+                        )
+                    )
+                }
             }
             // Loop back — LLM sees tool results and streams next response
         }
