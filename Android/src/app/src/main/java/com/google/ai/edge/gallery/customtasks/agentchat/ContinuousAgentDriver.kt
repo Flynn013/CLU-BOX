@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  */
 
 package com.google.ai.edge.gallery.customtasks.agentchat
@@ -166,7 +166,7 @@ class ContinuousAgentDriver(
 
   private suspend fun runLoop() {
     var safetyHops = 0
-    val maxHops = 64 // hard upper bound to prevent runaway costs.
+    val maxHops = 100 // Bumped to 100 for high-capacity Devbox execution
 
     while (scope.isActive && safetyHops < maxHops) {
       safetyHops++
@@ -202,18 +202,21 @@ class ContinuousAgentDriver(
         is TurnOutcome.Failure -> {
           val keepGoing = loopManager.onError(turn.message)
           if (!keepGoing) {
+            // Protocol Switch: local models fail when system-role overrides break strict turn templates mid-run.
+            // Map the agentic loop halt into a strict user context entry.
             context.add(
               ContextEntry(
-                ContextEntry.Role.SYSTEM,
-                loopManager.buildExhaustedMessage(governor.engine.value),
+                ContextEntry.Role.USER,
+                "<tool_response>\n${loopManager.buildExhaustedMessage(governor.engine.value)}\n</tool_response>",
               ),
             )
             return
           }
+          // Protocol Switch: retry prompts are wrapped in standard user XML blocks.
           context.add(
             ContextEntry(
-              ContextEntry.Role.SYSTEM,
-              loopManager.formatRetrySystemMessage("inference", turn.message),
+              ContextEntry.Role.USER,
+              "<tool_response>\n${loopManager.formatRetrySystemMessage("inference", turn.message)}\n</tool_response>",
             ),
           )
         }
@@ -224,8 +227,8 @@ class ContinuousAgentDriver(
       Log.w(TAG, "max-hop safety bound reached ($maxHops) — halting loop")
       context.add(
         ContextEntry(
-          ContextEntry.Role.SYSTEM,
-          "[CLU/BOX] Loop halted at safety bound of $maxHops hops to prevent runaway execution.",
+          ContextEntry.Role.USER,
+          "<tool_response>\n[CLU/BOX] Loop halted at safety bound of $maxHops hops to prevent runaway execution.\n</tool_response>",
         ),
       )
     }
@@ -251,19 +254,34 @@ class ContinuousAgentDriver(
 
     return if (ok) {
       governor.onToolResult(exec.id, observation)
-      context.add(ContextEntry(ContextEntry.Role.TOOL, "${turn.tool} -> $observation"))
+      // Protocol Switch: observations append strictly inside USER blocks enclosed in XML tool tags.
+      // This maintains turn template integrity under the hood and keeps these faux updates out of
+      // the visible Compose chat list, while governor signals keep terminal tool cards fully operational.
+      context.add(
+        ContextEntry(
+          ContextEntry.Role.USER,
+          "<tool_response>\n$observation\n</tool_response>"
+        )
+      )
       loopManager.onSuccess()
       true
     } else {
       governor.onToolError(exec.id, observation)
       val keepGoing = loopManager.onError(observation)
       val sysMsg = loopManager.formatRetrySystemMessage(turn.tool, observation)
-      context.add(ContextEntry(ContextEntry.Role.SYSTEM, sysMsg))
+      
+      // Protocol Switch: Wrap failures and retries inside the standard USER protocol sequence.
+      context.add(
+        ContextEntry(
+          ContextEntry.Role.USER,
+          "<tool_response>\n$sysMsg\n</tool_response>"
+        )
+      )
       if (!keepGoing) {
         context.add(
           ContextEntry(
-            ContextEntry.Role.SYSTEM,
-            loopManager.buildExhaustedMessage(governor.engine.value),
+            ContextEntry.Role.USER,
+            "<tool_response>\n${loopManager.buildExhaustedMessage(governor.engine.value)}\n</tool_response>",
           ),
         )
       }
