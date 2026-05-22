@@ -344,21 +344,22 @@ fun CrosshairMark(
     modifier: Modifier = Modifier,
     size: Dp = 10.dp,
     color: Color = MarathonTheme.PhosphorGreen,
+    strokeWidth: Dp = 1.dp,
 ) {
     Canvas(modifier = modifier.size(size)) {
         val center = Offset(this.size.width / 2f, this.size.height / 2f)
-        val strokeWidth = 1.dp.toPx()
+        val strokeWidthPx = strokeWidth.toPx()
         drawLine(
             color = color,
             start = Offset(0f, center.y),
             end = Offset(this.size.width, center.y),
-            strokeWidth = strokeWidth
+            strokeWidth = strokeWidthPx
         )
         drawLine(
             color = color,
             start = Offset(center.x, 0f),
             end = Offset(center.x, this.size.height),
-            strokeWidth = strokeWidth
+            strokeWidth = strokeWidthPx
         )
     }
 }
