@@ -338,3 +338,51 @@ fun CyberAcmeTerminalFrame(
         }
     }
 }
+
+@Composable
+fun CrosshairMark(
+    modifier: Modifier = Modifier,
+    size: Dp = 10.dp,
+    color: Color = MarathonTheme.PhosphorGreen,
+    strokeWidth: Dp = 1.dp,
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val center = Offset(this.size.width / 2f, this.size.height / 2f)
+        val strokeWidthPx = strokeWidth.toPx()
+        drawLine(
+            color = color,
+            start = Offset(0f, center.y),
+            end = Offset(this.size.width, center.y),
+            strokeWidth = strokeWidthPx
+        )
+        drawLine(
+            color = color,
+            start = Offset(center.x, 0f),
+            end = Offset(center.x, this.size.height),
+            strokeWidth = strokeWidthPx
+        )
+    }
+}
+
+@Composable
+fun MarathonMetaBar(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = text,
+            style = TextStyle(
+                fontFamily = FontFamily.Monospace,
+                fontSize = 9.sp,
+                color = MarathonTheme.PhosphorGreen.copy(alpha = 0.6f),
+                letterSpacing = 0.8.sp
+            )
+        )
+    }
+}
