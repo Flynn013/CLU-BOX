@@ -403,14 +403,6 @@ fun GlobalModelManager(
                   onExpanded = { modelItemExpandedStates[model.name] = it },
                 )
               }
-                  modelManagerViewModel = viewModel,
-                  onModelClicked = handleClickModel,
-                  onBenchmarkClicked = onBenchmarkClicked,
-                  expanded = expanded,
-                  showBenchmarkButton = false,
-                  onExpanded = { modelItemExpandedStates[model.name] = it },
-                )
-              }
             }
           }
         }
