@@ -39,6 +39,11 @@ class GalleryApplication : Application() {
   override fun onCreate() {
     super.onCreate()
 
+    // Load stored Gemini Client ID if available
+    com.google.ai.edge.gallery.runtime.geminicloud.GeminiAuthConfig.CLIENT_ID =
+      com.google.ai.edge.gallery.runtime.geminicloud.GeminiApiKeyStore.getClientId(this)
+        ?: "REPLACE_WITH_GOOGLE_OAUTH_CLIENT_ID"
+
     // ── Chaquopy — initialize Python on the main thread (Chaquopy requirement) ──
     // Python.start() must be called before any background thread calls getInstance().
     // PythonBridge wraps the double-checked-lock so this is safe even if called

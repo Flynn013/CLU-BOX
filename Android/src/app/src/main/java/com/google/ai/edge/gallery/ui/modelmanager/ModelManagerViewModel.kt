@@ -1279,46 +1279,8 @@ constructor(
 
     viewModelScope.launch(Dispatchers.IO) {
       try {
-        // Load model allowlist json.
-        var modelAllowlist: ModelAllowlist? = null
-
-        // Try to read the test allowlist first.
-        Log.d(TAG, "Loading test model allowlist.")
-        modelAllowlist = readModelAllowlistFromDisk(fileName = MODEL_ALLOWLIST_TEST_FILENAME)
-
-        // Local test only.
-        if (TEST_MODEL_ALLOW_LIST.isNotEmpty()) {
-          Log.d(TAG, "Loading local model allowlist for testing.")
-          val gson = Gson()
-          try {
-            modelAllowlist = gson.fromJson(TEST_MODEL_ALLOW_LIST, ModelAllowlist::class.java)
-          } catch (e: JsonSyntaxException) {
-            Log.e(TAG, "Failed to parse local test json", e)
-          }
-        }
-
-        if (modelAllowlist == null) {
-          // Load from github.
-          var version = BuildConfig.VERSION_NAME.replace(".", "_")
-          val url = getAllowlistUrl(version)
-          Log.d(TAG, "Loading model allowlist from internet. Url: $url")
-          val data = getJsonResponse<ModelAllowlist>(url = url)
-          modelAllowlist = data?.jsonObj
-
-          if (modelAllowlist == null) {
-            Log.w(TAG, "Failed to load model allowlist from internet. Trying to load it from disk")
-            modelAllowlist = readModelAllowlistFromDisk()
-          } else {
-            Log.d(TAG, "Done: loading model allowlist from internet")
-            saveModelAllowlistToDisk(modelAllowlistContent = data?.textContent ?: "{}")
-          }
-        }
-
-        // Fallback: load bundled allowlist from app assets.
-        if (modelAllowlist == null) {
-          Log.w(TAG, "Disk cache miss. Loading bundled model allowlist from assets")
-          modelAllowlist = readModelAllowlistFromAssets()
-        }
+        // Force loading only the bundled model allowlist from assets
+        val modelAllowlist = readModelAllowlistFromAssets()
 
         if (modelAllowlist == null) {
           _uiState.update {
@@ -1563,69 +1525,18 @@ constructor(
         )
     }
 
-    // Load persisted BESPOKE (manual API) models.
-    for (bespoke in dataStoreRepository.readBespokeModels()) {
-      Log.d(TAG, "Restoring bespoke model: ${bespoke.modelLabel}")
-      val normalizedBase = bespoke.baseUrl.trimEnd('/')
-      val apiEndpoint = "$normalizedBase/v1beta/models/${bespoke.modelId}"
-      val model = Model(
-        name = bespoke.modelLabel,
-        displayName = bespoke.modelLabel,
-        info = "Bespoke API model — ${bespoke.modelId} @ $normalizedBase",
-        url = "",
-        sizeInBytes = 0L,
-        downloadFileName = "_",
-        version = "_",
-        isLlm = true,
-        runtimeType = RuntimeType.MANUAL_API,
-        apiEndpoint = apiEndpoint,
-        contextWindowSize = bespoke.contextWindow,
-        configs = createLlmChatConfigs(
-          defaultMaxToken = bespoke.contextWindow,
-          defaultMaxContextLength = bespoke.contextWindow,
-        ),
-      )
-      model.preProcess()
-      tasks.get(key = BuiltInTaskId.LLM_CHAT)?.models?.add(model)
-      tasks.get(key = BuiltInTaskId.LLM_ASK_IMAGE)?.models?.add(model)
-      tasks.get(key = BuiltInTaskId.LLM_ASK_AUDIO)?.models?.add(model)
-      tasks.get(key = BuiltInTaskId.LLM_PROMPT_LAB)?.models?.add(model)
-      tasks.get(key = BuiltInTaskId.LLM_AGENT_CHAT)?.models?.add(model)
-      modelDownloadStatus[model.name] =
-        ModelDownloadStatus(status = ModelDownloadStatusType.SUCCEEDED)
-    }
-
-    // Load persisted GEMINI CLOUD models.
-    for (geminiModel in dataStoreRepository.readGeminiCloudModels()) {
-      Log.d(TAG, "Restoring Gemini cloud model: ${geminiModel.modelId}")
-      val model = createGeminiCloudModelObject(
-        modelId = geminiModel.modelId,
-        displayName = geminiModel.displayName.ifBlank { geminiModel.modelId },
-      )
-      tasks.get(key = BuiltInTaskId.LLM_CHAT)?.models?.add(model)
-      tasks.get(key = BuiltInTaskId.LLM_AGENT_CHAT)?.models?.add(model)
-      tasks.get(key = BuiltInTaskId.LLM_PROMPT_LAB)?.models?.add(model)
-      modelDownloadStatus[model.name] =
-        ModelDownloadStatus(status = ModelDownloadStatusType.SUCCEEDED)
-      modelInstances[model.name] =
-        ModelInitializationStatus(status = ModelInitializationStatusType.NOT_INITIALIZED)
-    }
-
-    // Load persisted ANTHROPIC CLOUD models.
-    for (anthropicModel in dataStoreRepository.readAnthropicCloudModels()) {
-      Log.d(TAG, "Restoring Anthropic cloud model: ${anthropicModel.modelId}")
-      val model = createAnthropicCloudModelObject(
-        modelId = anthropicModel.modelId,
-        displayName = anthropicModel.displayName.ifBlank { anthropicModel.modelId },
-      )
-      tasks.get(key = BuiltInTaskId.LLM_CHAT)?.models?.add(model)
-      tasks.get(key = BuiltInTaskId.LLM_AGENT_CHAT)?.models?.add(model)
-      tasks.get(key = BuiltInTaskId.LLM_PROMPT_LAB)?.models?.add(model)
-      modelDownloadStatus[model.name] =
-        ModelDownloadStatus(status = ModelDownloadStatusType.SUCCEEDED)
-      modelInstances[model.name] =
-        ModelInitializationStatus(status = ModelInitializationStatusType.NOT_INITIALIZED)
-    }
+    // Pre-populate Gemini 3.5 Flash cloud model
+    val gemini35Model = createGeminiCloudModelObject(
+      modelId = "gemini-3.5-flash",
+      displayName = "Gemini 3.5 Flash"
+    )
+    tasks.get(key = BuiltInTaskId.LLM_CHAT)?.models?.add(gemini35Model)
+    tasks.get(key = BuiltInTaskId.LLM_AGENT_CHAT)?.models?.add(gemini35Model)
+    tasks.get(key = BuiltInTaskId.LLM_PROMPT_LAB)?.models?.add(gemini35Model)
+    modelDownloadStatus[gemini35Model.name] =
+      ModelDownloadStatus(status = ModelDownloadStatusType.SUCCEEDED)
+    modelInstances[gemini35Model.name] =
+      ModelInitializationStatus(status = ModelInitializationStatusType.NOT_INITIALIZED)
 
     val textInputHistory = dataStoreRepository.readTextInputHistory()
     Log.d(TAG, "text input history: $textInputHistory")

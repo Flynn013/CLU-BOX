@@ -25,18 +25,9 @@ import net.openid.appauth.AuthorizationServiceConfiguration
  */
 object GeminiAuthConfig {
 
-    // ── Replace with your Cloud Console OAuth 2.0 Client ID ─────────────────
-    // Recommended: store the real value in local.properties (git-ignored) and
-    // expose it via BuildConfig:
-    //   # local.properties
-    //   googleOAuthClientId=1234567890-abc.apps.googleusercontent.com
-    //
-    //   # build.gradle.kts → android.defaultConfig
-    //   buildConfigField("String", "GOOGLE_OAUTH_CLIENT_ID",
-    //       "\"${properties["googleOAuthClientId"] ?: ""}\"")
-    //
-    //   Then replace the constant below with: BuildConfig.GOOGLE_OAUTH_CLIENT_ID
-    const val CLIENT_ID: String = "REPLACE_WITH_GOOGLE_OAUTH_CLIENT_ID"
+    // ── Google Cloud Console OAuth 2.0 Client ID ─────────────────
+    @Volatile
+    var CLIENT_ID: String = "REPLACE_WITH_GOOGLE_OAUTH_CLIENT_ID"
 
     // ── Redirect URI — must be registered in Cloud Console ──────────────────
     const val REDIRECT_URI: String = "clubox://oauth2callback"

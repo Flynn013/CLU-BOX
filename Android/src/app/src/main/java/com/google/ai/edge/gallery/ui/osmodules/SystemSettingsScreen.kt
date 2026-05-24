@@ -551,9 +551,10 @@ private fun ConfigTab(
               accent = neonGreen,
             )
           },
+          shape = RoundedCornerShape(4.dp),
           modifier = Modifier.fillMaxWidth(),
         ) {
-          Text("Reset to CLU/BOX defaults")
+          Text("Reset to CLU/BOX defaults", fontFamily = FontFamily.Monospace)
         }
       }
     }
@@ -593,8 +594,9 @@ private fun ConfigTab(
             hfToken = null
           },
           enabled = curHfToken != null,
+          shape = RoundedCornerShape(4.dp),
         ) {
-          Text("CLEAR")
+          Text("CLEAR", fontFamily = FontFamily.Monospace)
         }
         val handleSaveToken = {
           modelManagerViewModel.saveAccessToken(
@@ -624,7 +626,7 @@ private fun ConfigTab(
               .border(
                 width = if (isFocused) 2.dp else 1.dp,
                 color = if (isFocused) neonGreen else MaterialTheme.colorScheme.outline,
-                shape = CircleShape,
+                shape = RoundedCornerShape(4.dp),
               )
               .height(40.dp),
             contentAlignment = Alignment.CenterStart,
@@ -673,11 +675,11 @@ private fun ConfigTab(
 
 @Composable
 private fun CloudTab(context: Context) {
-  val geminiPlaceholder = GeminiAuthConfig.CLIENT_ID == "REPLACE_WITH_GOOGLE_OAUTH_CLIENT_ID"
-
+  var clientIDInput by remember { mutableStateOf(GeminiApiKeyStore.getClientId(context) ?: "") }
   var geminiKeyInput by remember { mutableStateOf(GeminiApiKeyStore.getApiKey(context) ?: "") }
-  var claudeKeyInput by remember { mutableStateOf(ManualApiKeyStore.getApiKey(context, "anthropic") ?: "") }
   val focusManager = LocalFocusManager.current
+
+  val geminiPlaceholder = GeminiAuthConfig.CLIENT_ID == "REPLACE_WITH_GOOGLE_OAUTH_CLIENT_ID"
 
   Column(
     modifier = Modifier
@@ -707,6 +709,26 @@ private fun CloudTab(context: Context) {
       }
       CloudStatusChip(geminiStatus)
 
+      // Client ID input row
+      CloudKeyInputRow(
+        label = "Google Client ID (OAuth)",
+        value = clientIDInput,
+        onValueChange = { clientIDInput = it },
+        onSave = {
+          val trimmed = clientIDInput.trim()
+          GeminiApiKeyStore.setClientId(context, trimmed)
+          GeminiAuthConfig.CLIENT_ID = trimmed
+          com.google.ai.edge.gallery.data.providers.ProviderRegistry.invalidateAll()
+          focusManager.clearFocus()
+        },
+        onClear = {
+          GeminiApiKeyStore.clearClientId(context)
+          GeminiAuthConfig.CLIENT_ID = "REPLACE_WITH_GOOGLE_OAUTH_CLIENT_ID"
+          clientIDInput = ""
+          com.google.ai.edge.gallery.data.providers.ProviderRegistry.invalidateAll()
+        },
+      )
+
       // OAuth client ID warning
       if (geminiPlaceholder) {
         Box(
@@ -720,7 +742,7 @@ private fun CloudTab(context: Context) {
             .padding(12.dp),
         ) {
           Text(
-            "Google OAuth requires a Client ID. See GeminiAuthConfig.kt.",
+            "Google OAuth requires a Client ID. Paste your client ID above to connect.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.error,
           )
@@ -729,7 +751,7 @@ private fun CloudTab(context: Context) {
 
       // API key input row
       CloudKeyInputRow(
-        label = "Gemini API Key",
+        label = "Gemini API Key (Alternative)",
         value = geminiKeyInput,
         onValueChange = { geminiKeyInput = it },
         onSave = {
@@ -756,47 +778,6 @@ private fun CloudTab(context: Context) {
       } else {
         GeminiConnectButton()
       }
-    }
-
-    // ── CLAUDE section ───────────────────────────────────────────────
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-      Text(
-        "CLAUDE",
-        style = MaterialTheme.typography.titleSmall.copy(
-          fontWeight = FontWeight.Bold,
-          fontFamily = FontFamily.Monospace,
-          letterSpacing = 2.sp,
-        ),
-        color = neonGreen,
-      )
-
-      // Status chip
-      val claudeStatus = when {
-        ClaudeCredentialStore.hasValidCredentials(context) -> "OAUTH"
-        !ManualApiKeyStore.getApiKey(context, "anthropic").isNullOrBlank() -> "API KEY"
-        else -> "NOT SET"
-      }
-      CloudStatusChip(claudeStatus)
-
-      // API key input row
-      CloudKeyInputRow(
-        label = "Claude API Key",
-        value = claudeKeyInput,
-        onValueChange = { claudeKeyInput = it },
-        onSave = {
-          ManualApiKeyStore.setApiKey(context, "anthropic", claudeKeyInput.trim())
-          com.google.ai.edge.gallery.data.providers.ProviderRegistry.invalidateAll()
-          focusManager.clearFocus()
-        },
-        onClear = {
-          ManualApiKeyStore.clearApiKey(context, "anthropic")
-          claudeKeyInput = ""
-          com.google.ai.edge.gallery.data.providers.ProviderRegistry.invalidateAll()
-        },
-      )
-
-      // OAuth connect button
-      ClaudeConnectButton()
     }
   }
 }
@@ -846,7 +827,7 @@ private fun CloudKeyInputRow(
             .border(
               width = if (isFocused) 2.dp else 1.dp,
               color = if (isFocused) neonGreen else MaterialTheme.colorScheme.outline,
-              shape = CircleShape,
+              shape = RoundedCornerShape(4.dp),
             )
             .height(40.dp),
           contentAlignment = Alignment.CenterStart,
@@ -866,7 +847,13 @@ private fun CloudKeyInputRow(
           }
         }
       }
-      OutlinedButton(onClick = onClear, enabled = value.isNotEmpty()) { Text("CLEAR") }
+      OutlinedButton(
+        onClick = onClear,
+        enabled = value.isNotEmpty(),
+        shape = RoundedCornerShape(4.dp)
+      ) {
+        Text("CLEAR", fontFamily = FontFamily.Monospace)
+      }
     }
   }
 }
@@ -965,7 +952,7 @@ private fun SysColorPickerRow(
         .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp)),
     )
     Column(modifier = Modifier.weight(1f)) {
-      Text(label, style = MaterialTheme.typography.labelMedium,
+      Text(label, style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
         color = MaterialTheme.colorScheme.onSurfaceVariant)
       BasicTextField(
         value = localHex,
@@ -983,7 +970,7 @@ private fun SysColorPickerRow(
           isFocused = state.isFocused
           if (!state.isFocused && localHex.length == 7) { onHexChange(localHex); onCommit(localHex) }
         },
-        textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface),
+        textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontFamily = FontFamily.Monospace),
         cursorBrush = SolidColor(neonGreen),
       ) { innerTextField ->
         Box(
@@ -991,7 +978,7 @@ private fun SysColorPickerRow(
             .border(
               width = if (isFocused) 2.dp else 1.dp,
               color = if (isFocused) neonGreen else MaterialTheme.colorScheme.outline,
-              shape = RoundedCornerShape(6.dp),
+              shape = RoundedCornerShape(4.dp),
             )
             .height(36.dp)
             .padding(horizontal = 10.dp),
@@ -999,7 +986,7 @@ private fun SysColorPickerRow(
         ) {
           if (localHex.isEmpty()) {
             Text("#RRGGBB", color = MaterialTheme.colorScheme.onSurfaceVariant,
-              style = MaterialTheme.typography.bodySmall)
+              style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace))
           }
           innerTextField()
         }

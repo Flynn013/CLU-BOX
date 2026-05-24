@@ -49,6 +49,8 @@ import com.google.ai.edge.gallery.ui.common.ClickableLink
 import com.google.ai.edge.gallery.ui.common.humanReadableSize
 import com.google.ai.edge.gallery.ui.theme.customColors
 import com.google.ai.edge.gallery.ui.theme.labelSmallNarrow
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 
 /**
  * Composable function to display the model name and its download status information.
@@ -88,7 +90,7 @@ fun ModelNameAndStatus(
         )
         Text(
           stringResource(R.string.best_overall),
-          style = MaterialTheme.typography.labelMedium,
+          style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
           color = MaterialTheme.colorScheme.onSurfaceVariant,
           modifier = Modifier.alpha(0.6f),
         )
@@ -100,7 +102,7 @@ fun ModelNameAndStatus(
       model.displayName.ifEmpty { model.name },
       maxLines = 1,
       overflow = TextOverflow.MiddleEllipsis,
-      style = MaterialTheme.typography.titleMedium,
+      style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold),
       modifier = Modifier.padding(end = 64.dp),
     )
 
@@ -121,7 +123,7 @@ fun ModelNameAndStatus(
             Text(
               downloadStatus.errorMessage,
               color = MaterialTheme.colorScheme.error,
-              style = labelSmallNarrow,
+              style = labelSmallNarrow.copy(fontFamily = FontFamily.Monospace),
               overflow = TextOverflow.Ellipsis,
             )
           }
@@ -176,6 +178,7 @@ fun ModelNameAndStatus(
                 maxLines = 1,
                 style =
                   MaterialTheme.typography.bodyMedium.copy(
+                    fontFamily = FontFamily.Monospace,
                     // This stops numbers from "jumping around" when being updated.
                     fontFeatureSettings = "tnum"
                   ),

@@ -14,13 +14,12 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
 import com.google.ai.edge.gallery.common.SkillProgressAgentAction
+import com.google.ai.edge.gallery.customtasks.agentchat.AgentEngineV2
+import com.google.ai.edge.gallery.customtasks.agentchat.AgentEvent
 import com.google.ai.edge.gallery.customtasks.agentchat.AgentTools
 import com.google.ai.edge.gallery.data.Model
-import com.google.ai.edge.gallery.data.providers.AnthropicProvider
-import com.google.ai.edge.gallery.data.providers.ProviderEvent
 import com.google.ai.edge.gallery.data.providers.ProviderMessage
 import com.google.ai.edge.gallery.data.providers.ProviderRegistry
-import com.google.ai.edge.gallery.data.providers.ProviderToolCallResult
 import com.google.ai.edge.gallery.runtime.CleanUpListener
 import com.google.ai.edge.gallery.runtime.LlmModelHelper
 import com.google.ai.edge.gallery.runtime.ResultListener
@@ -30,21 +29,13 @@ import com.google.ai.edge.litertlm.ToolSet
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
-import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.reflect.KProperty1
-import kotlin.reflect.full.findAnnotation
-import kotlin.reflect.full.memberFunctions
 import kotlin.reflect.full.memberProperties
-import kotlin.reflect.full.valueParameters
 
 private const val TAG = "AnthropicCloudHelper"
-private const val MAX_TOOL_ROUNDS = 10
 
 /**
  * Session state for an Anthropic Cloud Claude API session.
@@ -60,11 +51,7 @@ data class AnthropicCloudInstance(
 
 /**
  * [LlmModelHelper] implementation that routes inference to the Anthropic Claude
- * API via [AnthropicProvider] from [ProviderRegistry].
- *
- * Supports streaming tokens and multi-round tool calling.  Auth is handled
- * automatically: OAuth bearer token is preferred over API key via
- * [ProviderRegistry.get].
+ * API via [AgentEngineV2].
  */
 object AnthropicCloudModelHelper : LlmModelHelper {
 
@@ -164,101 +151,65 @@ object AnthropicCloudModelHelper : LlmModelHelper {
       return
     }
 
+    val agentTools = instance.toolSet as? AgentTools
+    val skillRegistry = agentTools?.skillRegistry
+    if (skillRegistry == null) {
+      onError("SkillRegistry not available")
+      cleanUpListener()
+      return
+    }
+
     val scope = coroutineScope ?: CoroutineScope(Dispatchers.IO)
     instance.inferenceJob = scope.launch(Dispatchers.IO) {
       try {
-        instance.conversationHistory.add(ProviderMessage(role = "user", content = input))
+        val engine = AgentEngineV2(provider, skillRegistry)
+        var accText = ""
+        var accThinking = ""
 
-        var round = 0
-        while (round < MAX_TOOL_ROUNDS) {
-          if (instance.cancelled.get()) {
-            cleanUpListener()
-            return@launch
-          }
-          round++
-
-          val messages = buildMessages(instance)
-          val pendingToolCalls = mutableListOf<ProviderToolCallResult>()
-          val accText = StringBuilder()
-
-          val toolDefs = buildToolDefinitions(instance.toolSet)
-          provider.streamChat(messages, toolDefs).collect { event ->
-            if (instance.cancelled.get()) return@collect
-            when (event) {
-              is ProviderEvent.Token -> {
-                accText.append(event.text)
-                resultListener(event.text, false, null)
-              }
-              is ProviderEvent.Thinking -> resultListener("", false, event.text)
-              is ProviderEvent.ToolCallStart -> {
-                (instance.toolSet as? AgentTools)?.sendAgentAction(
-                  SkillProgressAgentAction(label = "Calling ${event.name}…", inProgress = true)
-                )
-              }
-              is ProviderEvent.ToolCallEnd -> pendingToolCalls.add(
-                ProviderToolCallResult(event.id, event.name, event.input)
-              )
-              is ProviderEvent.Done -> {
-                if (pendingToolCalls.isEmpty()) {
-                  resultListener(accText.toString().ifEmpty { event.fullText }, true, null)
-                  cleanUpListener()
-                  return@collect
-                }
-              }
-              is ProviderEvent.Error -> {
-                onError(event.message)
-                cleanUpListener()
-                return@collect
-              }
-              else -> {}
+        engine.run(input, instance.conversationHistory, instance.systemInstruction.orEmpty()).collect { event ->
+          if (instance.cancelled.get()) return@collect
+          when (event) {
+            is AgentEvent.Token -> {
+              val partial = event.text.removePrefix(accText)
+              accText = event.text
+              resultListener(partial, false, null)
             }
-          }
-
-          if (instance.cancelled.get()) {
-            cleanUpListener()
-            return@launch
-          }
-
-          if (pendingToolCalls.isEmpty()) {
-            // Done returned without tool calls — exit loop.
-            return@launch
-          }
-
-          // Record assistant turn with tool calls, then dispatch each tool.
-          instance.conversationHistory.add(
-            ProviderMessage(
-              role = "assistant",
-              content = accText.toString(),
-              toolCalls = pendingToolCalls.map {
-                com.google.ai.edge.gallery.data.providers.ProviderToolCall(it.id, it.name, it.input.toString())
-              },
-            )
-          )
-
-          for (tc in pendingToolCalls) {
-            val result = dispatchToolCall(instance.toolSet, tc.name, tc.input)
-            (instance.toolSet as? AgentTools)?.sendAgentAction(
-              SkillProgressAgentAction(
-                label = "${tc.name} done",
-                inProgress = false,
-                addItemTitle = tc.name,
-                addItemDescription = result.take(120),
+            is AgentEvent.Thinking -> {
+              val partial = event.text.removePrefix(accThinking)
+              accThinking = event.text
+              resultListener("", false, partial)
+            }
+            is AgentEvent.ToolStart -> {
+              agentTools.sendAgentAction(
+                SkillProgressAgentAction(label = "Calling ${event.name}…", inProgress = true)
               )
-            )
-            instance.conversationHistory.add(
-              ProviderMessage(
-                role = "user",
-                content = result,
-                toolCallId = tc.id,
-                toolName = tc.name,
+            }
+            is AgentEvent.ToolEnd -> {
+              agentTools.sendAgentAction(
+                SkillProgressAgentAction(
+                  label = "${event.name} done",
+                  inProgress = false,
+                  addItemTitle = event.name,
+                  addItemDescription = event.output.take(120),
+                )
               )
-            )
-            resultListener("", false, null)
+              resultListener("", false, null)
+            }
+            is AgentEvent.Complete -> {
+              val partial = event.text.removePrefix(accText)
+              if (partial.isNotEmpty()) {
+                resultListener(partial, false, null)
+              }
+              resultListener("", true, null)
+              cleanUpListener()
+            }
+            is AgentEvent.Error -> {
+              onError(event.message)
+              cleanUpListener()
+            }
+            else -> {}
           }
         }
-
-        resultListener("[Max tool-call rounds reached]", true, null)
-        cleanUpListener()
       } catch (e: Exception) {
         Log.e(TAG, "Inference error for '${model.name}'", e)
         onError(e.message ?: "Unknown Anthropic inference error")
@@ -274,85 +225,6 @@ object AnthropicCloudModelHelper : LlmModelHelper {
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
-
-  private fun buildMessages(instance: AnthropicCloudInstance): List<ProviderMessage> {
-    val result = mutableListOf<ProviderMessage>()
-    instance.systemInstruction?.let {
-      result.add(ProviderMessage(role = "system", content = it))
-    }
-    result.addAll(instance.conversationHistory)
-    return result
-  }
-
-  private fun buildToolDefinitions(toolSet: ToolSet?): List<JSONObject> {
-    toolSet ?: return emptyList()
-    val defs = mutableListOf<JSONObject>()
-    for (fn in toolSet::class.memberFunctions) {
-      val annotation = fn.findAnnotation<com.google.ai.edge.litertlm.Tool>() ?: continue
-      try {
-        val props = JSONObject()
-        val required = org.json.JSONArray()
-        for (param in fn.valueParameters) {
-          val paramName = param.name ?: continue
-          props.put(paramName, JSONObject().apply {
-            put("type", "string")
-            put("description", paramName)
-          })
-          required.put(paramName)
-        }
-        val schema = JSONObject().apply {
-          put("type", "object")
-          put("properties", props)
-          if (required.length() > 0) put("required", required)
-        }
-        defs.add(JSONObject().apply {
-          put("type", "function")
-          put("function", JSONObject().apply {
-            put("name", fn.name)
-            put("description", annotation.description)
-            put("parameters", schema)
-          })
-        })
-      } catch (e: Exception) {
-        Log.w(TAG, "buildToolDefinitions: skipping '${fn.name}': ${e.message}")
-      }
-    }
-    Log.d(TAG, "buildToolDefinitions: built ${defs.size} tool definitions")
-    return defs
-  }
-
-  @Suppress("UNCHECKED_CAST")
-  private fun dispatchToolCall(toolSet: ToolSet?, name: String, args: JSONObject): String {
-    if (toolSet == null) return "[Tool dispatch error: no ToolSet available]"
-    val klass = toolSet::class
-    val fn = klass.memberFunctions.find { it.name == name }
-      ?: return "[Tool dispatch error: unknown function '$name']"
-    return try {
-      val paramValues = mutableListOf<Any?>(toolSet)
-      for (param in fn.valueParameters) {
-        val paramName = param.name ?: ""
-        val strVal = if (args.has(paramName)) args.optString(paramName) else ""
-        val coerced: Any? = when (param.type.classifier) {
-          Int::class     -> strVal.toIntOrNull() ?: 0
-          Long::class    -> strVal.toLongOrNull() ?: 0L
-          Double::class  -> strVal.toDoubleOrNull() ?: 0.0
-          Float::class   -> strVal.toFloatOrNull() ?: 0f
-          Boolean::class -> strVal.lowercase() == "true"
-          else           -> strVal
-        }
-        paramValues.add(coerced)
-      }
-      val result = fn.call(*paramValues.toTypedArray())
-      when (result) {
-        is Map<*, *> -> (result as Map<String, Any>).entries
-          .joinToString(", ") { "${it.key}=${it.value}" }
-        else -> result?.toString() ?: "null"
-      }
-    } catch (e: Exception) {
-      Log.e(TAG, "Tool call '$name' failed", e)
-      "[Tool error: ${e.cause?.message ?: e.message ?: "unknown"}]"
-    }
-  }
 
   @Suppress("UNCHECKED_CAST")
   private fun buildSystemText(contents: Contents): String {

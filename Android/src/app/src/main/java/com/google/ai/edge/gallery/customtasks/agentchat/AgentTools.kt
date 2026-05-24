@@ -105,9 +105,47 @@ class AgentTools : ToolSet {
 
   // ── File & Shell Tool Implementations ─────────────────────────────
 
+  private fun isPathSafe(path: String): Boolean {
+    val ctx = context ?: return false
+    return try {
+      val canonical = File(path).canonicalPath
+      val appDataRoot = ctx.filesDir.parentFile?.canonicalPath ?: return false
+      canonical.startsWith(appDataRoot)
+    } catch (e: Exception) {
+      false
+    }
+  }
+
+  private fun isCommandSafe(command: String): Boolean {
+    val ctx = context ?: return false
+    val appDataRoot = ctx.filesDir.parentFile?.canonicalPath ?: return false
+    val forbiddenPatterns = listOf("/sdcard", "/storage", "/mnt", "/data/local/tmp")
+    for (pattern in forbiddenPatterns) {
+      if (command.contains(pattern, ignoreCase = true)) {
+        return false
+      }
+    }
+    val regex = Regex("/[a-zA-Z0-9_.-]+(/[a-zA-Z0-9_.-]+)*")
+    val matches = regex.findAll(command)
+    for (match in matches) {
+      val path = match.value
+      if (path.startsWith("/system") || path.startsWith("/apex") || path.startsWith("/vendor") || path.startsWith("/bin") || path.startsWith("/sbin") || path.startsWith("/lib")) {
+        continue
+      }
+      if (path.startsWith(appDataRoot)) {
+        continue
+      }
+      return false
+    }
+    return true
+  }
+
   @Tool("Execute a bash command in the sandboxed terminal. Returns stdout and exit code.")
   fun shellExecute(command: String): Map<String, String> {
     if (command.isBlank()) return mapOf("stdout" to "Error: command argument is required", "exit_code" to "1")
+    if (!isCommandSafe(command)) {
+      return mapOf("stdout" to "Error: Security violation. Command references paths outside the app sandbox.", "exit_code" to "1")
+    }
     Log.d(TAG, "shellExecute: $command")
     sendAgentAction(SkillProgressAgentAction(label = "Executing: $command", inProgress = true))
     val tsm = terminalSessionManager
@@ -135,10 +173,9 @@ class AgentTools : ToolSet {
     Log.d(TAG, "fileBoxWrite: $file_path (${content.length} chars)")
     sendAgentAction(SkillProgressAgentAction(label = "Writing: $file_path", inProgress = true))
     return try {
-      val safeRelative = file_path.trimStart('/')
-      val root = File(ctx.filesDir, "clu_file_box")
-      val target = File(root, safeRelative).canonicalFile
-      if (!target.absolutePath.startsWith(root.canonicalPath)) {
+      val targetPath = resolveWorkspacePath(file_path)
+      val target = File(targetPath)
+      if (!isPathSafe(target.absolutePath)) {
         return mapOf("result" to "Error: path traversal not allowed")
       }
       target.parentFile?.mkdirs()
@@ -163,10 +200,9 @@ class AgentTools : ToolSet {
     Log.d(TAG, "fileBoxReadLines: $file_path [$start_line..$end_line]")
     sendAgentAction(SkillProgressAgentAction(label = "Reading: $file_path", inProgress = true))
     return try {
-      val safeRelative = file_path.trimStart('/')
-      val root = File(ctx.filesDir, "clu_file_box")
-      val target = File(root, safeRelative).canonicalFile
-      if (!target.absolutePath.startsWith(root.canonicalPath)) {
+      val targetPath = resolveWorkspacePath(file_path)
+      val target = File(targetPath)
+      if (!isPathSafe(target.absolutePath)) {
         return mapOf("lines" to "Error: path traversal not allowed")
       }
       if (!target.exists()) return mapOf("lines" to "Error: file not found at $file_path")
@@ -198,10 +234,9 @@ class AgentTools : ToolSet {
     Log.d(TAG, "brainBoxGrep: $file_path keyword='$keyword'")
     sendAgentAction(SkillProgressAgentAction(label = "Searching: $keyword in $file_path", inProgress = true))
     return try {
-      val safeRelative = file_path.trimStart('/')
-      val root = File(ctx.filesDir, "clu_file_box")
-      val target = File(root, safeRelative).canonicalFile
-      if (!target.absolutePath.startsWith(root.canonicalPath)) {
+      val targetPath = resolveWorkspacePath(file_path)
+      val target = File(targetPath)
+      if (!isPathSafe(target.absolutePath)) {
         return mapOf("matches" to "Error: path traversal not allowed")
       }
       if (!target.exists()) return mapOf("matches" to "Error: file not found at $file_path")
@@ -420,6 +455,9 @@ class AgentTools : ToolSet {
   @Tool("Execute a Python 3.11 script on-device using the embedded CPython interpreter. Returns captured stdout and stderr.")
   fun PYTHON_EXEC(python_script: String): Map<String, String> {
     if (python_script.isBlank()) return mapOf("error" to "python_script is required")
+    if (!isCommandSafe(python_script)) {
+      return mapOf("error" to "Error: Security violation. Script references paths outside the app sandbox.")
+    }
     sendAgentAction(SkillProgressAgentAction(label = "PYTHON_EXEC", inProgress = true))
     return try {
       val output = runBlocking { PythonBridge.executeScript(python_script) }
@@ -522,9 +560,9 @@ class AgentTools : ToolSet {
     val ctx = context ?: return mapOf("result" to "[Error: context not available]")
     sendAgentAction(SkillProgressAgentAction(label = "Editing: $file_path", inProgress = true))
     return try {
-      val root = File(ctx.filesDir, "clu_file_box")
-      val target = File(root, file_path.trimStart('/')).canonicalFile
-      if (!target.absolutePath.startsWith(root.canonicalPath)) {
+      val targetPath = resolveWorkspacePath(file_path)
+      val target = File(targetPath)
+      if (!isPathSafe(target.absolutePath)) {
         return mapOf("result" to "[Error: path traversal not allowed]")
       }
       if (!target.exists()) return mapOf("result" to "[Error: file not found: $file_path]")
@@ -552,9 +590,13 @@ class AgentTools : ToolSet {
   fun codeSearch(pattern: String, directory: String, file_extension: String): Map<String, String> {
     if (pattern.isBlank()) return mapOf("result" to "[Error: pattern required]")
     if (directory.isBlank()) return mapOf("result" to "[Error: directory required]")
+    val resolvedDir = resolveWorkspacePath(directory)
+    if (!isPathSafe(resolvedDir)) {
+      return mapOf("result" to "[Error: directory parameter is outside the allowed sandbox]")
+    }
     sendAgentAction(SkillProgressAgentAction(label = "Searching: $pattern", inProgress = true))
     val includeFlag = if (file_extension.isNotBlank()) "--include=\"*.$file_extension\"" else ""
-    val cmd = "grep -rn $includeFlag -- \"$pattern\" \"$directory\" 2>/dev/null | head -60"
+    val cmd = "grep -rn $includeFlag -- \"$pattern\" \"$resolvedDir\" 2>/dev/null | head -60"
     val shellResult = shellExecute(cmd)
     val output = shellResult["stdout"].orEmpty().trim().ifBlank { "No matches found." }
     val capped = capOutputWithSpill(output, "codeSearch")
@@ -593,8 +635,17 @@ class AgentTools : ToolSet {
   }
 
   private fun resolveWorkspacePath(path: String): String {
-    if (path.startsWith("/")) return path
     val ctx = context ?: return path
-    return File(File(ctx.filesDir, "clu_file_box"), path).canonicalPath
+    val root = File(ctx.filesDir, "clu_file_box")
+    val file = if (path.startsWith("/")) {
+      File(path)
+    } else {
+      File(root, path)
+    }
+    val canonical = file.canonicalPath
+    if (!isPathSafe(canonical)) {
+      return File(root, file.name).canonicalPath
+    }
+    return canonical
   }
 }

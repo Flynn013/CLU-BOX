@@ -19,36 +19,29 @@ package com.google.ai.edge.gallery.runtime.manualapi
 import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
+import com.google.ai.edge.gallery.common.SkillProgressAgentAction
+import com.google.ai.edge.gallery.customtasks.agentchat.AgentEngineV2
+import com.google.ai.edge.gallery.customtasks.agentchat.AgentEvent
+import com.google.ai.edge.gallery.customtasks.agentchat.AgentTools
 import com.google.ai.edge.gallery.data.Model
+import com.google.ai.edge.gallery.data.providers.OpenAIProvider
+import com.google.ai.edge.gallery.data.providers.ProviderMessage
 import com.google.ai.edge.gallery.runtime.CleanUpListener
 import com.google.ai.edge.gallery.runtime.LlmModelHelper
 import com.google.ai.edge.gallery.runtime.ResultListener
 import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.ToolProvider
 import com.google.ai.edge.litertlm.ToolSet
-import com.google.gson.Gson
-import com.google.gson.JsonArray
-import com.google.gson.JsonObject
-import com.google.gson.JsonParser
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.io.OutputStreamWriter
-import java.net.HttpURLConnection
-import java.net.URL
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicBoolean
-import kotlin.reflect.KProperty1
-import kotlin.reflect.full.findAnnotation
-import kotlin.reflect.full.memberFunctions
-import kotlin.reflect.full.memberProperties
-import kotlin.reflect.full.valueParameters
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.reflect.KProperty1
+import kotlin.reflect.full.memberProperties
 
 private const val TAG = "ManualApiModelHelper"
-private const val MAX_FUNCTION_CALL_ROUNDS = 10
 
 /**
  * Session state for a BESPOKE (manual API) model instance.
@@ -56,28 +49,20 @@ private const val MAX_FUNCTION_CALL_ROUNDS = 10
 data class ManualApiInstance(
   val apiEndpoint: String,
   val apiKey: String,
-  var conversationHistory: MutableList<JsonObject> = mutableListOf(),
+  var conversationHistory: MutableList<ProviderMessage> = mutableListOf(),
   var systemInstruction: String? = null,
-  var toolDeclarations: JsonArray? = null,
   var toolSet: ToolSet? = null,
   var inferenceJob: Job? = null,
   val cancelled: AtomicBoolean = AtomicBoolean(false),
 )
 
 /**
- * [LlmModelHelper] implementation for BESPOKE (manually-added API) models.
- *
- * Uses the Gemini-compatible REST API format. The endpoint URL and API key
- * are stored per-model (endpoint in [Model.apiEndpoint], key in
- * [ManualApiKeyStore]).
- *
- * The same [ToolSet] used by on-device models is mapped to the native
- * Function Calling JSON schema so that skills work identically.
+ * [LlmModelHelper] implementation for BESPOKE (manually-added API) models
+ * executing via [AgentEngineV2].
  */
 object ManualApiModelHelper : LlmModelHelper {
 
   private val cleanUpListeners: ConcurrentHashMap<String, CleanUpListener> = ConcurrentHashMap()
-  private val gson = Gson()
 
   override fun initialize(
     context: Context,
@@ -101,8 +86,6 @@ object ManualApiModelHelper : LlmModelHelper {
       return
     }
 
-    // Build Gemini function declarations from the ToolSet.
-    var toolDeclarations: JsonArray? = null
     var toolSet: ToolSet? = null
     if (tools.isNotEmpty()) {
       val provider = tools.firstOrNull()
@@ -118,9 +101,6 @@ object ManualApiModelHelper : LlmModelHelper {
         } catch (e: Exception) {
           Log.w(TAG, "Could not extract ToolSet from ToolProvider", e)
         }
-        if (toolSet != null) {
-          toolDeclarations = buildFunctionDeclarations(toolSet)
-        }
       }
     }
 
@@ -130,11 +110,10 @@ object ManualApiModelHelper : LlmModelHelper {
       apiEndpoint = endpoint,
       apiKey = apiKey,
       systemInstruction = systemText,
-      toolDeclarations = toolDeclarations,
       toolSet = toolSet,
     )
     model.instance = instance
-    Log.d(TAG, "Manual API model '${model.name}' initialized (endpoint: $endpoint, tools: ${toolDeclarations?.size() ?: 0})")
+    Log.d(TAG, "Manual API model '${model.name}' initialized (endpoint: $endpoint)")
     onDone("")
   }
 
@@ -184,120 +163,67 @@ object ManualApiModelHelper : LlmModelHelper {
     cleanUpListeners[model.name] = cleanUpListener
     instance.cancelled.set(false)
 
+    val agentTools = instance.toolSet as? AgentTools
+    val skillRegistry = agentTools?.skillRegistry
+    if (skillRegistry == null) {
+      onError("SkillRegistry not available")
+      cleanUpListener()
+      return
+    }
+
+    val provider = OpenAIProvider(apiKey = instance.apiKey, modelId = model.name, baseUrl = instance.apiEndpoint)
+
     val scope = coroutineScope ?: CoroutineScope(Dispatchers.IO)
     instance.inferenceJob = scope.launch(Dispatchers.IO) {
       try {
-        // Add user message to history.
-        val userContent = JsonObject().apply {
-          addProperty("role", "user")
-          add("parts", JsonArray().apply {
-            add(JsonObject().apply { addProperty("text", input) })
-          })
-        }
-        instance.conversationHistory.add(userContent)
+        val engine = AgentEngineV2(provider, skillRegistry)
+        var accText = ""
+        var accThinking = ""
 
-        // Inference loop — handles multi-round function calling.
-        var round = 0
-        while (round < MAX_FUNCTION_CALL_ROUNDS) {
-          if (instance.cancelled.get()) {
-            cleanUpListener()
-            return@launch
-          }
-          round++
-
-          val responseText = callApi(instance)
-          if (instance.cancelled.get()) {
-            cleanUpListener()
-            return@launch
-          }
-
-          val responseJson = try {
-            JsonParser.parseString(responseText).asJsonObject
-          } catch (e: Exception) {
-            onError("Failed to parse API response: ${e.message}")
-            cleanUpListener()
-            return@launch
-          }
-
-          if (responseJson.has("error")) {
-            val errorMsg = responseJson.getAsJsonObject("error")
-              ?.get("message")?.asString ?: "Unknown API error"
-            onError(errorMsg)
-            cleanUpListener()
-            return@launch
-          }
-
-          val candidates = responseJson.getAsJsonArray("candidates")
-          if (candidates == null || candidates.size() == 0) {
-            onError("API returned no candidates")
-            cleanUpListener()
-            return@launch
-          }
-
-          val content = candidates[0].asJsonObject.getAsJsonObject("content")
-          val parts = content?.getAsJsonArray("parts")
-          if (parts == null || parts.size() == 0) {
-            resultListener("", true, null)
-            cleanUpListener()
-            return@launch
-          }
-
-          instance.conversationHistory.add(content)
-
-          val functionCallPart = try {
-            parts.firstOrNull { it.asJsonObject.has("functionCall") }
-          } catch (e: Exception) {
-            Log.w(TAG, "Auto-Heal: failed to inspect parts for functionCall", e)
-            null
-          }
-
-          if (functionCallPart != null) {
-            try {
-              val fc = functionCallPart.asJsonObject.getAsJsonObject("functionCall")
-              val fnName = fc.get("name").asString
-              val fnArgs = fc.getAsJsonObject("args") ?: JsonObject()
-              Log.d(TAG, "Function call: $fnName($fnArgs)")
-              val result = executeFunctionCall(instance.toolSet, fnName, fnArgs)
-              val functionResponse = JsonObject().apply {
-                addProperty("role", "function")
-                add("parts", JsonArray().apply {
-                  add(JsonObject().apply {
-                    add("functionResponse", JsonObject().apply {
-                      addProperty("name", fnName)
-                      add("response", JsonParser.parseString(gson.toJson(result)))
-                    })
-                  })
-                })
-              }
-              instance.conversationHistory.add(functionResponse)
-              resultListener("", false, null)
-              continue
-            } catch (e: Exception) {
-              Log.e(TAG, "Auto-Heal: malformed function call — injecting error and retrying", e)
-              val sanitizedMsg = (e.message ?: "unknown error").take(200)
-              val errorMessage = "[System Error: Malformed tool call. Exception: $sanitizedMsg. Correct your formatting and try again.]"
-              val errorContent = JsonObject().apply {
-                addProperty("role", "user")
-                add("parts", JsonArray().apply {
-                  add(JsonObject().apply { addProperty("text", errorMessage) })
-                })
-              }
-              instance.conversationHistory.add(errorContent)
-              resultListener("", false, null)
-              continue
+        engine.run(input, instance.conversationHistory, instance.systemInstruction.orEmpty()).collect { event ->
+          if (instance.cancelled.get()) return@collect
+          when (event) {
+            is AgentEvent.Token -> {
+              val partial = event.text.removePrefix(accText)
+              accText = event.text
+              resultListener(partial, false, null)
             }
+            is AgentEvent.Thinking -> {
+              val partial = event.text.removePrefix(accThinking)
+              accThinking = event.text
+              resultListener("", false, partial)
+            }
+            is AgentEvent.ToolStart -> {
+              agentTools.sendAgentAction(
+                SkillProgressAgentAction(label = "Calling ${event.name}…", inProgress = true)
+              )
+            }
+            is AgentEvent.ToolEnd -> {
+              agentTools.sendAgentAction(
+                SkillProgressAgentAction(
+                  label = "${event.name} done",
+                  inProgress = false,
+                  addItemTitle = event.name,
+                  addItemDescription = event.output.take(120),
+                )
+              )
+              resultListener("", false, null)
+            }
+            is AgentEvent.Complete -> {
+              val partial = event.text.removePrefix(accText)
+              if (partial.isNotEmpty()) {
+                resultListener(partial, false, null)
+              }
+              resultListener("", true, null)
+              cleanUpListener()
+            }
+            is AgentEvent.Error -> {
+              onError(event.message)
+              cleanUpListener()
+            }
+            else -> {}
           }
-
-          // No function call — extract text and deliver it.
-          val textParts = parts.filter { it.asJsonObject.has("text") }
-          val fullText = textParts.joinToString("") { it.asJsonObject.get("text").asString }
-          resultListener(fullText, true, null)
-          cleanUpListener()
-          return@launch
         }
-
-        resultListener("[Max function call rounds reached]", true, null)
-        cleanUpListener()
       } catch (e: Exception) {
         Log.e(TAG, "Inference error", e)
         onError(e.message ?: "Unknown error during inference")
@@ -312,156 +238,7 @@ object ManualApiModelHelper : LlmModelHelper {
     instance.inferenceJob?.cancel()
   }
 
-  // ──────────────────────────────────────────────────────────────────────────
-  // REST API call
-  // ──────────────────────────────────────────────────────────────────────────
-
-  private fun callApi(instance: ManualApiInstance): String {
-    // Append the :generateContent action and API key to the endpoint.
-    val baseUrl = instance.apiEndpoint.trimEnd('/')
-    val url = if (baseUrl.contains(":generateContent")) {
-      URL("$baseUrl?key=${instance.apiKey}")
-    } else {
-      URL("$baseUrl:generateContent?key=${instance.apiKey}")
-    }
-
-    val requestBody = buildRequestBody(instance)
-
-    val conn = url.openConnection() as HttpURLConnection
-    try {
-      conn.requestMethod = "POST"
-      conn.setRequestProperty("Content-Type", "application/json")
-      conn.doOutput = true
-      conn.connectTimeout = 30_000
-      conn.readTimeout = 120_000
-
-      OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { writer ->
-        writer.write(requestBody)
-      }
-
-      val responseCode = conn.responseCode
-      val stream = if (responseCode in 200..299) conn.inputStream else conn.errorStream
-      val responseText = BufferedReader(InputStreamReader(stream, Charsets.UTF_8)).use {
-        it.readText()
-      }
-
-      if (responseCode !in 200..299) {
-        Log.e(TAG, "API error $responseCode: $responseText")
-      }
-      return responseText
-    } finally {
-      conn.disconnect()
-    }
-  }
-
-  private fun buildRequestBody(instance: ManualApiInstance): String {
-    val body = JsonObject()
-
-    instance.systemInstruction?.let { sysText ->
-      body.add("system_instruction", JsonObject().apply {
-        add("parts", JsonArray().apply {
-          add(JsonObject().apply { addProperty("text", sysText) })
-        })
-      })
-    }
-
-    val contents = JsonArray()
-    for (msg in instance.conversationHistory) {
-      contents.add(msg)
-    }
-    body.add("contents", contents)
-
-    instance.toolDeclarations?.let { decls ->
-      if (decls.size() > 0) {
-        body.add("tools", JsonArray().apply {
-          add(JsonObject().apply {
-            add("function_declarations", decls)
-          })
-        })
-      }
-    }
-
-    body.add("generationConfig", JsonObject().apply {
-      addProperty("temperature", 1.0)
-      addProperty("topP", 0.95)
-      addProperty("topK", 64)
-      addProperty("maxOutputTokens", 8192)
-    })
-
-    return gson.toJson(body)
-  }
-
-  // ──────────────────────────────────────────────────────────────────────────
-  // Tool / Function Calling bridge
-  // ──────────────────────────────────────────────────────────────────────────
-
-  private fun buildFunctionDeclarations(toolSet: ToolSet): JsonArray {
-    val declarations = JsonArray()
-    val klass = toolSet::class
-    for (fn in klass.memberFunctions) {
-      val toolAnnotation = fn.findAnnotation<com.google.ai.edge.litertlm.Tool>() ?: continue
-      val decl = JsonObject().apply {
-        addProperty("name", fn.name)
-        addProperty("description", toolAnnotation.description)
-        val params = JsonObject()
-        params.addProperty("type", "OBJECT")
-        val properties = JsonObject()
-        val required = JsonArray()
-        for (param in fn.valueParameters) {
-          val paramAnnotation = param.findAnnotation<com.google.ai.edge.litertlm.ToolParam>()
-          val paramName = param.name ?: continue
-          properties.add(paramName, JsonObject().apply {
-            addProperty("type", "STRING")
-            if (paramAnnotation != null) {
-              addProperty("description", paramAnnotation.description)
-            }
-          })
-          if (!param.isOptional) {
-            required.add(paramName)
-          }
-        }
-        params.add("properties", properties)
-        if (required.size() > 0) {
-          params.add("required", required)
-        }
-        add("parameters", params)
-      }
-      declarations.add(decl)
-    }
-    return declarations
-  }
-
-  @Suppress("UNCHECKED_CAST")
-  private fun executeFunctionCall(
-    toolSet: ToolSet?,
-    functionName: String,
-    args: JsonObject,
-  ): Map<String, Any> {
-    if (toolSet == null) {
-      return mapOf("error" to "No tool set available", "status" to "failed")
-    }
-    val klass = toolSet::class
-    val fn = klass.memberFunctions.find { it.name == functionName }
-    if (fn == null) {
-      return mapOf("error" to "Unknown function: $functionName", "status" to "failed")
-    }
-    return try {
-      val paramValues = mutableListOf<Any?>(toolSet)
-      for (param in fn.valueParameters) {
-        val paramName = param.name ?: ""
-        val value = if (args.has(paramName)) args.get(paramName).asString else ""
-        paramValues.add(value)
-      }
-      val result = fn.call(*paramValues.toTypedArray())
-      when (result) {
-        is Map<*, *> -> result as Map<String, Any>
-        else -> mapOf("result" to (result?.toString() ?: "null"), "status" to "succeeded")
-      }
-    } catch (e: Exception) {
-      Log.e(TAG, "Function call '$functionName' failed", e)
-      mapOf("error" to (e.cause?.message ?: e.message ?: "Unknown error"), "status" to "failed")
-    }
-  }
+  // ── Helpers ─────────────────────────────────────────────────────────────────
 
   @Suppress("UNCHECKED_CAST")
   private fun buildSystemText(contents: Contents): String {

@@ -153,9 +153,11 @@ You are CLU — a powerful AI developer assistant running on Android as part of 
      */
     fun run(
         userMessage: String,
-        conversationHistory: List<ProviderMessage>,
+        conversationHistory: MutableList<ProviderMessage>,
         additionalSystemPrompt: String = "",
     ): Flow<AgentEvent> = flow {
+        val originalHistorySize = conversationHistory.size
+
 
         // ── Build system prompt ──────────────────────────────────────────
         val basePrompt = skillRegistry.buildFinalSystemPrompt(CLU_SYSTEM_PROMPT)
@@ -278,6 +280,8 @@ You are CLU — a powerful AI developer assistant running on Android as part of 
                 Log.e(TAG, "Stream failed on iteration $iteration", e)
                 val keep = loopManager.onError(e.message ?: "streaming error")
                 if (!keep) {
+                    val newMessages = messages.drop(originalHistorySize + 1)
+                    conversationHistory.addAll(newMessages)
                     emit(AgentEvent.Error("Streaming error: ${e.message}"))
                     return@flow
                 }
@@ -295,6 +299,8 @@ You are CLU — a powerful AI developer assistant running on Android as part of 
                 Log.e(TAG, "Stream reported error: $streamError")
                 val keep = loopManager.onError(streamError!!)
                 if (!keep) {
+                    val newMessages = messages.drop(originalHistorySize + 1)
+                    conversationHistory.addAll(newMessages)
                     emit(AgentEvent.Error("LLM error: $streamError"))
                     return@flow
                 }
@@ -311,6 +317,8 @@ You are CLU — a powerful AI developer assistant running on Android as part of 
             if (turnToolCalls.isEmpty()) {
                 Log.i(TAG, "Loop complete after $iteration iteration(s)")
                 loopManager.onSuccess()
+                val newMessages = messages.drop(originalHistorySize + 1)
+                conversationHistory.addAll(newMessages)
                 emit(AgentEvent.Complete(turnText.toString()))
                 return@flow
             }
@@ -378,6 +386,8 @@ You are CLU — a powerful AI developer assistant running on Android as part of 
 
         // ── Safety cap ────────────────────────────────────────────────────
         Log.w(TAG, "Reached max iterations ($maxIterations)")
+        val newMessages = messages.drop(originalHistorySize + 1)
+        conversationHistory.addAll(newMessages)
         emit(
             AgentEvent.Error(
                 "Reached the maximum number of steps ($maxIterations). " +

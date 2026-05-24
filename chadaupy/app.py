@@ -34,6 +34,7 @@ import importlib.util
 import inspect
 import json
 import os
+import queue
 import re
 import sys
 import time
@@ -53,6 +54,17 @@ PORT = int(os.getenv("CHADAUPY_PORT", "7431"))
 _VALID_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 app = Flask(__name__)
+
+_sse_listeners: list[queue.Queue] = []
+
+
+def _broadcast_sse(event_type: str, data: dict):
+    payload = json.dumps({"event": event_type, "data": data})
+    for q in list(_sse_listeners):
+        try:
+            q.put_nowait(payload)
+        except queue.Full:
+            pass
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -164,6 +176,27 @@ def _skill_metadata(name: str) -> dict:
 # ── Routes ─────────────────────────────────────────────────────────────────
 
 
+@app.get("/sse")
+def sse_stream():
+    def event_generator():
+        q = queue.Queue(maxsize=100)
+        _sse_listeners.append(q)
+        yield "data: {\"status\": \"connected\"}\n\n"
+        try:
+            while True:
+                try:
+                    msg = q.get(timeout=5.0)
+                    yield f"data: {msg}\n\n"
+                except queue.Empty:
+                    yield "data: {\"heartbeat\": true}\n\n"
+        finally:
+            if q in _sse_listeners:
+                _sse_listeners.remove(q)
+
+    from flask import Response
+    return Response(event_generator(), mimetype="text/event-stream")
+
+
 @app.get("/health")
 def health():
     return jsonify({"status": "ok", "skills_dir": str(SKILLS_DIR), "ts": int(time.time())})
@@ -205,6 +238,7 @@ def create_skill():
 
     SKILLS_DIR.mkdir(parents=True, exist_ok=True)
     path.write_text(source, encoding="utf-8")
+    _broadcast_sse("skill_created", {"name": name})
     return jsonify({"created": name, "path": str(path)}), 201
 
 
@@ -238,6 +272,7 @@ def update_skill(name: str):
         return jsonify({"error": "'source' field is required."}), 400
 
     _skill_path(name).write_text(source, encoding="utf-8")
+    _broadcast_sse("skill_updated", {"name": name})
     return jsonify({"updated": name})
 
 
@@ -252,6 +287,7 @@ def delete_skill(name: str):
         return jsonify({"error": f"Skill '{name}' not found."}), 404
 
     path.unlink()
+    _broadcast_sse("skill_deleted", {"name": name})
     return jsonify({"deleted": name})
 
 
@@ -285,15 +321,18 @@ def run_skill(name: str):
         return jsonify({"error": f"Skill '{name}' does not expose a 'run' function."}), 400
 
     kwargs: dict[str, Any] = request.get_json(force=True, silent=True) or {}
+    _broadcast_sse("skill_run_start", {"name": name, "kwargs": kwargs})
 
     try:
         result = mod.run(**kwargs)
+        _broadcast_sse("skill_run_end", {"name": name, "result": str(result)})
         return jsonify({"result": str(result)})
     except Exception as exc:
         # Log full traceback server-side; return only exception type to avoid
         # py/stack-trace-exposure — never include str(exc) in the HTTP response.
         import logging
         logging.getLogger(__name__).exception("Skill '%s' raised an exception", name)
+        _broadcast_sse("skill_run_error", {"name": name, "error": f"{type(exc).__name__}"})
         return jsonify({"error": f"Skill execution error: {type(exc).__name__}"}), 500
 
 

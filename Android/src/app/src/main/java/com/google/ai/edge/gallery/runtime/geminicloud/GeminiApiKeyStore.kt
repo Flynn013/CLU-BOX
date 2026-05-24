@@ -63,4 +63,21 @@ object GeminiApiKeyStore {
   fun clearApiKey(context: Context) {
     getPrefs(context).edit().remove(KEY_API_KEY).apply()
   }
+
+  private const val KEY_CLIENT_ID = "gemini_client_id"
+
+  /** Returns the stored Client ID, or `null` if none has been saved yet. */
+  fun getClientId(context: Context): String? {
+    return getPrefs(context).getString(KEY_CLIENT_ID, null)?.takeIf { it.isNotBlank() }
+  }
+
+  /** Persists [clientId] into encrypted storage. */
+  fun setClientId(context: Context, clientId: String) {
+    getPrefs(context).edit().putString(KEY_CLIENT_ID, clientId).apply()
+  }
+
+  /** Removes the stored Client ID. */
+  fun clearClientId(context: Context) {
+    getPrefs(context).edit().remove(KEY_CLIENT_ID).apply()
+  }
 }

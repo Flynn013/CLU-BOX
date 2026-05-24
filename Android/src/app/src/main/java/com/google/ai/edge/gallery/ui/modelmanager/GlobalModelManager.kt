@@ -197,30 +197,15 @@ fun GlobalModelManager(
         allModelsSet.add(model)
       }
     }
-    val sortedModels = allModelsSet.toList().sortedBy { it.displayName.ifEmpty { it.name } }
-
-    // Split into VENDING_MACHINE tabs:
-    // LOCAL_CLU: LiteRT-LM on-device models + locally-imported files
-    // CLOUD_CLU: User-added Gemini Cloud API models (via API key in CLOUD_CLU tab)
-    // AICore/BESPOKE/MANUAL_API models are excluded from the CLU/BOX vending machine.
-    val persistedGeminiIds = viewModel.dataStoreRepository.readGeminiCloudModels().map { it.modelId }.toSet()
-    val persistedAnthropicIds = viewModel.dataStoreRepository.readAnthropicCloudModels().map { it.modelId }.toSet()
     localModels.clear()
     importedModels.clear()
     geminiModels.clear()
     anthropicModels.clear()
-    for (model in sortedModels) {
-      when {
-        model.runtimeType == RuntimeType.GEMINI_CLOUD && persistedGeminiIds.contains(model.name) ->
-          geminiModels.add(model)
-        model.runtimeType == RuntimeType.ANTHROPIC_CLOUD && persistedAnthropicIds.contains(model.name) ->
-          anthropicModels.add(model)
-        model.runtimeType == RuntimeType.GEMINI_CLOUD ||
-          model.runtimeType == RuntimeType.ANTHROPIC_CLOUD ||
-          model.runtimeType == RuntimeType.AICORE ||
-          model.runtimeType == RuntimeType.MANUAL_API -> { /* excluded from vending machine */ }
-        model.imported -> importedModels.add(model)
-        else -> localModels.add(model)
+    for (model in allModelsSet) {
+      if (model.name == "gemini-3.5-flash") {
+        geminiModels.add(model)
+      } else if (model.name == "Gemma-4-E4B-it") {
+        localModels.add(model)
       }
     }
   }
@@ -307,20 +292,7 @@ fun GlobalModelManager(
         )
       }
     },
-    floatingActionButton = {
-      // Context-sensitive FAB: import local model on LOCAL_CLU tab only.
-      if (selectedTab == 0) {
-        val cdImportModelFab = stringResource(R.string.cd_import_model_button)
-        SmallFloatingActionButton(
-          onClick = { showImportModelSheet = true },
-          containerColor = MaterialTheme.colorScheme.secondaryContainer,
-          contentColor = MaterialTheme.colorScheme.secondary,
-          modifier = Modifier.semantics { contentDescription = cdImportModelFab },
-        ) {
-          Icon(Icons.Filled.Add, contentDescription = null)
-        }
-      }
-    },
+    floatingActionButton = {},
   ) { innerPadding ->
     Box() {
       Column(
@@ -374,10 +346,10 @@ fun GlobalModelManager(
           when (selectedTab) {
             // ── Tab 0: LOCAL_CLU ─────────────────────────────────
             0 -> {
-              if (localModels.isEmpty() && importedModels.isEmpty()) {
+              if (localModels.isEmpty()) {
                 item(key = "local_empty") {
                   Text(
-                    "No local models downloaded yet.\nTap a model to download it, or tap + to import a local file.",
+                    "No local models downloaded yet.\nTap a model to download it.",
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                     style = MaterialTheme.typography.bodyMedium,
                     fontFamily = FontFamily.Monospace,
@@ -399,31 +371,6 @@ fun GlobalModelManager(
                   onExpanded = { modelItemExpandedStates[model.name] = it },
                 )
               }
-
-              // Imported models in the LOCAL_CLU tab.
-              if (importedModels.isNotEmpty()) {
-                item(key = "imported_models_label") {
-                  Text(
-                    stringResource(R.string.model_list_imported_models_title),
-                    color = MaterialTheme.colorScheme.onSurface,
-                    style = MaterialTheme.typography.labelLarge,
-                    modifier = Modifier
-                      .padding(horizontal = 16.dp)
-                      .padding(top = 32.dp, bottom = 8.dp),
-                  )
-                }
-              }
-              items(importedModels) { model ->
-                ModelItem(
-                  model = model,
-                  task = null,
-                  modelManagerViewModel = viewModel,
-                  onModelClicked = handleClickModel,
-                  onBenchmarkClicked = onBenchmarkClicked,
-                  expanded = true,
-                  showBenchmarkButton = model.runtimeType == RuntimeType.LITERT_LM,
-                )
-              }
             }
 
             // ── Tab 1: CLOUD_CLU ─────────────────────────────────
@@ -433,32 +380,16 @@ fun GlobalModelManager(
                 CloudCredentialHub(context = context)
               }
 
-              // ── Gemini section ───────────────────────────────
-              item(key = "gemini_api_tab") {
-                GeminiApiTab(
-                  viewModel = viewModel,
-                  onModelAdded = { modelId, displayName ->
-                    viewModel.addGeminiCloudModel(
-                      modelId = modelId,
-                      displayName = displayName,
-                    )
-                    scope.launch {
-                      snackbarHostState.showSnackbar("Gemini model '$displayName' added to chat")
-                    }
-                  },
+              item(key = "gemini_title") {
+                Text(
+                  "CLOUD_CLU — Gemini Cloud",
+                  color = neonGreen,
+                  style = MaterialTheme.typography.titleMedium,
+                  fontFamily = FontFamily.Monospace,
+                  modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
                 )
               }
-              if (geminiModels.isNotEmpty()) {
-                item(key = "gemini_active_label") {
-                  Text(
-                    "Active Gemini Models",
-                    color = neonGreen,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
-                  )
-                }
-              }
+
               items(geminiModels) { model ->
                 val expanded = modelItemExpandedStates.getOrDefault(model.name, true)
                 ModelItem(
@@ -472,45 +403,6 @@ fun GlobalModelManager(
                   onExpanded = { modelItemExpandedStates[model.name] = it },
                 )
               }
-
-              // ── Claude section ───────────────────────────────
-              item(key = "claude_models_header") {
-                ClaudeModelsTab(
-                  viewModel = viewModel,
-                  addedModelIds = anthropicModels.map { it.name }.toSet(),
-                  onModelAdded = { modelId, displayName ->
-                    viewModel.addAnthropicCloudModel(
-                      modelId = modelId,
-                      displayName = displayName,
-                    )
-                    scope.launch {
-                      snackbarHostState.showSnackbar("Claude model '$displayName' added to chat")
-                    }
-                  },
-                  onModelRemoved = { modelId ->
-                    viewModel.removeAnthropicCloudModel(modelId)
-                    scope.launch {
-                      snackbarHostState.showSnackbar("Model removed")
-                    }
-                  },
-                )
-              }
-              if (anthropicModels.isNotEmpty()) {
-                item(key = "claude_active_label") {
-                  Text(
-                    "Active Claude Models",
-                    color = neonGreen,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
-                  )
-                }
-              }
-              items(anthropicModels) { model ->
-                val expanded = modelItemExpandedStates.getOrDefault(model.name, true)
-                ModelItem(
-                  model = model,
-                  task = null,
                   modelManagerViewModel = viewModel,
                   onModelClicked = handleClickModel,
                   onBenchmarkClicked = onBenchmarkClicked,
@@ -720,13 +612,13 @@ private fun CloudCredentialHub(context: Context) {
     modifier = Modifier
       .fillMaxWidth()
       .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-      .border(1.dp, neonGreen.copy(alpha = 0.2f), RoundedCornerShape(12.dp))
+      .border(1.dp, neonGreen.copy(alpha = 0.25f), RoundedCornerShape(4.dp))
       .padding(12.dp),
     verticalArrangement = Arrangement.spacedBy(8.dp),
   ) {
     Text(
       "CLOUD CREDENTIALS",
-      style = MaterialTheme.typography.labelSmall,
+      style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.sp),
       fontFamily = FontFamily.Monospace,
       color = neonGreen.copy(alpha = 0.7f),
     )
@@ -738,7 +630,7 @@ private fun CloudCredentialHub(context: Context) {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier.fillMaxWidth(),
       ) {
-        Text("GEMINI", style = MaterialTheme.typography.labelMedium, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurface)
+        Text("GEMINI", style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.onSurface)
         val geminiStatus = when {
           GeminiTokenManager.hasValidAccessToken(context) -> "OAUTH"
           !GeminiApiKeyStore.getApiKey(context).isNullOrBlank() -> "API KEY"
@@ -752,29 +644,6 @@ private fun CloudCredentialHub(context: Context) {
         Text("· $geminiStatus", style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = geminiStatusColor)
       }
       GeminiConnectButton(modifier = Modifier.fillMaxWidth())
-    }
-
-    // Claude credential row — label + status above, button below
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-      Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.fillMaxWidth(),
-      ) {
-        Text("CLAUDE", style = MaterialTheme.typography.labelMedium, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurface)
-        val claudeStatus = when {
-          ClaudeCredentialStore.hasValidCredentials(context) -> "OAUTH"
-          !ManualApiKeyStore.getApiKey(context, "anthropic").isNullOrBlank() -> "API KEY"
-          else -> "NOT SET"
-        }
-        val claudeStatusColor = when (claudeStatus) {
-          "OAUTH" -> neonGreen
-          "API KEY" -> Color(0xFFFFBB00)
-          else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-        }
-        Text("· $claudeStatus", style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = claudeStatusColor)
-      }
-      ClaudeConnectButton(modifier = Modifier.fillMaxWidth())
     }
   }
 }

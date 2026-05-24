@@ -26,6 +26,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,6 +34,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -87,6 +89,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Brush.Companion.linearGradient
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -96,6 +100,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -111,6 +116,7 @@ import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.ui.common.RevealingText
 import com.google.ai.edge.gallery.ui.common.SwipingText
 import com.google.ai.edge.gallery.ui.common.TaskIcon
+import com.google.ai.edge.gallery.ui.common.MarathonDiagnosticsSidebar
 import com.google.ai.edge.gallery.ui.common.buildTrackableUrlAnnotatedString
 import com.google.ai.edge.gallery.ui.common.rememberDelayedAnimationProgress
 import com.google.ai.edge.gallery.ui.common.tos.AppTosDialog
@@ -355,73 +361,94 @@ fun HomeScreen(
             }
           },
         ) { innerPadding ->
-          // Outer box for coloring the background edge to edge.
-          Box(
-            contentAlignment = Alignment.TopCenter,
+          val configuration = LocalConfiguration.current
+          val isWideScreen = configuration.screenWidthDp >= 600
+          val sidebarWidth = if (isWideScreen) 180.dp else 75.dp
+
+          // Outer Row for displaying sidebar and main body side-by-side.
+          Row(
             modifier =
               Modifier.fillMaxSize()
-                .background(MaterialTheme.colorScheme.surfaceContainer),
+                .background(MaterialTheme.colorScheme.surfaceContainer)
+                .padding(top = innerPadding.calculateTopPadding()),
           ) {
-            // Inner box to hold content.
-            Box(
-              contentAlignment = Alignment.TopCenter,
-              modifier =
-                Modifier.fillMaxSize()
-                  .padding(top = innerPadding.calculateTopPadding())
-                  .verticalScroll(rememberScrollState()),
-            ) {
-              // Background star removed (was part of original upstream branding).
-
-              Column(modifier = Modifier.fillMaxWidth()) {
-                var selectedCategoryIndex by remember { mutableIntStateOf(0) }
-
-                // Tab header for categories.
-                //
-                // synchronizes the `pagerState` and the `selectedCategoryIndex` to ensure that
-                //  both the tab header and the task list always show the correct category and page.
-                val pagerState = rememberPagerState(pageCount = { sortedCategories.size })
-                LaunchedEffect(pagerState.settledPage) {
-                  selectedCategoryIndex = pagerState.settledPage
-                }
-                if (sortedCategories.size > 1) {
-                  CategoryTabHeader(
-                    sortedCategories = sortedCategories,
-                    selectedIndex = selectedCategoryIndex,
-                    enableAnimation = enableAnimation,
-                    onCategorySelected = { index ->
-                      selectedCategoryIndex = index
-                      scope.launch { pagerState.animateScrollToPage(page = index) }
-                    },
-                  )
-                }
-
-                // Task list in a horizontal pager. Each page shows the list of tasks for the
-                // category.
-                TaskList(
-                  modelManagerViewModel = modelManagerViewModel,
-                  pagerState = pagerState,
-                  sortedCategories = sortedCategories,
-                  tasksByCategories = uiState.tasksByCategory,
-                  enableAnimation = enableAnimation,
-                  navigateToTaskScreen = navigateToTaskScreen,
-                )
-
-                Spacer(modifier = Modifier.height(innerPadding.calculateBottomPadding() + 10.dp))
-              }
-            }
-
-            // Gradient overlay at the bottom.
-            Box(
-              modifier =
-                Modifier.fillMaxWidth()
-                  .height(innerPadding.calculateBottomPadding())
-                  .background(
-                    Brush.verticalGradient(
-                      colors = listOf(Color.Transparent, MaterialTheme.colorScheme.surfaceContainer)
-                    )
-                  )
-                  .align(Alignment.BottomCenter)
+            // Left: Diagnostics Sidebar
+            MarathonDiagnosticsSidebar(
+              modifier = Modifier
+                .fillMaxHeight()
+                .width(sidebarWidth),
+              color = neonGreen
             )
+
+            // Vertical divider line
+            Box(
+              modifier = Modifier
+                .fillMaxHeight()
+                .width(1.dp)
+                .background(neonGreen.copy(alpha = 0.25f))
+            )
+
+            // Right: Scrollable list of tasks
+            Box(
+              modifier =
+                Modifier.weight(1f)
+                  .fillMaxHeight(),
+            ) {
+              // Inner box to hold scrollable content.
+              Box(
+                contentAlignment = Alignment.TopCenter,
+                modifier =
+                  Modifier.fillMaxSize()
+                    .verticalScroll(rememberScrollState()),
+              ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                  var selectedCategoryIndex by remember { mutableIntStateOf(0) }
+
+                  // Tab header for categories.
+                  val pagerState = rememberPagerState(pageCount = { sortedCategories.size })
+                  LaunchedEffect(pagerState.settledPage) {
+                    selectedCategoryIndex = pagerState.settledPage
+                  }
+                  if (sortedCategories.size > 1) {
+                    CategoryTabHeader(
+                      sortedCategories = sortedCategories,
+                      selectedIndex = selectedCategoryIndex,
+                      enableAnimation = enableAnimation,
+                      onCategorySelected = { index ->
+                        selectedCategoryIndex = index
+                        scope.launch { pagerState.animateScrollToPage(page = index) }
+                      },
+                    )
+                  }
+
+                  // Task list in a horizontal pager. Each page shows the list of tasks for the
+                  // category.
+                  TaskList(
+                    modelManagerViewModel = modelManagerViewModel,
+                    pagerState = pagerState,
+                    sortedCategories = sortedCategories,
+                    tasksByCategories = uiState.tasksByCategory,
+                    enableAnimation = enableAnimation,
+                    navigateToTaskScreen = navigateToTaskScreen,
+                  )
+
+                  Spacer(modifier = Modifier.height(innerPadding.calculateBottomPadding() + 10.dp))
+                }
+              }
+
+              // Gradient overlay at the bottom.
+              Box(
+                modifier =
+                  Modifier.fillMaxWidth()
+                    .height(innerPadding.calculateBottomPadding())
+                    .background(
+                      Brush.verticalGradient(
+                        colors = listOf(Color.Transparent, MaterialTheme.colorScheme.surfaceContainer)
+                      )
+                    )
+                    .align(Alignment.BottomCenter)
+              )
+            }
           }
         }
       }
@@ -608,11 +635,16 @@ private fun CategoryTabHeader(
       Row(
         modifier =
           Modifier.height(40.dp)
-            .clip(CircleShape)
+            .clip(RoundedCornerShape(4.dp))
             .background(
               color =
                 if (selectedIndex == index) MaterialTheme.customColors.tabHeaderBgColor
                 else Color.Transparent
+            )
+            .border(
+              width = 1.dp,
+              color = if (selectedIndex == index) neonGreen else Color.Transparent,
+              shape = RoundedCornerShape(4.dp)
             )
             .clickable {
               onCategorySelected(index)
@@ -637,9 +669,13 @@ private fun CategoryTabHeader(
         horizontalArrangement = Arrangement.Center,
       ) {
         Text(
-          getCategoryLabel(context = context, category = category),
+          getCategoryLabel(context = context, category = category).uppercase(),
           modifier = Modifier.padding(horizontal = 16.dp),
-          style = MaterialTheme.typography.labelLarge,
+          style = MaterialTheme.typography.labelLarge.copy(
+            fontFamily = FontFamily.Monospace,
+            letterSpacing = 1.sp,
+            fontWeight = FontWeight.Bold
+          ),
           color =
             if (selectedIndex == index) neonGreen else MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -816,7 +852,16 @@ private fun TaskCard(
   Card(
     modifier =
       modifier
-        .clip(RoundedCornerShape(24.dp))
+        .clip(RoundedCornerShape(4.dp))
+        .border(width = 1.dp, color = terminalOutline, shape = RoundedCornerShape(4.dp))
+        .drawBehind {
+          // Draw the thick active left indicator bar matching Bungie's sci-fi theme
+          drawRect(
+            color = neonGreen,
+            topLeft = Offset(0f, 0f),
+            size = Size(6.dp.toPx(), size.height)
+          )
+        }
         .clickable(onClick = onClick)
         .graphicsLayer { alpha = progress }
         .semantics { contentDescription = cbTask },
@@ -841,18 +886,18 @@ private fun TaskCard(
           Text(
             curModelCountLabel,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp, fontFamily = FontFamily.Monospace),
             modifier = Modifier.clearAndSetSemantics {},
           )
           Text(
             task.label,
             color = MaterialTheme.colorScheme.onSurface,
-            style = MaterialTheme.typography.titleMedium,
+            style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold),
           )
           Text(
             task.shortDescription,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp, lineHeight = 14.sp),
+            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp, lineHeight = 14.sp, fontFamily = FontFamily.Monospace),
             modifier = Modifier.clearAndSetSemantics {},
             minLines = 2,
             maxLines = 2,
@@ -872,7 +917,7 @@ private fun TaskCard(
           TaskIcon(task = task, width = 40.dp)
 
           // Title and description.
-          Column(modifier = Modifier.weight(1f).padding(start = 16.dp)) {
+          Column(modifier = Modifier.weight(1f).padding(start = 24.dp)) {
             Row(
               modifier = Modifier.fillMaxWidth(),
               verticalAlignment = Alignment.CenterVertically,
@@ -881,22 +926,23 @@ private fun TaskCard(
               Text(
                 task.label,
                 color = MaterialTheme.colorScheme.onSurface,
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold),
               )
               if (task.newFeature) {
                 Box(
                   modifier =
                     Modifier.offset(y = (-6).dp, x = 6.dp)
-                      .clip(RoundedCornerShape(8.dp))
+                      .clip(RoundedCornerShape(4.dp))
                       .background(MaterialTheme.customColors.newFeatureContainerColor)
+                      .border(width = 1.dp, color = neonGreen.copy(alpha = 0.5f), shape = RoundedCornerShape(4.dp))
                       .padding(horizontal = 12.dp)
                       .height(26.dp),
                   contentAlignment = Alignment.Center,
                 ) {
                   Text(
-                    "New",
+                    "NEW",
                     color = MaterialTheme.customColors.newFeatureTextColor,
-                    style = MaterialTheme.typography.labelLarge,
+                    style = MaterialTheme.typography.labelLarge.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold),
                   )
                 }
               }
@@ -905,18 +951,18 @@ private fun TaskCard(
               description,
               color = MaterialTheme.colorScheme.onSurfaceVariant,
               style =
-                MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp, lineHeight = 15.sp),
+                MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp, lineHeight = 15.sp, fontFamily = FontFamily.Monospace),
               modifier = Modifier.clearAndSetSemantics {},
             )
           }
         } else {
           // Title and model count
-          Column {
+          Column(modifier = Modifier.padding(start = 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
               Text(
                 task.label,
                 color = MaterialTheme.colorScheme.onSurface,
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold),
               )
               if (task.experimental) {
                 Icon(
@@ -930,7 +976,7 @@ private fun TaskCard(
             Text(
               curModelCountLabel,
               color = MaterialTheme.colorScheme.onSurfaceVariant,
-              style = MaterialTheme.typography.bodyMedium,
+              style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
               modifier = Modifier.clearAndSetSemantics {},
             )
           }

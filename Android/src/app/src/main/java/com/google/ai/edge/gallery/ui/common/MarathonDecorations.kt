@@ -20,9 +20,12 @@ import android.graphics.BlurMaskFilter
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -384,5 +387,248 @@ fun MarathonMetaBar(
                 letterSpacing = 0.8.sp
             )
         )
+    }
+}
+
+/**
+ * Custom folder outline shape with octagonal corner cuts matching classic cyber HUD assets.
+ */
+@Composable
+fun CyberFolderOutlineIcon(
+    modifier: Modifier = Modifier,
+    color: Color = MarathonTheme.PhosphorGreen,
+    strokeWidth: Dp = 2.dp
+) {
+    Canvas(modifier = modifier) {
+        val strokeWidthPx = strokeWidth.toPx()
+        val path = Path().apply {
+            val w = size.width
+            val h = size.height
+            val tabW = w * 0.45f
+            val tabH = h * 0.28f
+            val tabCut = 6.dp.toPx()
+            val cornerCut = 4.dp.toPx()
+
+            // Start at top left tab corner cut
+            moveTo(tabCut, 0f)
+            lineTo(tabW - tabCut, 0f)
+            // Slope down to the folder top edge
+            lineTo(tabW, tabH)
+            // Top edge of the main folder body
+            lineTo(w - cornerCut, tabH)
+            // Top-right corner cut
+            lineTo(w, tabH + cornerCut)
+            // Right side
+            lineTo(w, h - cornerCut)
+            // Bottom-right corner cut
+            lineTo(w - cornerCut, h)
+            // Bottom edge
+            lineTo(cornerCut, h)
+            // Bottom-left corner cut
+            lineTo(0f, h - cornerCut)
+            // Left side
+            lineTo(0f, tabCut)
+            close()
+        }
+        drawPath(
+            path = path,
+            color = color,
+            style = Stroke(width = strokeWidthPx, join = StrokeJoin.Miter)
+        )
+    }
+}
+
+/**
+ * Stylized cyber-flower/fractal motif matching Image 5.
+ */
+@Composable
+fun CyberFlowerIcon(
+    modifier: Modifier = Modifier,
+    color: Color = MarathonTheme.PhosphorGreen,
+    strokeWidth: Dp = 1.5.dp
+) {
+    Canvas(modifier = modifier) {
+        val sw = strokeWidth.toPx()
+        val cx = size.width / 2f
+        val cy = size.height / 2f
+        val r = size.minDimension * 0.25f
+
+        // Inner circle
+        drawCircle(color = color, radius = r, style = Stroke(width = sw))
+
+        // Central rays
+        val rayCount = 8
+        for (i in 0 until rayCount) {
+            val angle = (i * 2 * Math.PI / rayCount).toFloat()
+            val dx = Math.cos(angle.toDouble()).toFloat()
+            val dy = Math.sin(angle.toDouble()).toFloat()
+            drawLine(
+                color = color,
+                start = Offset(cx + dx * (r * 0.2f), cy + dy * (r * 0.2f)),
+                end = Offset(cx + dx * (r * 0.8f), cy + dy * (r * 0.8f)),
+                strokeWidth = sw
+            )
+        }
+
+        // Outer brackets
+        val outerR = r * 1.5f
+        for (i in 0 until 4) {
+            val angle = (i * Math.PI / 2).toFloat()
+            val dx = Math.cos(angle.toDouble()).toFloat()
+            val dy = Math.sin(angle.toDouble()).toFloat()
+
+            val bSize = r * 0.6f
+            val px = cx + dx * outerR
+            val py = cy + dy * outerR
+
+            val perpX = -dy
+            val perpY = dx
+
+            val petalPath = Path().apply {
+                moveTo(px - perpX * bSize - dx * (bSize * 0.2f), py - perpY * bSize - dy * (bSize * 0.2f))
+                lineTo(px, py)
+                lineTo(px + perpX * bSize - dx * (bSize * 0.2f), py + perpY * bSize - dy * (bSize * 0.2f))
+            }
+            drawPath(path = petalPath, color = color, style = Stroke(width = sw))
+        }
+    }
+}
+
+/**
+ * UESC diagnostics sidebar containing scrolling/ticking log rows, branding header,
+ * and a triple-circle COL-NET indicator badge.
+ */
+@Composable
+fun MarathonDiagnosticsSidebar(
+    modifier: Modifier = Modifier,
+    color: Color = MarathonTheme.PhosphorGreen
+) {
+    val logs = remember {
+        listOf(
+            "[SIGNAL_ALIGNED]",
+            "[EMOTION HARMONIZED]",
+            "COL-NET SYNCED",
+            "LINK_ONLINE",
+            "INITIALIZING...",
+            "SHELL SYS CONNECT",
+            "(MEM) BANKS 1-7 CHECK",
+            "M1..................OK",
+            "M2..................OK",
+            "M3..................OK",
+            "M4..................OK",
+            "M5..................OK",
+            "M6..................OK",
+            "M7..................OK",
+            "NN REVIEW COMPLETE",
+            "VERIFYING CORES...",
+            "[LINK ESTABLISHED]",
+            "COL-NET SYS: NORMAL",
+            "SUPPRESS INSULA DISS",
+            "[SYSTEM CLEAR 1]",
+            "[SYSTEM CLEAR 2]"
+        )
+    }
+
+    Column(
+        modifier = modifier
+            .background(MarathonTheme.DeepObsidian)
+            .padding(vertical = 12.dp, horizontal = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        // Top section: Custom Outline Brand
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            CyberFolderOutlineIcon(
+                modifier = Modifier
+                    .size(40.dp)
+                    .padding(2.dp),
+                color = color
+            )
+
+            // Partition Line
+            Canvas(modifier = Modifier.fillMaxWidth().height(2.dp)) {
+                drawLine(
+                    color = color.copy(alpha = 0.2f),
+                    start = Offset(0f, size.height / 2f),
+                    end = Offset(size.width, size.height / 2f),
+                    strokeWidth = 1.dp.toPx()
+                )
+            }
+        }
+
+        // Middle section: Diagnostics Log Lines
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .padding(vertical = 8.dp, horizontal = 2.dp)
+        ) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                items(logs) { log ->
+                    Text(
+                        text = log.uppercase(),
+                        style = TextStyle(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 6.sp,
+                            color = if (log.startsWith("[")) color else color.copy(alpha = 0.45f),
+                            fontWeight = FontWeight.SemiBold,
+                            lineHeight = 7.sp
+                        )
+                    )
+                }
+            }
+        }
+
+        // Bottom section: COL-NET globe
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            // Partition Line
+            Canvas(modifier = Modifier.fillMaxWidth().height(2.dp)) {
+                drawLine(
+                    color = color.copy(alpha = 0.2f),
+                    start = Offset(0f, size.height / 2f),
+                    end = Offset(size.width, size.height / 2f),
+                    strokeWidth = 1.dp.toPx()
+                )
+            }
+
+            // Triple circle globe drawing
+            Canvas(modifier = Modifier.size(24.dp)) {
+                val sw = 1.dp.toPx()
+                val radius = size.minDimension / 3.5f
+                drawCircle(color = color.copy(alpha = 0.7f), radius = radius, style = Stroke(width = sw))
+                drawCircle(
+                    color = color.copy(alpha = 0.35f),
+                    radius = radius,
+                    center = Offset(center.x - radius * 0.5f, center.y),
+                    style = Stroke(width = sw)
+                )
+                drawCircle(
+                    color = color.copy(alpha = 0.35f),
+                    radius = radius,
+                    center = Offset(center.x + radius * 0.5f, center.y),
+                    style = Stroke(width = sw)
+                )
+            }
+
+            Text(
+                text = "COL-NET",
+                style = TextStyle(
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 7.sp,
+                    color = color,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.5.sp
+                )
+            )
+        }
     }
 }
